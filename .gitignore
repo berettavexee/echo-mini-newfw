@@ -1,0 +1,9 @@
+# local only, never published
+loader/
+work/
+fwbase/
+flash/
+# build output
+fw/build/
+__pycache__/
+*.pyc

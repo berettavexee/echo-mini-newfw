@@ -1,0 +1,7 @@
+Fusion Pixel Font 12px proportional, BDF, release 2026.10.16
+https://github.com/TakWolf/fusion-pixel-font (fusion-pixel-font-12px-proportional-bdf-v2026.10.16.zip)
+Font license: SIL Open Font License 1.1 (OFL.txt; upstream fonts in LICENSES/).
+Only the ja variant is kept here; the other variants (zh_hans, zh_hant, zh_hk, zh_tw, ko, latin)
+are in the same release zip. tools/mkfusion.py converts the variant named by FONT_LANG
+(Makefile, default ja) into the font
+blob stored in the firmware image.
