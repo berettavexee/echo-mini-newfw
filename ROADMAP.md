@@ -57,7 +57,6 @@ New formats, in this order (agreed 2026-10-24):
 
 Other items:
 
-- Commit and push 0.61 to 0.67.
 - Actions on the plug events (to be proposed and agreed first):
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
