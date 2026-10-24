@@ -42,7 +42,7 @@ Last update: 2026-10-24, version 0.67.
 - 0.67: damaged files, after a test set on the device (`work/damage.py`): BACK passes a track
   that does not open backwards, FLAC skips a damaged frame and stops at the STREAMINFO length,
   Vorbis stops at its last page, an input with no Ogg page in its first 64 KiB is refused at
-  once (3 s before) (§46). Validated on the device with the test set, except BACK (not tried).
+  once (3 s before) (§46). Validated on the device with the test set, BACK included, and no regression on real FLAC and Ogg files (seek, gapless, large cover art).
 
 ## To do
 
@@ -105,12 +105,13 @@ Other items:
 - To check on the device rather than add:
   - the 4.4 mm balanced output: the plug is detected, nothing is specific to it; check by ear,
     and whether the stock firmware sets the DACs differently for it (mode, gain);
-  - charging while off: what the device shows and does when the cable is plugged in;
   - hardware acceleration of FLAC and MP3, as in the stock firmware: its MP3 module uses the
     IMDCT36 and SYNTH accelerators of the chip (TRM chapters 27-28, ETUDE §18, about 31 MHz of
     the HiFi core), while our MP3 decoder (PacketVideo) does it all in software (about 50 MHz
     on average on the device); whether the stock FLAC module uses any hardware help is not
     known yet.
+- Charging while off: the cable turns the device on and it starts as usual (tested 0.67, §47);
+  a charging screen of its own (no music, screen off after a while) is possible, to be proposed.
 - Battery percentage: the curve is a generic Li-ion one, to be measured on the device. Overnight
   test (0.61, 2026-10-24): 6 h of MP3 320 kbps from the card, screen off, 4,184 to 3,710 mV (about
   70 mV/h after the first hour); about 9-10 h of playback estimated, a full discharge still to do.

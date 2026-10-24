@@ -2563,6 +2563,28 @@ Priorité de sécurité du `ROADMAP.md`. Avant la 0.64, aucune action : l'appare
 - Ogg et Opus sans contenu : refus en 150 ms (3 s en 0.66) ;
 - la file entière dure 89 s au lieu de 107 s.
 
-Le seul trou restant vient du MP3 suivi de données inutiles : 116 772 octets de sortie manquants (environ 0,66 s), le temps de parcourir les 3 Mio. BACK sur une piste qui ne s'ouvre pas n'a pas été essayé sur l'appareil.
+Le seul trou restant vient du MP3 suivi de données inutiles : 116 772 octets de sortie manquants (environ 0,66 s), le temps de parcourir les 3 Mio.
+
+**Série A** (journal `work/hwlog_1024_067c/`) :
+- **BACK** : depuis `T_CH1.WAV`, les cinq `RR_RANDOM.*` échouent l'un après l'autre en reculant, puis `R_CH8.OPUS` est joué. Depuis `M_CH1.WAV`, `H_CH8` et `H_CH7` échouent, puis `H_CH5.MP3` est joué. Depuis `H_CH5.MP3`, `H_CH3` et `H_CH1` échouent, puis `CHA.FLAC` est joué.
+- **PLAY sur les `E_*`** : bandeau « empty file (0 bytes) » pour chacun.
+- **Non-régression** :
+  - FLAC et Ogg de la carte : avance rapide correcte (Arkona en FLAC et en Ogg, Claws) ;
+  - « Road to Burn.flac » (528 s) joué jusqu'au bout, puis enchaîné ;
+  - `CHA.FLAC` (24 bits, 96 kHz) joué entier ;
+  - `OPEN_aotuv`, `OPEN_bib` et `OPEN_glow` (pochettes) et leurs versions `_nocov` : ouverts et joués jusqu'au bout.
+
+  Le patch 4 n'a donc pas d'effet sur les Ogg à grosse pochette.
+- Une avance rapide loin dans un Ogg de la carte (Claws, de 15 à 298 s) donne environ 0,8 s de silence. C'était déjà le cas en 0.66 (« Loose »).
+- Sur la carte, le dossier d'Arkona contient un FLAC vide, « 01 Izrechenie. Nachalo.flac » : c'est le fichier, pas le firmware.
 
 - **0.67** : `work/NEWFW067.IMG`, CRC `0x2bf2016f`.
+
+## 47. Essais sur l'appareil : carte après le mode USB, prises, branchement appareil éteint (0.67, 2026-10-24)
+Journal `work/hwlog_1024_067d/`. L'utilisateur confirme que tous les essais de la série B passent.
+
+- **Carte après le mode USB** : six sessions USB, en lecture et écriture ou en lecture seule, quittées par l'éjection ou par BACK. Après chacune, le journal note `card to be set up again (after the USB session)`, puis la carte est remontée au premier accès, en 236 à 251 ms, ou en 43-44 ms quand la carte était restée prête. Le contenu est toujours correct.
+- **Carte retirée puis remise pendant le mode USB** : détectée à la sortie (`card removed`, puis `card inserted`), et contenu correct à l'entrée suivante.
+- **Carte retirée pendant la lecture d'une de ses pistes** (« Road to Burn ») : la lecture s'arrête aussitôt, sans blocage. Pendant la remise, le journal montre plusieurs `card removed` et `card inserted` toutes les 0,5 s, le temps que la carte soit bien en place. Ensuite, la carte est montée en 251 ms et la piste est relancée.
+- **Prise 3,5 mm** : branchements et débranchements journalisés (`jack 3.5 mm in` / `out`), sans effet sur la lecture. La prise 4,4 mm n'a pas été essayée.
+- **Câble USB branché sur l'appareil éteint** : l'appareil démarre normalement, avec reprise sur la carte, et se recharge. Il n'y a pas d'écran de charge à part. Le branchement du câble suffit à l'allumer.
