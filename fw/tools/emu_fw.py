@@ -345,6 +345,10 @@ def main():
     mmc = MMC(opt("--disk", None), log)
     sdc = SDCard(opt("--sd", None), log) if opt("--sd", None) else None
     sd_out = int(opt("--sd-out", "0")) or None                    # ms: the card is removed
+    adc0_at = sorted(tuple(int(v) for v in x.split(":"))            # MS:VALUE, ... (mV * 1024 / 5000)
+                     for x in opt("--adc0-at", "").split(",") if x)
+    gpio_at = sorted(tuple(int(v) for v in x.split(":"))            # MS:BANK:PIN:LEVEL, ...
+                     for x in opt("--gpio-at", "").split(",") if x)
 
     def now_ms(uc):
         return struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] // 1000
@@ -353,6 +357,8 @@ def main():
         t = now_ms(uc)
         while keys and keys[0][0] <= t:
             adc[1] = keys.pop(0)[1]
+        while adc0_at and adc0_at[0][0] <= t:                   # --adc0-at: the battery
+            adc[0] = adc0_at.pop(0)[1]
         while shots and shots[0][0] <= t:
             panel.png(shots.pop(0)[1])
 
@@ -415,6 +421,9 @@ def main():
                 bank = {0x40160050: 0, 0x40170050: 1, 0x50030050: 2}[a]
                 if sd_out is not None and now_ms(uc) >= sd_out:          # card pulled out
                     gpio_in[(0, 11)] = 1
+                while gpio_at and gpio_at[0][0] <= now_ms(uc):         # --gpio-at changes
+                    _, gb, gp, gv = gpio_at.pop(0)
+                    gpio_in[(gb, gp)] = gv
                 v = 0
                 for (b, p), lvl in gpio_in.items():
                     if b == bank and lvl:

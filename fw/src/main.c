@@ -20,6 +20,7 @@
 #include "usb.h"
 #include "version.h"
 #include "sys.h"
+#include "keys.h"
 #include "ui.h"
 
 extern uint32_t boot_regs[4], boot_tag;
@@ -82,8 +83,6 @@ static void status_reset(void)
         status_text[i][0] = (char)0xff;
 }
 
-static const char *const key_names[] = { "-", "VOL-", "VOL+", "PLAY", "MENU", "BACK" };
-
 static int fast, storage_err = 1, volume_err = 1, volume_dirty;
 
 static void volume_init(void)
@@ -108,102 +107,6 @@ static void volume_init(void)
                    logs.next, logs.wraps);
 }
 
-#ifdef SD_WALK
-/* Emulator test of the card (ETUDE §36-37, make EXTRA=-DSD_WALK): set up, mounted, its root
- * listed in the log, every folder walked and every file hashed (sd_walk) */
-static int sd_root_entry(const struct fat_dirent *e, void *ctx)
-{
-    int *n = ctx;
-    if (*n < 12)
-        log_printf("sd:   %s%s, %u bytes, cluster %u%s", e->name, e->attr & FAT_ATTR_DIR ? "/" : "",
-                   e->size, e->cluster, e->contig ? " (contiguous)" : "");
-    (*n)++;
-    return 0;
-}
-
-/* every directory down to depth 3 listed, every file read through fat_pread and hashed (FNV-1a
- * over 32-bit words) */
-static struct fat_dirent walk_e[8];
-static int walk_n[4];
-
-static int walk_cb(const struct fat_dirent *e, void *ctx)
-{
-    int depth = *(int *)ctx;
-    if (walk_n[depth] < 8)
-        walk_e[walk_n[depth]] = *e;
-    walk_n[depth]++;
-    return 0;
-}
-
-static void sd_walk(const struct fat_dir *d, int depth)
-{
-    static uint32_t buf[512];
-    static struct fat_dirent list[4][8];
-    walk_n[depth] = 0;
-    if (fat_list(d, walk_cb, &depth))
-        log_printf("sd: walk: read error");
-    int n = walk_n[depth] < 8 ? walk_n[depth] : 8;
-    for (int i = 0; i < n; i++)
-        list[depth][i] = walk_e[i];
-    log_printf("sd: walk depth %d: %d entries", depth, walk_n[depth]);
-    for (int i = 0; i < n; i++) {
-        const struct fat_dirent *e = &list[depth][i];
-        if (e->attr & FAT_ATTR_DIR) {
-            log_printf("sd: walk dir %s", e->name);
-            struct fat_dir sub;
-            fat_dir_of(e, &sub);
-            if (depth < 3)
-                sd_walk(&sub, depth + 1);
-            continue;
-        }
-        struct fat_file f;
-        struct fat_cursor c = { 0, 0 };
-        fat_file_of(e, &f);
-        uint32_t h = 2166136261u, pos = 0;
-        while (pos < f.size) {
-            uint32_t k = f.size - pos > sizeof buf ? sizeof buf : f.size - pos;
-            for (uint32_t j = 0; j < sizeof buf / 4; j++)
-                buf[j] = 0;
-            if (fat_pread(&f, &c, pos, buf, k) != (int)k) {
-                log_printf("sd: walk %s: read error at %u", e->name, pos);
-                break;
-            }
-            for (uint32_t j = 0; j < (k + 3) / 4; j++)
-                h = (h ^ buf[j]) * 16777619u;
-            pos += k;
-        }
-        log_printf("sd: walk file %s: %u bytes, hash %x", e->name, f.size, h);
-    }
-}
-
-static void sd_probe(void)
-{
-    if (!sd_present()) {
-        log_printf("sd: no card");
-        return;
-    }
-    uint32_t t0 = ticks();
-    if (sd_init())
-        return;
-    uint32_t t1 = ticks();
-    if (fat_mount_sd()) {
-        log_printf("sd: no FAT32 or exFAT volume found");
-        return;
-    }
-    log_printf("sd: ready in %u ms; %s volume at %u, %u clusters of %u sectors, FAT %u, "
-               "data %u, root cluster %u (mounted in %u ms)", (t1 - t0) / 1000,
-               sdvol.exfat ? "exFAT" : "FAT32", sdvol.part, sdvol.clusters, sdvol.spc, sdvol.fat,
-               sdvol.data, sdvol.root, (ticks() - t1) / 1000);
-    struct fat_dir root;
-    int n = 0;
-    fat_root(FAT_VOL_SD, &root);
-    t1 = ticks();
-    int r = fat_list(&root, sd_root_entry, &n);
-    log_printf("sd: root: %d entries (%d), listed in %u ms", n, r, (ticks() - t1) / 1000);
-    sd_walk(&root, 0);
-}
-#endif
-
 static void storage_init(void)
 {
     uint32_t total = 0;
@@ -218,7 +121,7 @@ static void storage_init(void)
                emmc.r);
     volume_init();
 #ifdef SD_WALK
-    sd_probe();
+    sd_test();
 #endif
 }
 
@@ -269,9 +172,7 @@ static void draw_static(void)
     }
     *p = 0;
     line(32, b, storage_err || volume_err || volume_dirty ? WARN : FG);
-    line(122, "PLAY: USB disk   VOL+: USB disk, writable", DIM);
-    line(138, "MENU: install firmware   Power 2 s: off", DIM);
-    line(154, "VOL- 3 s: USB loader   BACK: audio tests", DIM);
+    line(154, "any key: back", DIM);
 }
 
 static uint32_t draw_us;                        /* last status refresh that drew something */
@@ -282,7 +183,7 @@ static void draw_status(void)
     unsigned k = adc_read(1), mv = battery_mv();
 
     p = put_str(b, "key ");
-    p = put_str(p, key_names[key_ladder(k)]);
+    p = put_str(p, key_name(key_ladder(k)));
     p = put_str(p, " (adc ");
     p = put_dec(p, k);
     p = put_str(p, ")  power ");
@@ -329,68 +230,6 @@ static void draw_status(void)
 static void message(int y, const char *s, uint16_t fg)
 {
     line(y, s, fg);
-}
-
-/* ---- keys ---- */
-/* The ladder is RC filtered: pressing VOL-, VOL+ or Play sweeps channel 1 down through the
- * Menu range for a few ms. A key counts once its class has been the same for 30 ms. A key held
- * (0.53, ETUDE §34): a release counts after 60 ms (a loose contact of Play reads none for a few
- * ms; VOL+/VOL-: 30 ms, quick clicks leave 50-60 ms between them, 0.54), VOL+ <-> VOL- (the chord) after 100 ms, and another key not at all until a release (a loose
- * contact of Play sweeps up through Menu and Back: these read as Back presses in 0.52). */
-#define KEY_SETTLE_US   30000
-#define KEY_RELEASE_US  60000
-#define KEY_CHORD_US   100000
-unsigned key_adc;                               /* channel 1 when the key held was taken */
-
-static const char *const key_lnames[] = { "none", "vol-", "vol+", "play", "menu", "back" };
-
-const char *key_name(int k)
-{
-    return key_lnames[k];
-}
-
-int key_scan(void)
-{
-    static int raw = KEY_NONE, stable = KEY_NONE;
-    static uint32_t since;
-    unsigned v = adc_read(1);
-    int k = key_ladder(v);
-    uint32_t now = ticks();
-
-    if (k != raw) {
-        uint32_t held = now - since;
-        if (raw != stable && stable != KEY_NONE && held >= KEY_SETTLE_US / 2)
-            log_printf("keys: %s held: %s for %u ms ignored", key_lnames[stable], key_lnames[raw],
-                       held / 1000);
-        raw = k;
-        since = now;
-        return stable;
-    }
-    if (k == stable)
-        return stable;
-    uint32_t need = stable == KEY_NONE ? KEY_SETTLE_US :
-                    k == KEY_NONE ? (stable == KEY_VOLUP || stable == KEY_VOLDOWN ?
-                                     KEY_SETTLE_US : KEY_RELEASE_US) :
-                    (stable == KEY_VOLUP || stable == KEY_VOLDOWN) &&
-                    (k == KEY_VOLUP || k == KEY_VOLDOWN) ? KEY_CHORD_US : 0xffffffffu;
-    if (now - since >= need) {
-        stable = k;
-        if (k != KEY_NONE)
-            key_adc = v;
-    }
-    return stable;
-}
-
-/* One event per press (Power excluded) */
-static int key_last;
-
-static int key_event(void)
-{
-    int k = key_scan();
-    if (k == key_last)
-        return KEY_NONE;
-    key_last = k;
-    return k;
 }
 
 /* ---- firmware menu ---- */
@@ -469,7 +308,7 @@ static void firmware_menu(void)
         line(154, "VOL+/VOL-: choose  PLAY: check  BACK", DIM);
 
         int k;
-        while (!(k = key_event()))
+        while (!(k = key_edge()))
             wdt_kick();
         if (k == KEY_BACK)
             return;
@@ -490,7 +329,7 @@ static void firmware_menu(void)
         if (r) {
             message(112, upd_error(r), WARN);
             line(154, "BACK: return", DIM);
-            while (key_event() != KEY_BACK)
+            while (key_edge() != KEY_BACK)
                 wdt_kick();
             continue;
         }
@@ -506,13 +345,13 @@ static void firmware_menu(void)
         if (!vbus() && mv < 3600) {
             message(80, "battery too low: plug the USB cable", WARN);
             line(154, "BACK: return", DIM);
-            while (key_event() != KEY_BACK)
+            while (key_edge() != KEY_BACK)
                 wdt_kick();
             continue;
         }
         line(80, "do not power off during the install", WARN);
         line(154, "PLAY: install   BACK: cancel", DIM);
-        while ((k = key_event()) != KEY_PLAY && k != KEY_BACK)
+        while ((k = key_edge()) != KEY_PLAY && k != KEY_BACK)
             wdt_kick();
         if (k == KEY_BACK)
             continue;
@@ -528,7 +367,7 @@ static void firmware_menu(void)
             message(112, upd_error(r), WARN);
             message(130, "restart, then install again", WARN);
             line(154, "BACK: return", DIM);
-            while (key_event() != KEY_BACK)
+            while (key_edge() != KEY_BACK)
                 wdt_kick();
             continue;
         }
@@ -623,7 +462,7 @@ static void usb_mode(int writable)
                 why = "cable unplugged";
                 break;
             }
-            if (key_event() == KEY_BACK) {
+            if (key_edge() == KEY_BACK) {
                 why = "BACK";
                 break;
             }
@@ -652,469 +491,6 @@ static void usb_mode(int writable)
                "%u resets, %u setups", why, (millis() - t0) / 1000, msc.commands, msc.read_sectors,
                msc.written_sectors, msc.errors, usb.resets, usb.setups);
     volume_init();                              /* the host may have changed everything */
-}
-
-/* ---- audio test (steps 5a, 5b): core A plays the part of core B and streams a 1 kHz tone
- * into the ring ahead of the DMA; MENU walks through rates and rings, Power stalls the
- * producer for 500 ms (an underrun when the ring holds less than that) ---- */
-static const struct { uint32_t rate; int ring, bits16; } audio_cfg[] = {
-    { 44100, RING_HIGHRAM1, 0 }, { 44100, RING_HIGHRAM1, 1 }, { 48000, RING_HIGHRAM1, 0 },
-    { 48000, RING_HIGHRAM1, 1 }, { 88200, RING_HIGHRAM1, 0 }, { 96000, RING_HIGHRAM1, 0 },
-    { 176400, RING_HIGHRAM1, 0 }, { 192000, RING_HIGHRAM1, 0 }, { 192000, RING_HIGHRAM1, 1 },
-    { 44100, RING_PMU, 0 }, { 44100, RING_HIGHRAM0, 0 },
-    { 44100, RING_SYSRAM, 1 }, { 44100, RING_SYSRAM, 0 }, { 192000, RING_SYSRAM, 0 },
-};
-static const char *const ring_names[RING_COUNT] = { "hram1 64K", "pmu 48K", "hram0 64K", "sram 128K" };
-
-static uint32_t ms_of(int32_t bytes)
-{
-    return bytes <= 0 ? 0 : (uint32_t)((uint64_t)bytes * 1000 / (audio.rate * audio.frame_bytes));
-}
-
-static void audio_screen(int tone, uint8_t level)
-{
-    char b[64], *p;
-
-    p = put_str(b, "dac0 ");
-    for (int i = 0; i < 4; i++)
-        p = put_hex(p, audio.id[0][i], 2);
-    p = put_str(p, audio.id_err[0] ? " ERR" : "");
-    p = put_str(p, "  dac1 ");
-    for (int i = 0; i < 4; i++)
-        p = put_hex(p, audio.id[1][i], 2);
-    p = put_str(p, audio.id_err[1] ? " ERR" : "");
-    p = put_str(p, "  i2c err ");
-    p = put_dec(p, audio.i2c_errors);
-    *p = 0;
-    status_line(0, 20, b, audio.id_err[0] || audio.id_err[1] || audio.i2c_errors ? WARN : DIM);
-    p = put_dec(b, audio.rate / 1000);
-    if (audio.rate % 1000) {
-        *p++ = '.';
-        p = put_dec(p, audio.rate % 1000 / 100);
-    }
-    p = put_str(p, audio.bits16 ? " kHz 16b " : " kHz 32b ");
-    p = put_str(p, ring_names[audio.ring_sel]);
-    p = put_str(p, "  tone ");
-    p = put_str(p, tone ? "on" : "off");
-    p = put_str(p, "  -");
-    p = put_dec(p, level / 2);
-    p = put_str(p, " dB");
-    *p = 0;
-    status_line(1, 40, b, FG);
-    p = put_str(b, "fill ");
-    p = put_dec(p, ms_of(audio_fill()));
-    p = put_str(p, " ms  min ");
-    p = put_dec(p, ms_of(audio.min_fill));
-    p = put_str(p, " ms  dma ");
-    p = put_hex(p, audio_dma_pos(), 5);
-    p = put_str(p, audio_dma_err() ? " ERR" : "");
-    *p = 0;
-    status_line(2, 56, b, FG);
-    p = put_str(b, "underruns: ring ");
-    p = put_dec(p, audio.ring_ur);
-    p = put_str(p, "  i2s ");
-    p = put_dec(p, audio.i2s_ur);
-    p = put_str(p, "  fifo ");
-    p = put_dec(p, audio_i2s_fifo());
-    *p = 0;
-    status_line(3, 72, b, audio.ring_ur || audio.i2s_ur ? WARN : FG);
-}
-
-static void audio_log(const char *what)
-{
-    log_printf("audio: %s: %u Hz %u-bit %s, fill %u ms (min %u), underruns ring %u (%u ms) i2s %u, dma %x err %x, "
-               "fifo %u, i2c errors %u", what, audio.rate, audio.bits16 ? 16 : 32,
-               ring_names[audio.ring_sel],
-               ms_of(audio_fill()), ms_of(audio.min_fill), audio.ring_ur, ms_of((int32_t)audio.ring_lost),
-               audio.i2s_ur,
-               audio_dma_pos(), audio_dma_err(), audio_i2s_fifo(), i2c_errors);
-}
-
-static void audio_test(void)
-{
-    int tone = 0, cfg = 0;
-    uint8_t level = 0x50;                       /* -40 dB when the tone is on */
-
-    status_reset();
-    lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    line(0, "Audio test (steps 5a/5b)", TITLE);
-    line(20, "starting...", DIM);
-    audio_start(audio_cfg[cfg].rate, audio_cfg[cfg].ring, audio_cfg[cfg].bits16);
-    line(122, "PLAY: tone   VOL+/-: volume   MENU: next", DIM);
-    line(138, "Power: 500 ms stall test", DIM);
-    line(154, "BACK: stop and return", DIM);
-    log_flush();
-    uint32_t t_draw = 0, t_log = 0;
-    for (;;) {
-        wdt_kick();
-        audio_service(tone, 0);
-        log_poll();
-        uint32_t now = ticks();
-        int k = key_event();
-        if (k == KEY_BACK)
-            break;
-        if (k == KEY_PLAY) {
-            tone = !tone;
-            if (tone)
-                audio_volume(level, 1);
-            else
-                audio_volume(0xff, 1);
-            log_printf("audio: tone %s, volume %x", tone ? "on" : "off", audio.vol);
-        }
-        if (k == KEY_MENU) {                    /* next rate / ring */
-            audio_log("before the change");
-            audio_stop();
-            cfg = (cfg + 1) % (int)(sizeof audio_cfg / sizeof *audio_cfg);
-            audio_start(audio_cfg[cfg].rate, audio_cfg[cfg].ring, audio_cfg[cfg].bits16);
-            if (tone)
-                audio_volume(level, 1);
-            t_log = now;
-        }
-        if (k == KEY_VOLUP || k == KEY_VOLDOWN) {        /* also while the tone is off */
-            if (k == KEY_VOLUP && level >= 4)
-                level -= 4;                     /* louder, up to 0 dB (the DAC maximum) */
-            else if (k == KEY_VOLDOWN && level < 0xfe - 4)
-                level += 4;
-            if (tone)
-                audio_volume(level, 0);
-            log_printf("audio: volume %x (-%u dB)", level, level / 2);
-        }
-        if (power_key()) {                      /* stall: the producer stops for 500 ms */
-            uint32_t ur = audio.ring_ur;
-            uint32_t t0 = ticks();
-            while (ticks() - t0 < 500000) {
-                audio_service(tone, 1);
-                wdt_kick();
-            }
-            audio_service(tone, 0);
-            log_printf("audio: 500 ms stall at %u Hz, %u-bit (ring %u ms): ring underruns +%u, "
-                       "%u ms lost in total", audio.rate, audio.bits16 ? 16 : 32,
-                       ms_of((int32_t)audio.ring_size), audio.ring_ur - ur,
-                       ms_of((int32_t)audio.ring_lost));
-            while (power_key())
-                audio_service(tone, 0), wdt_kick();
-        }
-        if (now - t_draw > 200000) {
-            audio_screen(tone, level);
-            t_draw = now;
-        }
-        if (now - t_log > 2000000) {
-            audio_log("stats");
-            t_log = now;
-        }
-    }
-    audio_log("end");
-    audio_stop();
-    log_flush();
-}
-
-static int is_ext(const char *name, const char *ext)
-{
-    int n = 0;
-    while (name[n])
-        n++;
-    return n > 4 && name[n - 4] == '.' && name[n - 3] == ext[0] && name[n - 2] == ext[1] &&
-           name[n - 1] == ext[2];
-}
-
-/* Files we can play: with our own codec image when there is one (own), else with a stock
- * module (module, codec): WAV, FLAC, MP3, Opus and Vorbis (ours), M4A/AAC (module 75, codec 2) */
-#include "hifi_proto.h"
-static const struct { const char *ext; uint32_t own; int module, codec; } play_types[] = {
-    { "WAV", HP_CODEC_WAV, 76, 3 }, { "FLA", HP_CODEC_FLAC, 0, 0 }, { "OPU", HP_CODEC_OPUS, 0, 0 },
-    { "OGG", HP_CODEC_VORBIS, 0, 0 },
-    { "MP3", HP_CODEC_MP3, 73, 0 },
-    { "M4A", 0, 75, 2 },
-};
-
-static int play_type(const char *name)
-{
-    for (unsigned i = 0; i < sizeof play_types / sizeof *play_types; i++)
-        if (is_ext(name, play_types[i].ext))
-            return (int)i;
-    return -1;
-}
-
-/* ---- steps 5c, 5d: a file through a stock codec module on core B ---- */
-static uint32_t play_t_draw;
-
-static void play_screen(void)
-{
-    char b[64], *p;
-
-    p = put_dec(b, player.rate);
-    p = put_str(p, " Hz  ");
-    p = put_dec(p, player.channels);
-    p = put_str(p, " ch  ");
-    p = put_dec(p, player.bps);
-    p = put_str(p, " bits  -");
-    p = put_dec(p, play_level / 2);
-    p = put_str(p, " dB");
-    *p = 0;
-    status_line(0, 36, b, FG);
-    p = put_dec(b, player.time_ms / 60000);
-    *p++ = ':';
-    p = put_dec(p, player.time_ms / 10000 % 6);
-    p = put_dec(p, player.time_ms / 1000 % 10);
-    p = put_str(p, " / ");
-    p = put_dec(p, player.length_ms / 60000);
-    *p++ = ':';
-    p = put_dec(p, player.length_ms / 10000 % 6);
-    p = put_dec(p, player.length_ms / 1000 % 10);
-    *p = 0;
-    status_line(1, 52, b, FG);
-    /* DAC ring: what is queued for the DACs, its share of the ring, its lowest, the underruns */
-    int32_t fill = audio_fill();
-    p = put_str(b, "DAC ring ");
-    p = put_dec(p, ms_of(fill));
-    p = put_str(p, " ms ");
-    p = put_dec(p, audio.ring_size ? (uint32_t)((uint64_t)(fill > 0 ? fill : 0) * 100 / audio.ring_size) : 0);
-    p = put_str(p, "% (min ");
-    p = put_dec(p, ms_of(audio.min_fill));
-    p = put_str(p, ")  ur ");
-    p = put_dec(p, audio.ring_ur);
-    p = put_str(p, "/");
-    p = put_dec(p, audio.i2s_ur);
-    *p = 0;
-    status_line(2, 68, b, audio.ring_ur || audio.i2s_ur ? WARN : FG);
-    /* core B: clock, load and MHz used in the last 250 ms, its output ring */
-    p = put_str(b, "core B ");
-    p = put_dec(p, hifi_hz / 1000000);
-    p = put_str(p, " MHz");
-    if (player.b_mhz10 || player.b_load) {
-        p = put_str(p, "  load ");
-        p = put_dec(p, (player.b_load + 5) / 10);
-        p = put_str(p, "% (");
-        p = put_dec(p, (player.b_mhz10 + 5) / 10);
-        p = put_str(p, " MHz)");
-    }
-    *p = 0;
-    status_line(3, 84, b, player.b_load > 850 ? WARN : DIM);
-    p = put_str(b, "core B out ");
-    p = put_dec(p, player.b_out >> 10);
-    p = put_str(p, " KiB");
-    *p = 0;
-    status_line(4, 100, b, DIM);
-}
-
-static int play_ui(void)
-{
-    log_poll();                                 /* the start-up trace fills the ring fast */
-    if (audio.on && audio.vol == 0xff && player.buffers >= 4)
-        audio_volume((uint8_t)play_level, 1);   /* fade in once a little audio is queued */
-    int k = key_event();
-    if (k == KEY_BACK)
-        return 1;
-    if (k == KEY_VOLUP || k == KEY_VOLDOWN) {
-        if (k == KEY_VOLUP && play_level >= 4)
-            play_level -= 4;
-        else if (k == KEY_VOLDOWN && play_level < 0xfe - 4)
-            play_level += 4;
-        if (audio.vol != 0xff)
-            audio_volume((uint8_t)play_level, 0);
-    }
-    if (ticks() - play_t_draw > 250000) {
-        play_t_draw = ticks();
-        play_screen();
-    }
-    return 0;
-}
-
-static void play_file(const struct fat_file *f)
-{
-    char b[64], *p;
-
-    if (cpu_hz < 100000000) {                   /* the PLL is off: core B would run at 6 MHz */
-        message(122, "24 MHz fallback: restart the player first", WARN);
-        log_printf("player: refused in the 24 MHz fallback");
-        mdelay(2000);
-        return;
-    }
-
-    status_reset();
-    lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    p = put_str(b, "Play ");
-    p = put_str(p, f->name);
-    if (play_types[play_type(f->name)].own)
-        p = put_str(p, " (our codec)");
-    else {
-        p = put_str(p, " (module ");
-        p = put_dec(p, (uint32_t)play_types[play_type(f->name)].module);
-        p = put_str(p, ")");
-    }
-    *p = 0;
-    line(0, b, TITLE);
-    line(138, "VOL+/VOL-: volume", DIM);
-    line(154, "BACK: stop", DIM);
-    log_flush();
-    int t = play_type(f->name);
-    int r = play_types[t].own ? player_play_own(f, play_types[t].own, play_ui, 0)
-                              : player_play(f, play_types[t].module, play_types[t].codec, play_ui);
-    play_screen();
-    audio_stop();
-    if (r < 0) {
-        p = put_str(b, "error ");
-        p = put_dec(p, (uint32_t)-r);
-        p = put_str(p, ": see NEWFWLOG.TXT");
-        *p = 0;
-        line(120, b, WARN);
-    } else
-        line(120, r ? "stopped" : "end of file", FG);
-    line(154, "BACK: return", DIM);
-    log_flush();
-    while (key_event() != KEY_BACK)
-        wdt_kick();
-}
-
-static int collect_wav(const struct fat_file *f, void *ctx)
-{
-    struct img_list *l = ctx;
-    if (play_type(f->name) >= 0 && f->size >= 44)
-        l->f[l->n++] = *f;
-    return l->n == MAX_IMG;
-}
-
-/* Chain tests: every file of the root whose name starts with 'prefix' and that one of our codecs
- * plays, in name order, one after the other with PLAY_CHAIN (core B restarted or reloaded, DACs
- * kept when nothing changes); 'loop': again and again, WAV files left out (the long cycle, TEST*:
- * they tell nothing more, ETUDE §24). The log gets the
- * time of each step of each switch and the core B clock report of each track. BACK stops. */
-static void chain_files(const struct img_list *l, const char *prefix, int loop)
-{
-    static struct fat_file ch[MAX_IMG];
-    char b[64], *p;
-    int n = 0;
-
-    for (int i = 0; i < l->n; i++)
-    {
-        int k = 0;
-        while (prefix[k] && l->f[i].name[k] == prefix[k])
-            k++;
-        uint32_t own = play_types[play_type(l->f[i].name)].own;
-        if (!prefix[k] && own && !(loop && own == HP_CODEC_WAV))   /* the long cycle: no WAV */
-            ch[n++] = l->f[i];
-    }
-    for (int i = 1; i < n; i++)                 /* insertion sort by name */
-        for (int j = i; j > 0; j--) {
-            const char *a = ch[j - 1].name, *z = ch[j].name;
-            int k = 0;
-            while (a[k] && a[k] == z[k])
-                k++;
-            if ((uint8_t)a[k] <= (uint8_t)z[k])
-                break;
-            struct fat_file t = ch[j - 1];
-            ch[j - 1] = ch[j];
-            ch[j] = t;
-        }
-    if (cpu_hz < 100000000 || !n) {
-        message(122, n ? "24 MHz fallback: restart the player first" : "no such file in the root", WARN);
-        mdelay(2000);
-        return;
-    }
-    log_printf("chain: %d %s* files%s", n, prefix, loop ? ", in a loop" : "");
-    int r = 0;
-    for (int i = 0, round = 1; i < n && !r; i++) {
-        if (loop && i == 0)
-            log_printf("chain: round %d", round);
-        status_reset();
-        lcd_fill(0, 0, LCD_W, LCD_H, BG);
-        p = put_str(b, loop ? "Cycle " : "Chain ");
-        p = put_dec(p, (uint32_t)i + 1);
-        p = put_str(p, "/");
-        p = put_dec(p, (uint32_t)n);
-        p = put_str(p, ": ");
-        p = put_str(p, ch[i].name);
-        *p = 0;
-        line(0, b, TITLE);
-            line(138, "VOL+/VOL-: volume", DIM);
-        line(154, "BACK: stop", DIM);
-        r = player_play_own(&ch[i], play_types[play_type(ch[i].name)].own, play_ui, PLAY_CHAIN);
-        if (loop && !r && i == n - 1) {
-            i = -1;                             /* the long cycle starts again */
-            round++;
-        }
-    }
-    player_chain_end();
-    audio_stop();
-    log_printf("chain: %s", r ? "stopped" : "done");
-    log_flush();
-    message(122, r ? "chain stopped" : "chain done", FG);
-    mdelay(1500);
-}
-
-/* BACK on the main screen: the tone test, or a WAV, FLAC, Opus, Ogg Vorbis, MP3 or M4A of the
- * root through core B */
-static void tests_menu(void)
-{
-    static struct img_list l;
-    char b[64], *p;
-    int sel = 0;
-
-    l.n = 0;
-    if (!storage_err && !volume_err)
-        fat_list_root(collect_wav, &l);
-    for (;;) {
-        lcd_fill(0, 0, LCD_W, LCD_H, BG);
-        static const uint8_t clk_modes[] = { 0, 8, 4, 3, 2 };
-        static const char *const clk_names[] = { "auto", "50", "100", "133", "200" };
-        int cm = 0;
-        for (unsigned i = 0; i < sizeof clk_modes; i++)
-            if (clk_modes[i] == player_clock)
-                cm = (int)i;
-        p = put_str(b, "Audio tests   core B: ");
-        p = put_str(p, clk_names[cm]);
-        p = put_str(p, cm ? " MHz" : "");
-        *p = 0;
-        line(0, b, TITLE);
-        static int top;
-        if (sel < top)
-            top = sel;
-        if (sel > top + 8)
-            top = sel - 8;
-        for (int i = top; i <= l.n + 2 && i <= top + 8; i++) {
-            p = put_str(b, i == sel ? "> " : "  ");
-            if (!i)
-                p = put_str(p, "tone, rates, rings (5a/5b)");
-            else if (i == l.n + 1)
-                p = put_str(p, "chain the CH* files");
-            else if (i == l.n + 2)
-                p = put_str(p, "cycle the TEST* files (long, BACK stops)");
-            else {
-                p = put_str(p, "play ");
-                p = put_str(p, l.f[i - 1].name);
-                p = put_str(p, "  ");
-                p = put_dec(p, l.f[i - 1].size >> 10);
-                p = put_str(p, " KiB");
-            }
-            *p = 0;
-            line(18 + 14 * (i - top), b, i == sel ? FG : DIM);
-        }
-        line(154, "VOL+/-: choose PLAY: start MENU: clock BACK", DIM);
-        int k;
-        while (!(k = key_event()))
-            wdt_kick();
-        if (k == KEY_BACK)
-            return;
-        if (k == KEY_MENU) {
-            player_clock = clk_modes[(cm + 1) % (int)sizeof clk_modes];
-            log_printf("tests: core B clock %s", player_clock ? "fixed" : "automatic");
-            continue;
-        }
-        if (k == KEY_VOLUP)
-            sel = sel > 0 ? sel - 1 : l.n + 2;
-        if (k == KEY_VOLDOWN)
-            sel = sel < l.n + 2 ? sel + 1 : 0;
-        if (k != KEY_PLAY)
-            continue;
-        if (!sel)
-            audio_test();
-        else if (sel == l.n + 1)
-            chain_files(&l, "CH", 0);
-        else if (sel == l.n + 2)
-            chain_files(&l, "TEST", 1);
-        else
-            play_file(&l.f[sel - 1]);
-    }
 }
 
 /* ---- for the user interface (sys.h) ---- */
@@ -1240,23 +616,18 @@ void sys_install(void)
     firmware_menu();
 }
 
-void sys_tests(void)
-{
-    tests_menu();
-}
-
 void sys_screen(void)
 {
     draw_static();
     draw_status();
-    key_last = key_scan();
+    key_edge_sync();
     for (uint32_t t_draw = 0;;) {
         sys_idle();
         if (ticks() - t_draw > 50000) {
             draw_status();
             t_draw = ticks();
         }
-        if (key_event())
+        if (key_edge())
             return;
     }
 }
@@ -1268,6 +639,30 @@ void sys_loader_usb(void)
     log_flush();
     mdelay(1000);
     reboot_loader_usb();
+}
+
+/* An empty battery at start-up (ETUDE §43): below 3,350 mV without USB power (the mean of 8
+ * readings), a message and power off, before any resume or write but this line of the log */
+static void battery_check_boot(void)
+{
+    if (vbus())
+        return;
+    uint32_t sum = 0;
+    for (int i = 0; i < 8; i++) {
+        sum += battery_mv();
+        mdelay(5);
+    }
+    if (sum / 8 >= 3350)
+        return;
+    lcd_fill(0, 0, LCD_W, LCD_H, BG);
+    lcd_text_clip_x(8, 50, "Battery empty", LCD_W, WARN, BG, 2);
+    lcd_text(8, 100, "plug the USB cable", DIM, BG);
+    mdelay(2000);
+    log_printf("power off (battery empty at start), battery %u mV", sum / 8);
+    log_flush();                                /* not sys_power_off(): nothing loaded yet, */
+    mdelay(300);                                /* the saved resume state must stay as it is */
+    power_off();
+    log_printf("power off: still powered (USB)");
 }
 
 int main(void)
@@ -1306,6 +701,7 @@ int main(void)
     log_printf("battery %u mV, usb %d, charge pin %d, jack 3.5 %d 4.4 %d", battery_mv(), vbus(),
                gpio_get(PIN_CHARGING), gpio_get(PIN_JACK35), !gpio_get(PIN_JACK44));
     log_flush();
+    battery_check_boot();
     draw_static();
     draw_status();
 

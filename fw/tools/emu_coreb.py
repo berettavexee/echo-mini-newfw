@@ -73,17 +73,6 @@ class CoreB(emu_host.Hifi):
         u.mem_map(0x60000000, 0x100000)
         u.mem_map(0xE0000000, 0x100000)
         code = bytes(sh.hr0)
-        if os.environ.get("COREB_CHECK"):                          # compare with the image
-            sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")))
-            from rknanofw import overlays
-            d = open(os.environ["COREB_CHECK"], "rb").read()
-            c, base, ents = overlays(d)
-            cl, ce, cs, dl, de, ds = ents[int(os.environ.get("COREB_MOD", "76"))][:6]
-            ref_c, ref_d = c[cl - base:cl - base + cs], c[dl - base:dl - base + ds]
-            got_d = bytes(sh.hr1)[:ds]
-            print(f"core B check: code {'same' if code[:cs] == ref_c else 'DIFFERENT'} ({cs:#x}), "
-                  f"data {'same' if got_d[0x90:] == ref_d[0x90:] else 'DIFFERENT'} ({ds:#x}); "
-                  f"code[0:8] {code[:8].hex()} ref {ref_c[:8].hex()}")
         self.wfi = code.find(bytes.fromhex("30bf7047"))
         if self.wfi < 0:
             raise RuntimeError("core B: no wfi helper in the loaded module")

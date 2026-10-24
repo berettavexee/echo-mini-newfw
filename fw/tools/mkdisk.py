@@ -4,6 +4,7 @@ copied anywhere else), our firmware in FW1, an MBR at 0x81000 and a FAT32 volume
 4 KiB, as on the device) at 0x81000 + 64 holding the given files.
 
   mkdisk.py OUT.img FW.IMG [--boot BOOTDUMP.BIN] [--size-mb 300] FILE[=NAME] ...
+  (--boot defaults to $ECHO_BOOTDUMP, else BOOTDUMP.BIN in the current directory)
   mkdisk.py OUT.img FW.IMG --vol VOLUME.img        (a FAT32 volume made beforehand)
 """
 import os
@@ -27,7 +28,7 @@ def make_volume(t, size, files):
 
 def main():
     a = sys.argv[1:]
-    boot = "/home/beretta/code/REA/RECHO/BOOTDUMP.BIN"
+    boot = os.environ.get("ECHO_BOOTDUMP", "BOOTDUMP.BIN")   # a dump of the device's boot area
     size = 300
     if "--boot" in a:
         i = a.index("--boot"); boot = a[i + 1]; del a[i:i + 2]

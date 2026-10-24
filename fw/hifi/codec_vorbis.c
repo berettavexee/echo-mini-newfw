@@ -3,7 +3,8 @@
  * HIFIEC56). Tremor's own Ogg layer is not used: oggpage.c reads the pages. The comment header
  * (tags, cover art: often 70+ KB) is skipped, Tremor gets an empty one. 16-bit output, mono
  * duplicated; the end is trimmed by Tremor from the granule of the last page, the beginning
- * here (start_trim()).
+ * here (start_trim()). The stream ends with its last page (flag 4): zeros or garbage after it
+ * are not read.
  * Codebook cache: decoding the setup header takes about 2 M instructions (re/REPORT.md §38). The
  * tracks of an album share their identification and setup headers, so the decoded vorbis_info
  * and the heap blocks below it are kept in .noinit (not cleared when core B restarts), with a
@@ -59,7 +60,7 @@ static vorbis_info vi;
 static vorbis_comment vc;
 static vorbis_dsp_state *vd;
 static int64_t packetno;
-static int errors, eos;
+static int errors, eos, last;           /* last: the packet of the last page went in */
 static int resync;                      /* after a seek: position unknown until a page granule */
 static int64_t vpos, discard;           /* position of the next frame out; dropped before discard */
 static int64_t gshift;                  /* added to the granules given to Tremor */
@@ -137,7 +138,7 @@ int codec_open(void)
     static uint8_t ident[IDENT_MAX];
     pg_reset();
     packetno = 0;
-    errors = eos = 0;
+    errors = eos = last = 0;
     vd = 0;
     vorbis_cache_hits = 0;
     int ilen = pg_packet(ident, sizeof ident);  /* identification header (30 bytes) */
@@ -227,6 +228,8 @@ static int feed(void)
     ogg_buffer ob;
     ogg_reference ref;
     ogg_packet op;
+    if (last)
+        return 0;                               /* the stream ended: what follows is not read */
     int len = pg_packet(pkt, sizeof pkt);
     if (len == 0)
         return 0;
@@ -238,6 +241,7 @@ static int feed(void)
     if (pg_last_on_page()) {
         op.granulepos = pg.granule + gshift;    /* Tremor's count: no trimming of its own */
         op.e_o_s = (pg.flags & 4) != 0;
+        last = op.e_o_s;
     }
     if (vorbis_dsp_synthesis(vd, &op, 1))
         return ++errors <= MAX_ERRORS;

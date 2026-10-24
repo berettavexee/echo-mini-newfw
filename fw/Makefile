@@ -11,7 +11,7 @@ CFLAGS = -mcpu=cortex-m3 -mthumb -Os -g -ffreestanding -fno-builtin -nostdlib \
          -ffunction-sections -fdata-sections -Wall -Wextra -Isrc $(EXTRA)
 LDFLAGS = -T link.ld -Wl,--gc-sections -Wl,-Map=build/fw.map -nostdlib -lgcc
 
-SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/main.c src/font.c src/rtc.c build/font_ascii.c
+SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/resume.c src/uidraw.c src/main.c src/font.c src/rtc.c build/font_ascii.c
 OBJS = $(patsubst %.c,build/%.o,$(notdir $(SRCS)))
 
 all: $(OUT)

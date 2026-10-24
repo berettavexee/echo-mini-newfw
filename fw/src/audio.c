@@ -8,7 +8,6 @@
  * I2C0. */
 #include "audio.h"
 #include "board.h"
-#include "hifi.h"
 #include "i2c.h"
 #include "log.h"
 #include "regs.h"
@@ -50,7 +49,6 @@
 #define DMA_CTL    0x18909124u
 #define MAX_BLOCKS 24
 #define GUARD      4096                         /* bytes kept free ahead of the DMA */
-#define RAW_ERR    (DMAC1 + 0x2e0)
 #define CLEAR_ERR  (DMAC1 + 0x358)
 
 struct lli {
@@ -81,13 +79,6 @@ static const struct rate *cur_rate = &rates[0];
 static int standby;                             /* paused, headphone stage and ASP powered down */
 
 static uint32_t sysram_ring[0x30000 / 4] __attribute__((section(".dacring"), aligned(32)));
-
-static const struct { uint32_t base, size; const char *name; } rings[RING_COUNT] = {
-    { 0x01050000, 0x10000, "HIGHRAM1 bank 3" },
-    { 0x03090000, 0xc000, "PMU-SRAM" },
-    { 0x01010000, 0x10000, "HIGHRAM0 bank 1" },
-    { (uint32_t)sysram_ring, sizeof sysram_ring, "SYSRAM" },
-};
 
 static int both(uint32_t reg, uint8_t val)
 {
@@ -270,20 +261,6 @@ static void clocks_i2s(void)
     i2s_config();
 }
 
-/* Pattern written and read back by core A over the whole ring */
-static int ring_check(void)
-{
-    volatile uint32_t *m = (volatile uint32_t *)audio.ring;
-    for (uint32_t i = 0; i < audio.ring_size / 4; i += 61)
-        m[i] = 0x5a000000u ^ i;
-    for (uint32_t i = 0; i < audio.ring_size / 4; i += 61)
-        if (m[i] != (0x5a000000u ^ i)) {
-            log_printf("audio: ring check failed at %x: %x", (uint32_t)&m[i], m[i]);
-            return -1;
-        }
-    return 0;
-}
-
 static void dma_start(void)
 {
     REG(CH_EN) = 1u << (8 + 5);                 /* channel 5 off while it is reprogrammed */
@@ -323,29 +300,18 @@ uint32_t audio_dma_pos(void)
     return REG(CH_SAR) - audio.ring;
 }
 
-uint32_t audio_i2s_fifo(void)
+static uint32_t i2s_fifo(void)
 {
     return REG(I2S_FIFOLR) & 0x3f;
 }
 
-uint32_t audio_dma_err(void)
+static void ring_setup(void)
 {
-    return REG(RAW_ERR) & 0xff;
-}
-
-static int select_ring(int sel)
-{
-    if (sel != RING_PMU && sel != RING_SYSRAM)
-        hifi_power();
-    audio.ring_sel = sel;
-    audio.ring = rings[sel].base;
-    audio.ring_size = rings[sel].size;
-    if (ring_check() && sel != RING_HIGHRAM1)
-        return select_ring(RING_HIGHRAM1);
+    audio.ring = (uint32_t)sysram_ring;
+    audio.ring_size = sizeof sysram_ring;
     for (uint32_t i = 0; i < audio.ring_size / 4; i++)
-        ((volatile uint32_t *)audio.ring)[i] = 0;
-    log_printf("audio: ring %s %x + %u", rings[sel].name, audio.ring, audio.ring_size);
-    return sel;
+        sysram_ring[i] = 0;
+    log_printf("audio: ring %x + %u", audio.ring, audio.ring_size);
 }
 
 void audio_reset_stats(void)
@@ -360,25 +326,7 @@ int32_t audio_fill(void)
     return (int32_t)(audio.wr - audio.rd);
 }
 
-/* ---- stream test producer ---- */
-static int32_t sine[1024];
-static int last_tone;
 void (*ramp_hook)(void);
-static uint32_t phase;
-
-static void sine_table(void)
-{
-    double w = 2 * 3.14159265358979323846 / 1024, w2 = w * w;
-    double c = 1 - w2 / 2 + w2 * w2 / 24 - w2 * w2 * w2 / 720;
-    double sn = w - w * w2 / 6 + w * w2 * w2 / 120;
-    double x = 1, y = 0, amp = 0.1 * 2147483647.0;   /* -20 dBFS */
-    for (int i = 0; i < 1024; i++) {
-        sine[i] = (int32_t)(y * amp);
-        double nx = x * c - y * sn, ny = x * sn + y * c;
-        x = nx;
-        y = ny;
-    }
-}
 
 /* Read position from the DMA, underrun counters */
 void audio_update(void)
@@ -399,8 +347,7 @@ void audio_update(void)
             audio.ring_ur++;                    /* one episode, however many polls it lasts */
         audio.in_ur = 1;
         audio.ring_lost += (uint32_t)-fill;
-        if (!audio.external)
-            audio.wr = audio.rd;
+        audio.wr = audio.rd;
         fill = 0;
     } else if (fill > 0)
         audio.in_ur = 0;
@@ -415,39 +362,91 @@ uint32_t audio_free(void)
 }
 
 /* Copies n bytes (whole frames, n <= audio_free()) at the write position */
+/* ---- beeps mixed into what is written (battery warnings, ETUDE §43): while a pattern runs,
+ * the music is lowered by 12 dB and a sine at -12 dBFS (5 ms fades) is added; the DAC volume
+ * then applies to both. Heard about 1.1 s later (the ring ahead of the DMA). ---- */
+static const int16_t beep_sine[64] = {
+    0, 803, 1598, 2378, 3135, 3862, 4551, 5197, 5793, 6333, 6811, 7225, 7568, 7839, 8035, 8153,
+    8192, 8153, 8035, 7839, 7568, 7225, 6811, 6333, 5793, 5197, 4551, 3862, 3135, 2378, 1598, 803,
+    0, -803, -1598, -2378, -3135, -3862, -4551, -5197, -5793, -6333, -6811, -7225, -7568, -7839,
+    -8035, -8153, -8192, -8153, -8035, -7839, -7568, -7225, -6811, -6333, -5793, -5197, -4551,
+    -3862, -3135, -2378, -1598, -803,
+};
+static const struct { uint16_t hz, on_ms, off_ms, count; } beeps[] = {
+    [BEEP_WARN] = { 1000, 120, 120, 3 },
+    [BEEP_REMIND] = { 1000, 120, 0, 1 },
+    [BEEP_OFF] = { 500, 200, 150, 2 },
+};
+static struct { int on, mix; uint32_t frame, on_frames, period, total, step, phase, fade; } bp;
+static int32_t bp_t;                            /* tone of the 32-bit frame being written */
+
+void audio_beep(int kind)
+{
+    if (!audio.on)
+        return;
+    bp.on_frames = beeps[kind].on_ms * audio.rate / 1000;
+    bp.period = (uint32_t)(beeps[kind].on_ms + beeps[kind].off_ms) * audio.rate / 1000;
+    bp.total = bp.period * beeps[kind].count;
+    bp.step = (uint32_t)(((uint64_t)beeps[kind].hz << 32) / audio.rate);
+    bp.fade = audio.rate / 200;
+    bp.frame = bp.phase = 0;
+    bp.on = 1;
+}
+
+/* The tone of the next frame (16-bit scale), 0 between the beeps */
+static int32_t beep_sample(void)
+{
+    uint32_t f = bp.frame % bp.period;
+    int32_t v = 0;
+    if (f < bp.on_frames) {
+        uint32_t edge = f < bp.on_frames - f ? f : bp.on_frames - f;
+        v = beep_sine[bp.phase >> 26];
+        if (edge < bp.fade)
+            v = v * (int32_t)edge / (int32_t)bp.fade;
+        bp.phase += bp.step;
+    }
+    if (++bp.frame >= bp.total)
+        bp.on = 0;
+    return v;
+}
+
+static uint32_t beep_mix(uint32_t w)
+{
+    if (audio.bits16) {                         /* one word: left low, right high */
+        int32_t t = beep_sample();
+        int32_t l = (int16_t)(w & 0xffff) / 4 + t, r = (int16_t)(w >> 16) / 4 + t;
+        return ((uint32_t)l & 0xffff) | (uint32_t)r << 16;
+    }
+    if (!(audio.wr & 4)) {                      /* left word: a new frame */
+        bp.mix = bp.on;
+        if (bp.mix)
+            bp_t = beep_sample();
+    }
+    return bp.mix ? (uint32_t)(((int32_t)w >> 2) + (bp_t << 16)) : w;
+}
+
 void audio_write(const void *src, uint32_t n)
 {
     const uint32_t *s = src;
     volatile uint32_t *ring = (volatile uint32_t *)audio.ring;
     uint32_t size = audio.ring_size;
     for (uint32_t i = 0; i < n / 4; i++) {
-        ring[audio.wr % size / 4] = s[i];
+        ring[audio.wr % size / 4] = bp.on || bp.mix ? beep_mix(s[i]) : s[i];
         audio.wr += 4;
     }
+    if (!bp.on && !(audio.wr & 4))
+        bp.mix = 0;
 }
 
-void audio_service(int tone, int stall)
+/* Silence ahead of the DMA up to the guard: a volume ramp with no player to feed the ring */
+static void fill_silence(void)
 {
-    last_tone = tone;
     audio_update();
-    if (stall || !audio.on)
+    if (!audio.on)
         return;
-    uint32_t size = audio.ring_size;
-    uint32_t step = (uint32_t)(((uint64_t)1000 << 32) / audio.rate);
-    volatile int32_t *ring = (volatile int32_t *)audio.ring;
-    uint32_t fb = audio.frame_bytes;
-    while (audio_fill() + (int32_t)fb <= (int32_t)(size - GUARD)) {
-        uint32_t o = audio.wr % size / 4;
-        int32_t v = tone ? sine[phase >> 22] : 0;
-        if (fb == 4) {
-            uint32_t h = (uint32_t)v >> 16;     /* the top 16 bits, both channels */
-            ring[o] = (int32_t)(h | h << 16);
-        } else {
-            ring[o] = v;
-            ring[o + 1] = v;
-        }
-        phase += step;
-        audio.wr += fb;
+    while (audio_fill() + 4 <= (int32_t)(audio.ring_size - GUARD)) {
+        sysram_ring[audio.wr % audio.ring_size / 4] = 0;
+        audio.wr += 4;
     }
 }
 
@@ -467,7 +466,7 @@ void audio_volume(uint8_t vol, int ramp)
                 if (ramp_hook)
                     ramp_hook();                /* the player keeps the ring fed */
                 else
-                    audio_service(last_tone, 0);
+                    fill_silence();
         }
     } else {
         both(0x090001, vol);
@@ -476,8 +475,9 @@ void audio_volume(uint8_t vol, int ramp)
     audio.vol = vol;
 }
 
-int audio_start(uint32_t rate, int ring_sel, int bits16)
+int audio_start(uint32_t rate, int bits16)
 {
+    bp.on = bp.mix = 0;
     audio.bits16 = bits16;
     audio.frame_bytes = bits16 ? 4 : 8;
     uint32_t e0 = i2c_errors;
@@ -488,8 +488,6 @@ int audio_start(uint32_t rate, int ring_sel, int bits16)
             cur_rate = &rates[i];
     audio.rate = cur_rate->hz;
     audio.vol = 0xff;
-    if (!sine[256])
-        sine_table();
     log_printf("audio: start at %u Hz, %u-bit frames in the ring", audio.rate, bits16 ? 16 : 32);
     dac_power();
     i2c_init();
@@ -499,9 +497,8 @@ int audio_start(uint32_t rate, int ring_sel, int bits16)
     log_printf("audio: acodec pll %x %x %x %x %x, i2s ckr %x txcr %x", REG(ACODEC + 0x200),
                REG(ACODEC + 0x204), REG(ACODEC + 0x208), REG(ACODEC + 0x20c),
                REG(ACODEC + 0x210), REG(I2S_CKR), REG(I2S_TXCR));
-    select_ring(ring_sel);
+    ring_setup();
     audio.rd = audio.last_pos = 0;
-    audio.external = 0;
     audio_paused = standby = 0;
     audio.wr = audio.ring_size - GUARD;         /* the zeroed ring: silence ahead */
     audio_reset_stats();
@@ -513,7 +510,7 @@ int audio_start(uint32_t rate, int ring_sel, int bits16)
     gpio_out(2, 0, 0);                          /* as RECHO once running (unmute, maybe) */
     REG(I2S_INTCR) |= 4;                        /* underrun flag from the start-up cleared */
     log_printf("audio: running: dma sar %x ch_en %x cfg %x, i2s fifo %u intsr %x, %u i2c errors",
-               REG(CH_SAR), REG(CH_EN), REG(DMA_CFG), audio_i2s_fifo(), REG(I2S_INTSR),
+               REG(CH_SAR), REG(CH_EN), REG(DMA_CFG), i2s_fifo(), REG(I2S_INTSR),
                i2c_errors - e0);
     audio.i2c_errors = i2c_errors - e0;
     audio.on = 1;
@@ -571,7 +568,7 @@ int audio_change_rate(uint32_t rate, int bits16)
     audio_reset_stats();
     dma_start();
     REG(I2S_DMACR) = 0x110;
-    for (uint32_t t = ticks(); audio_i2s_fifo() < 16 && ticks() - t < 5000;)
+    for (uint32_t t = ticks(); i2s_fifo() < 16 && ticks() - t < 5000;)
         ;                                       /* TX FIFO filled by the DMA */
     REG(I2S_XFER) = 1;
     REG(I2S_INTCR) |= 4;
@@ -656,6 +653,7 @@ void audio_flush(void)
 {
     if (!audio.on)
         return;
+    bp.on = bp.mix = 0;                         /* a beep queued is dropped with the rest */
     audio_update();
     uint32_t wr = (audio.rd + 256) & ~7u;
     uint32_t n = audio.ring_size / 2 < 65536 ? audio.ring_size / 2 : 65536;

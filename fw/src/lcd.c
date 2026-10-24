@@ -323,15 +323,10 @@ int lcd_text_clip(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t b
     return lcd_text_clip_x(x, y, s, xmax, fg, bg, 1);
 }
 
-int lcd_char(int x, int y, char c, uint16_t fg, uint16_t bg)
-{
-    return lcd_glyph(x, y, (unsigned char)c, fg, bg);
-}
-
 int lcd_text(int x, int y, const char *s, uint16_t fg, uint16_t bg)
 {
     while (*s)
-        x += lcd_char(x, y, *s++, fg, bg);
+        x += lcd_glyph(x, y, utf8_next(&s), fg, bg);
     return x;
 }
 

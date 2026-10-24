@@ -1,4 +1,4 @@
-/* Step 5c player: one file through a stock codec module on core B, PCM into the ring */
+/* Player: our codecs on core B (hifi_proto.h), PCM into the DAC ring (ETUDE §19 onwards) */
 #ifndef PLAYER_H
 #define PLAYER_H
 
@@ -9,12 +9,10 @@ struct player_state {
     int state;                  /* see enum in player.c */
     int error;
     uint32_t rate, channels, bps, length_ms, time_ms;
-    uint32_t buffers, frames, reads, read_bytes, seeks;
-    uint32_t wait_us_max;       /* longest time a decoded buffer waited for room in the ring */
+    uint32_t frames, reads, read_bytes;
     /* our codecs: core B in the last 250 ms window (step 5g) */
     uint32_t b_load;            /* per mille of the time awake */
     uint32_t b_mhz10;           /* tenths of MHz used */
-    uint32_t b_out;             /* bytes in core B's output ring */
 };
 
 extern struct player_state player;
@@ -27,15 +25,9 @@ struct player_heard {
 };
 extern struct player_heard player_heard;
 
-/* Plays 'file' with overlay 'module' (76: WAV) of a stock image found in the root, 'codec'
- * being the stock codec number of the descriptor (3: WAV). 'ui' is called every 20 ms or so
- * (keys, volume, screen) and returns non-zero to stop. Returns 0 at the end of the file. */
-int player_play(const struct fat_file *file, int module, int codec, int (*ui)(void));
-/* The same with our own codec image 'codec' (hifi_proto.h) and our protocol. PLAY_CHAIN: keep
- * the DACs running into the next call (same rate and frame size), return at the end of the
- * track without draining; player_chain_end() drains and lets the next start stop them. */
+/* player_open() flag: keep the DACs running into the next track (same rate and frame size); the
+ * track ends without a drain, player_chain_end() drains and lets the next start stop them */
 #define PLAY_CHAIN 1
-int player_play_own(const struct fat_file *file, uint32_t codec, int (*ui)(void), int flags);
 void player_chain_end(void);
 /* The same without blocking, from the main loop (the end of the queue): 1 once the DMA is past
  * the last frame, 0 meanwhile */
@@ -50,6 +42,8 @@ void player_ogg_hint(uint32_t page, uint32_t seg);
 /* For the next player_open() only: start at ms (0: at the start) */
 void player_seek_hint(uint32_t ms);
 int player_service(void);
+/* player_service() error: input read on and on without a frame decoded (zeros, garbage) */
+#define PLAYER_ENOAUDIO (-50)
 void player_close(int stopped);
 int player_is_open(void);
 extern int player_clock;        /* core B clock: 0 automatic, else a fixed divider of the PLL */

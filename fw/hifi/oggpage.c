@@ -1,5 +1,6 @@
 /* Ogg (RFC 3533) packets from the input ring. Pages of other logical streams are skipped; a
- * damaged header makes the reader look for the next "OggS". Page bodies and packets that do
+ * damaged header makes the reader look for the next "OggS"; with no page in the first 64 KiB
+ * the input is not Ogg. Page bodies and packets that do
  * not fit the caller's buffer are skipped with in_seek(), one jump per page, so core A jumps over
  * cover art instead of reading it. */
 #include <string.h>
@@ -7,6 +8,8 @@
 #include "oggpage.h"
 
 struct pg_state pg;
+
+#define PG_FIRST_MAX 65536                      /* bytes searched for the first page */
 
 void pg_reset(void)
 {
@@ -22,10 +25,13 @@ static uint32_t le32(const uint8_t *p)
 static int next_page(void)
 {
     uint8_t h[27];
+    uint32_t lost = 0;
     for (;;) {
         if (in_read_wait(h, 4) < 4)
             return 0;
         while (memcmp(h, "OggS", 4)) {          /* lost: slide one byte at a time */
+            if (!pg.have_serial && ++lost > PG_FIRST_MAX)
+                return 0;                       /* no page at the start: not an Ogg file */
             memmove(h, h + 1, 3);
             if (in_read_wait(h + 3, 1) < 1)
                 return 0;

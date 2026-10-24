@@ -2,7 +2,9 @@
  * its input through the read callback, which waits in rt_wait() for core A to fill the input
  * ring; metadata blocks (cover art) are skipped with in_seek(), so core A jumps over them.
  * 16-bit sources go to the ring as packed 16-bit frames, the others as 32-bit frames; mono is
- * duplicated, more than two channels are refused. */
+ * duplicated, more than two channels are refused. The stream ends with the frame count of
+ * STREAMINFO (zeros or garbage after it are not read); a frame that does not decode (damaged in
+ * the middle) is passed over: the decoder looks for the next frame sync code. */
 #include <stddef.h>
 #include <string.h>
 #include "rt.h"
@@ -103,13 +105,26 @@ static void out_wait(uint32_t bytes)
         rt_wait();
 }
 
+/* Nothing decoded: the end of the stream, or a damaged frame to pass over */
+static int no_frames(void)
+{
+    if (in_ended() && !in_avail())
+        return 2;
+    return 1;                                   /* the next call looks for the next sync code */
+}
+
 int codec_run(void)
 {
-    uint32_t ch = flac->channels;
-    if (ctl->frame_bytes == 4) {
-        uint32_t n = (uint32_t)drflac_read_pcm_frames_s16(flac, 1024, pcm.s16);
+    uint32_t ch = flac->channels, want = ctl->frame_bytes == 4 ? 1024 : 512;
+    uint64_t total = flac->totalPCMFrameCount, cur = flac->currentPCMFrame;
+    if (total && cur >= total)
+        return 2;                               /* all the frames of STREAMINFO */
+    if (total && total - cur < want)
+        want = (uint32_t)(total - cur);         /* not one more: dr_flac would look for the */
+    if (ctl->frame_bytes == 4) {                /* next frame through what follows */
+        uint32_t n = (uint32_t)drflac_read_pcm_frames_s16(flac, want, pcm.s16);
         if (!n)
-            return 2;
+            return no_frames();
         out_wait(n * 4);
         for (uint32_t i = 0; i < n; i++) {
             uint16_t l = (uint16_t)pcm.s16[i * ch], r = (uint16_t)pcm.s16[i * ch + ch - 1];
@@ -117,9 +132,9 @@ int codec_run(void)
         }
         ctl->frames += n;
     } else {
-        uint32_t n = (uint32_t)drflac_read_pcm_frames_s32(flac, 512, pcm.s32);
+        uint32_t n = (uint32_t)drflac_read_pcm_frames_s32(flac, want, pcm.s32);
         if (!n)
-            return 2;
+            return no_frames();
         out_wait(n * 8);
         for (uint32_t i = 0; i < n; i++) {
             out_word((uint32_t)pcm.s32[i * ch]);

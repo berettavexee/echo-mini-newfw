@@ -9,6 +9,7 @@
 #include "fat.h"
 #include "hifi_proto.h"
 #include "tags.h"
+#include "text.h"
 
 #define SCAN_MAX (512 * 1024)                   /* never look further into a file */
 
@@ -45,32 +46,9 @@ static int rd_at(uint32_t pos, uint32_t n, const uint8_t **p)
 }
 
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
-static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint32_t syncsafe(const uint8_t *p) { return p[0] << 21 | p[1] << 14 | p[2] << 7 | p[3]; }
 
 /* ---- text into a field: UTF-8 out, cut on a character boundary ---- */
-static void put_cp(char *d, int max, int *o, uint32_t c)
-{
-    int len = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
-    if (*o + len > max - 1)
-        return;
-    if (len == 1)
-        d[(*o)++] = (char)c;
-    else if (len == 2) {
-        d[(*o)++] = (char)(0xc0 | c >> 6);
-        d[(*o)++] = (char)(0x80 | (c & 0x3f));
-    } else if (len == 3) {
-        d[(*o)++] = (char)(0xe0 | c >> 12);
-        d[(*o)++] = (char)(0x80 | (c >> 6 & 0x3f));
-        d[(*o)++] = (char)(0x80 | (c & 0x3f));
-    } else {
-        d[(*o)++] = (char)(0xf0 | c >> 18);
-        d[(*o)++] = (char)(0x80 | (c >> 12 & 0x3f));
-        d[(*o)++] = (char)(0x80 | (c >> 6 & 0x3f));
-        d[(*o)++] = (char)(0x80 | (c & 0x3f));
-    }
-}
-
 /* enc: 0 Latin-1, 1 UTF-16 with BOM, 2 UTF-16 BE, 3 UTF-8 */
 static void set_text(char *d, int max, const uint8_t *s, uint32_t n, int enc)
 {
@@ -106,7 +84,7 @@ static void set_text(char *d, int max, const uint8_t *s, uint32_t n, int enc)
         }
         if (!c)
             break;
-        put_cp(d, max, &o, c);
+        utf8_put(d, max, &o, c);
     }
     /* UTF-8 cut in the middle of a character (even right after its lead byte): drop it */
     if (o > 0 && enc == 3 && ((uint8_t)d[o - 1] & 0x80)) {

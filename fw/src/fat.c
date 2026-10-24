@@ -5,6 +5,7 @@
 #include "fat.h"
 #include "emmc.h"
 #include "sd.h"
+#include "text.h"
 
 struct fat_vol vol, sdvol;
 
@@ -19,16 +20,6 @@ static struct fat_vol *V(int v)
 static int dev_read(const struct fat_vol *v, uint32_t lba, uint32_t n, void *buf)
 {
     return v->dev == FAT_VOL_SD ? sd_read(lba, n, buf) : emmc_read(lba, n, buf);
-}
-
-static uint16_t le16(const uint8_t *p)
-{
-    return p[0] | p[1] << 8;
-}
-
-static uint32_t le32(const uint8_t *p)
-{
-    return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
 /* A FAT32 boot sector at 'lba'? Fills v. */
@@ -391,24 +382,8 @@ static void utf16_to_utf8(const uint16_t *u, int n, char *out, int max)
             c = 0x10000 + ((c - 0xd800) << 10) + (u[++i] - 0xdc00);
         else if (c >= 0xd800 && c < 0xe000)
             c = 0xfffd;
-        int len = c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
-        if (o + len > max - 1)
+        if (!utf8_put(out, max, &o, c))
             break;
-        if (len == 1)
-            out[o++] = (char)c;
-        else if (len == 2) {
-            out[o++] = (char)(0xc0 | c >> 6);
-            out[o++] = (char)(0x80 | (c & 0x3f));
-        } else if (len == 3) {
-            out[o++] = (char)(0xe0 | c >> 12);
-            out[o++] = (char)(0x80 | (c >> 6 & 0x3f));
-            out[o++] = (char)(0x80 | (c & 0x3f));
-        } else {
-            out[o++] = (char)(0xf0 | c >> 18);
-            out[o++] = (char)(0x80 | (c >> 12 & 0x3f));
-            out[o++] = (char)(0x80 | (c >> 6 & 0x3f));
-            out[o++] = (char)(0x80 | (c & 0x3f));
-        }
     }
     out[o] = 0;
 }

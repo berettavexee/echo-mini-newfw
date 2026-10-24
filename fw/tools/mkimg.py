@@ -21,8 +21,8 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-from rknanofw import rkcrc                                         # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from rkcrc import rkcrc                                            # noqa: E402
 
 BASE = 0x03050000
 CODE_IN_PART = 0x200

@@ -1,267 +1,25 @@
-/* Step 5c player: a stock codec module on core B, driven through the mailbox as the stock
- * firmware does (protocol of ETUDE §1.2, checked in emulation by tools/emu_host.py):
- *  - A2B ch2 0x65: file descriptor {u8 handle, h2, h3, pad | size | pos | pos2 | pos3 | codec}
- *    in core A RAM; B2A ch2 0x66 when taken;
- *  - A2B ch1: 1 OPEN, 4 DECODE, 0xd CLOSE; B2A ch0: 3 opened, 5 decoded (data = &info), 2 open
- *    failed, 6 end or error, 0xe closed;
- *  - B2A ch2 file requests, served at once: 0x69 seek {off, whence, h} (new position written
- *    back at +0, reply 0x6a 0), 0x6b read {buf, size, h} (data written into core B RAM, new
- *    position at +4, reply 0x6c count), 0x73 close (reply 0x74 1).
- * Info: +0x00 time ms, +0x04 length ms, +0x0c bits, +0x10 rate, +0x14 channels, +0x1c PCM
- * (16-bit stereo interleaved), +0x20 frames. The PCM goes into the ring as packed 16-bit
- * frames (the same bytes), and DECODE is only sent once the buffer is in the ring. */
+/* Player (ETUDE §19 onwards): our codecs on core B (hifi_proto.h), the input ring fed from the
+ * file by core A, core B's PCM copied into the DAC ring in SYSRAM. The stock codec modules and
+ * their mailbox protocol (ETUDE §1.2) were dropped in 0.61. */
 #include "player.h"
 #include "audio.h"
 #include "board.h"
 #include "hifi.h"
 #include "log.h"
 
-enum { ST_IDLE, ST_LOAD, ST_OPEN, ST_PLAY, ST_DRAIN, ST_END, ST_ERROR };
+enum { ST_IDLE, ST_LOAD, ST_OPEN, ST_PLAY, ST_END, ST_ERROR };
 
 struct player_state player;
 
-static struct {
-    uint8_t h[4];
-    uint32_t size, pos, pos2, pos3, codec;
-} desc __attribute__((aligned(4)));
-
 static const struct fat_file *file;
 static struct fat_cursor cur;
-static uint32_t pos[8];
-
-static uint32_t rd32(uint32_t a)
-{
-    return *(volatile uint32_t *)hifi_ptr(a);
-}
-
-static void wr32(uint32_t a, uint32_t v)
-{
-    *(volatile uint32_t *)hifi_ptr(a) = v;
-}
-
-static int tracing;                             /* start-up phase: every message logged */
-static uint32_t t_trace;
-#define MIN_REPLY_US 200                        /* file replies never sooner than this */
-
-/* Answers one file request; returns 0 if 'cmd' was a file request */
-static int serve(uint32_t cmd, uint32_t data)
-{
-    uint32_t t_req = ticks();
-    if (cmd == 0x6b) {                          /* read {buf, size, h} */
-        uint32_t buf = rd32(data), n = rd32(data + 4), h = rd32(data + 8) & 7;
-        uint32_t p = pos[h], left = p < file->size ? file->size - p : 0;
-        if (n > left)
-            n = left;
-        if (n && fat_pread(file, &cur, p, hifi_ptr(buf), n) != (int)n) {
-            log_printf("player: read error at %u (+%u)", p, n);
-            n = 0;
-        }
-        pos[h] = p + n;
-        wr32(data + 4, pos[h]);
-        player.reads++;
-        player.read_bytes += n;
-        while (ticks() - t_req < MIN_REPLY_US)
-            ;
-        if (tracing)
-            log_printf("player: +%u us read h%u %u at %u into %x, reply after %u us",
-                       t_req - t_trace, h, n, p, buf, ticks() - t_req);
-        hifi_send(2, 0x6c, n);
-        return 0;
-    }
-    if (cmd == 0x69) {                          /* seek {off, whence, h} */
-        int32_t off = (int32_t)rd32(data);
-        uint32_t wh = rd32(data + 4), h = rd32(data + 8) & 7;
-        int64_t p = wh == 0 ? off : wh == 1 ? (int64_t)pos[h] + off : (int64_t)file->size + off;
-        int ok = p >= 0 && p <= file->size;
-        if (ok) {
-            pos[h] = (uint32_t)p;
-            wr32(data, pos[h]);
-        }
-        player.seeks++;
-        while (ticks() - t_req < MIN_REPLY_US)
-            ;
-        if (tracing)
-            log_printf("player: +%u us seek h%u %d/%u -> %u", t_req - t_trace, h, off, wh, pos[h]);
-        hifi_send(2, 0x6a, ok ? 0 : 0xffffffffu);
-        return 0;
-    }
-    if (cmd == 0x73) {                          /* close */
-        while (ticks() - t_req < MIN_REPLY_US)
-            ;
-        hifi_send(2, 0x74, 1);
-        return 0;
-    }
-    return -1;
-}
-
-/* Serves file requests until a control message among 'want' (bit mask of commands < 32)
- * arrives; 0 on success */
-static int wait_for(uint32_t want, uint32_t *cmd, uint32_t *data, uint32_t us)
-{
-    int ch;
-    for (uint32_t t0 = ticks(); ticks() - t0 < us;) {
-        wdt_kick();
-        audio_update();
-        if (!hifi_poll(&ch, cmd, data))
-            continue;
-        if (tracing && !(ch == 2 && (*cmd == 0x6b || *cmd == 0x69)))
-            log_printf("player: +%u us B2A ch%d %x data %x", ticks() - t_trace, ch, *cmd, *data);
-        if (ch == 2) {
-            if (serve(*cmd, *data) && *cmd != 0x66 && *cmd != 0x68 && *cmd != 0x75 && *cmd != 0xd3)
-                log_printf("player: unknown file request %x data %x", *cmd, *data);
-            if (*cmd == 0x66 && (want & 1u << 31))
-                return 0;
-            continue;
-        }
-        if (*cmd < 32 && (want & 1u << *cmd))
-            return 0;
-        if (*cmd != 5)                          /* a buffer decoded before a CLOSE: expected */
-            log_printf("player: unexpected message ch%d %x data %x", ch, *cmd, *data);
-    }
-    return HIFI_ETIMEOUT;
-}
 
 static int fail(int err, const char *what)
 {
-    tracing = 0;
     player.error = err;
     player.state = ST_ERROR;
     log_printf("player: %s (%d)", what, err);
     return err;
-}
-
-int player_play(const struct fat_file *f, int module, int codec, int (*ui)(void))
-{
-    hifi_set_div(4);                            /* stock modules: 100 MHz, as validated */
-    struct fat_file img;
-    uint32_t cmd, data, info = 0;
-    int r, ch_end;
-
-    for (unsigned i = 0; i < sizeof player / sizeof(uint32_t); i++)
-        ((uint32_t *)&player)[i] = 0;
-    file = f;
-    cur.index = cur.cluster = 0;
-    for (int i = 0; i < 8; i++)
-        pos[i] = 0;
-    player.state = ST_LOAD;
-    log_printf("player: %s, %u bytes, module %d", f->name, f->size, module);
-    if ((r = hifi_find_image(module, &img)))
-        return fail(r, "no stock image with this module in the root");
-    for (int attempt = 1;; attempt++) {
-        if ((r = hifi_load(&img, module)))
-            return fail(r, "module load failed");
-        tracing = 1;
-        t_trace = ticks();
-        if ((r = hifi_start()))
-            return fail(r, "core B did not start");
-        for (int i = 0; i < 8; i++)
-            pos[i] = 0;
-        cur.index = cur.cluster = 0;
-        desc.h[0] = 3;
-        desc.h[1] = 4;
-        desc.h[2] = 5;
-        desc.size = f->size;
-        desc.pos = desc.pos2 = desc.pos3 = 0;
-        desc.codec = (uint32_t)codec;
-        log_printf("player: +%u us A2B ch2 65 (descriptor), attempt %d", ticks() - t_trace, attempt);
-        hifi_send(2, 0x65, (uint32_t)&desc);
-        if (!(r = wait_for(1u << 31, &cmd, &data, 500000)))
-            break;
-        hifi_dump("descriptor not taken");
-        if (attempt == 3)
-            return fail(r, "descriptor not taken");
-        log_printf("player: restarting core B");
-    }
-    player.state = ST_OPEN;
-    hifi_send(1, 1, 0);                         /* OPEN */
-    if ((r = wait_for(1u << 2 | 1u << 3, &cmd, &data, 3000000))) {
-        hifi_dump("no answer to OPEN");
-        return fail(r, "no answer to OPEN");
-    }
-    if (cmd == 2)
-        return fail(HIFI_EPROTO, "OPEN failed");
-    info = data;
-    player.length_ms = rd32(info + 4);
-    player.bps = rd32(info + 0xc);
-    player.rate = rd32(info + 0x10);
-    player.channels = rd32(info + 0x14);
-    tracing = 0;
-    log_printf("player: opened: %u Hz, %u ch, %u bits, %u ms, info %x", player.rate,
-               player.channels, player.bps, player.length_ms, info);
-    if (player.bps != 16)
-        return fail(HIFI_EPROTO, "only 16-bit output is handled");
-    /* ring: memory layout B (HIGHRAM1 bank 3) when the module leaves it free (73 MP3 ends at
-     * 0x01049730, 75 AAC at 0x01043658); the stock WAV module 76 uses HIGHRAM1 up to
-     * 0x0105f2bc, so its ring goes to HIGHRAM0 bank 1, past its code (ETUDE §15.2, §17) */
-    audio_start(player.rate, module == 76 ? RING_HIGHRAM0 : RING_HIGHRAM1, 1);
-    ramp_hook = audio_update;                   /* volume ramps must not write into the ring */
-    player.state = ST_PLAY;
-
-    int have = 1, ended = 0, stop = 0;  /* message 3 carries a first buffer */
-    uint32_t t_ui = 0, t_wait = 0;
-    while (!stop) {
-        wdt_kick();
-        audio_update();
-        int ch;
-        if (hifi_poll(&ch, &cmd, &data)) {
-            if (ch == 2) {
-                if (serve(cmd, data))
-                    log_printf("player: file request %x data %x ignored", cmd, data);
-            } else if (cmd == 5) {
-                info = data;
-                have = 1;
-            } else if (cmd == 6) {
-                ended = 1;
-                log_printf("player: end of stream (6) at %u ms, %u buffers", player.time_ms,
-                           player.buffers);
-            } else
-                log_printf("player: unexpected message ch%d %x data %x", ch, cmd, data);
-        }
-        if (have) {
-            uint32_t pcm = rd32(info + 0x1c), n = rd32(info + 0x20) * 4;
-            if (n <= audio_free()) {
-                if (t_wait && ticks() - t_wait > player.wait_us_max)
-                    player.wait_us_max = ticks() - t_wait;
-                audio_write(hifi_ptr(pcm), n);
-                player.buffers++;
-                player.frames += n / 4;
-                player.time_ms = rd32(info);
-                have = 0;
-                t_wait = 0;
-                if (!ended)
-                    hifi_send(1, 4, 0);         /* DECODE the next buffer */
-            } else if (!t_wait)
-                t_wait = ticks();
-        }
-        if (ended && !have && audio_fill() <= 4096) {      /* drained (the last 12 ms play on) */
-            player.state = ST_END;
-            break;
-        }
-        if (ticks() - t_ui > 20000) {
-            t_ui = ticks();
-            if (ui())
-                stop = 1;
-        }
-    }
-    log_printf("player: %s after %u buffers, %u frames, %u ms; %u reads (%u bytes), %u seeks; "
-               "ring underruns %u, i2s %u, min fill %u bytes, longest wait %u us",
-               stop ? "stopped" : "finished", player.buffers, player.frames, player.time_ms,
-               player.reads, player.read_bytes, player.seeks, audio.ring_ur, audio.i2s_ur,
-               audio.min_fill, player.wait_us_max);
-    ramp_hook = 0;
-    hifi_send(1, 0xd, 0);                       /* CLOSE */
-    if (wait_for(1u << 0xe, &cmd, &data, 1000000)) {
-        log_printf("player: no answer to CLOSE");
-        hifi_dump("no answer to CLOSE");
-    }
-    for (uint32_t t0 = ticks(); ticks() - t0 < 20000;)     /* late replies of the close */
-        if (hifi_poll(&ch_end, &cmd, &data) && ch_end == 2)
-            serve(cmd, data);
-    if (logs.lost)
-        log_printf("log: %u bytes lost so far (ring overflow)", logs.lost);
-    hifi_dump("after CLOSE");
-    hifi_stop();
-    return stop ? 1 : 0;
 }
 
 /* ---- our runtime and codecs (ETUDE §19) ---- */
@@ -279,7 +37,6 @@ static void feed(void)
         if (wr > file->size)
             wr = file->size;
         c->in_wr = wr;
-        player.seeks++;
         fed_since_ring++;
     }
     for (int k = 0; k < 4 && wr < file->size; k++) {
@@ -688,6 +445,7 @@ int player_drain_service(void)
 static struct {
     int flags, warm, kept, changed, full, open;
     uint32_t t0, t_load, t_ready, t_open, t_dac, t_first, t_play, ur0, lost0, fb;
+    uint32_t na_frames, na_t, na_in;    /* the last change of the frames decoded: when, input */
     int32_t fill0;
 } ps;
 
@@ -803,7 +561,7 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
                                            (dac.rate ? dac.rate : 1)), dac.rate);
     }
     if (!ps.kept && !ps.changed) {
-        audio_start(player.rate, RING_SYSRAM, ps.fb == 4);
+        audio_start(player.rate, ps.fb == 4);
         audio_update();
         audio.wr = (audio.rd + 8192) & ~7u;     /* 8 KiB of the zeroed ring, then core B's PCM */
         log_printf("player: core B had %u bytes ready when the DMA started", out_avail());
@@ -832,6 +590,9 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     return 0;
 }
 
+#define NOAUDIO_US    5000000u
+#define NOAUDIO_BYTES (1u << 20)
+
 /* One round of an open track: 0 while it plays, 1 at its end (all of core B's output in the DAC
  * ring with PLAY_CHAIN, the DAC ring drained otherwise), < 0 on an error */
 int player_service(void)
@@ -854,7 +615,7 @@ int player_service(void)
             audio.wr = (audio.rd + 1024) & ~7u; /* core B's frames are ready: 1 KiB ahead */
             ps.changed = 1;
         } else {
-            audio_start(player.rate, RING_SYSRAM, ps.fb == 4);
+            audio_start(player.rate, ps.fb == 4);
             audio_update();
             audio.wr = (audio.rd + 8192) & ~7u;
         }
@@ -889,10 +650,8 @@ int player_service(void)
     /* frames heard: written by core B minus what is still in the two rings */
     uint32_t queued = (out_avail() + (uint32_t)(audio_fill() > 0 ? audio_fill() : 0)) / ps.fb;
     player.frames = c->start_frame + (c->frames > queued ? c->frames - queued : 0);
-    player.b_out = out_avail();
     player.time_ms = player.rate ? (uint32_t)((uint64_t)player.frames * 1000 / player.rate) : 0;
     heard_update();
-    player.buffers = c->wakeups;
     if (c->state == HP_ERROR) {
         log_printf("player: core B error %u, fault pc %x lr %x cfsr %x", c->error, c->fault_pc,
                    c->fault_lr, c->fault_cfsr);
@@ -903,6 +662,20 @@ int player_service(void)
         ((ps.flags & PLAY_CHAIN) || audio_fill() <= 4096)) {
         player.state = ST_END;
         return 1;
+    }
+    /* A damaged file (zeros, garbage): NOAUDIO_US without a frame while core B reads on (not in
+     * a pause, nor while the DACs wait for the last track: core B waits for room then) */
+    if (c->frames != ps.na_frames || !ps.na_t) {
+        ps.na_frames = c->frames;
+        ps.na_t = ticks() | 1;
+        ps.na_in = c->in_rd;
+    } else if (!dac_switch && ticks() - ps.na_t > NOAUDIO_US &&
+               c->in_rd - ps.na_in > NOAUDIO_BYTES) {
+        log_printf("player: no audio decoded for %u ms over %u bytes of input (at %u of %u): "
+                   "damaged file", (ticks() - ps.na_t) / 1000, c->in_rd - ps.na_in, c->in_rd,
+                   own_file.size);
+        player.error = PLAYER_ENOAUDIO;
+        return player.error;
     }
     return 0;
 }
@@ -940,25 +713,4 @@ void player_close(int stopped)
 int player_is_open(void)
 {
     return ps.open;
-}
-
-/* Blocking form, for the test menus: 'ui' every 20 ms, non-zero to stop */
-int player_play_own(const struct fat_file *f, uint32_t codec, int (*ui)(void), int flags)
-{
-    int r = player_open(f, codec, flags);
-    if (r)
-        return r;
-    int stop = 0;
-    uint32_t t_ui = 0;
-    while (!(r = player_service())) {
-        if (ticks() - t_ui > 20000) {
-            t_ui = ticks();
-            if (ui()) {
-                stop = 1;
-                break;
-            }
-        }
-    }
-    player_close(stop);
-    return player.error ? player.error : stop;
 }

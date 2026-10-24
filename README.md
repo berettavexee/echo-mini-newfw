@@ -16,6 +16,7 @@ pause. No equaliser.
 | Path | Content |
 |---|---|
 | `ETUDE.md` | the study (in French): hardware, boot, cores, codecs, every version and its tests |
+| `ROADMAP.md` | what is done, waiting for a test, to do, ideas, known limitations |
 | `fw/src/` | main-core firmware (C) |
 | `fw/hifi/` | HiFi-core runtime and codec glue |
 | `fw/tools/` | image builder, emulator (`emu_fw.py`, Unicorn), test disk and exFAT image builders, log reader |

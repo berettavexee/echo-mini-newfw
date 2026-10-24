@@ -921,35 +921,50 @@ gardés tels quels (73, 75), on y greffe la sonde comme dans HIFIEC64 (patch de 
 - **USB** en stockage de masse ;
 - **ajustement dynamique** de la fréquence du cœur B (§1.4) à partir du bloc de retour (§6).
 
-## 9. Proposition d'architecture mémoire (à discuter)
-Établie d'après le TRM, le firmware d'origine et RECHO (§1 à 4). Rien n'est figé.
+## 9. Architecture mémoire (état de la 0.60, 2026-10-24)
+Mise à jour de la proposition de départ, validée au début de l'étape 3. Les modules de codec du firmware d'origine sont abandonnés au profit de nos codecs libres (WAV, dr_flac, pvmp3dec, Tremor, libopus) : les réservations prévues pour eux sont retirées du plan (anneau PCM en PMU-SRAM, anneau du DAC en HIGHRAM1 ou HIGHRAM0, bloc de paramètres de 0x90 octets du runtime d'origine).
 
-| Zone | Taille | Usage proposé | Justification |
+**Cœur A (Cortex-M3 principal), SYSRAM et PMU-SRAM** (`fw/link.ld`, `build/fw.map`) :
+
+| Adresses | Taille | Contenu | Marge |
 |---|---|---|---|
-| SYSRAM0 `0x03000000`–`0x03004000` | 16 Ko | pile du cœur A | comme l'origine (SP initial `0x03004000`) |
-| `0x03004000`–… | — | **table de vecteurs**, puis données et BSS (entrée 0) | le chargeur saute par la table placée au début des données (§2.2) |
-| SYSRAM0/1 `0x03050000`–`0x03090000` | 256 Ko | code du cœur A (entrée 0) | adresse de chargement imposée par la table des overlays |
-| PMU-SRAM `0x03090000`–`0x0309c000` | 48 Ko | **anneau PCM** écrit par le cœur B, lu par le DMAC1 canal 5 vers l'I2S1 | schéma de RECHO, validé sur l'appareil (§4) |
-| PMU-SRAM `0x0309c000`–`0x0309ffe0` | ~16 Ko | marqueurs conservés au reset, listes chaînées de la DMA, journal circulaire | zone libre du §20 du rapport ; conservée au reset |
-| `0x0309ffe0`, `0x0309fff0` | 32 o | marqueur `FAST` (repli de la PLL), `NanoCRebootFlag` | conventions de RECHO et de l'origine |
-| HIGHRAM0 `0x01000000`–`0x01020000` | 128 Ko | code du module de codec (vu en 0 par le cœur B) | §1.4 |
-| HIGHRAM1 `0x01020000`–`0x01060000` | 256 Ko | bloc de paramètres (0x90 o), bloc d'état et de retour (§6), anneau d'entrée des fichiers, données du codec | §1.4 et §6 |
+| `0x03000000`–`0x03003fff` | 16 Kio | pile du cœur A (SP initial `0x03004000`, comme l'origine) | — |
+| `0x03004000`–`0x03004127` | 296 o | `.data` : table des vecteurs en tête (le chargeur saute par elle, §2.2), puis variables initialisées | — |
+| `0x03004128`–`0x0301db03` | 102,7 Kio | `.bss` | 9,2 Kio jusqu'à `0x03020000` |
+| `0x03020000`–`0x0304ffff` | 192 Kio | anneau du DAC (`.dacring`, 1,1 s à 44,1 kHz / 16 bits), lu par le DMAC1 canal 5 vers l'I2S1 ; ni chargé ni effacé | plein |
+| `0x03050000`–`0x0306237b` | 72,9 Kio | code et constantes (entrée 0 de la table des overlays, adresse imposée) | — |
+| `0x0306237c`–`0x030624a3` | 296 o | image de `.data`, recopiée au démarrage | 54,8 Kio jusqu'à `0x03070000` |
+| `0x03070000`–`0x03077aff` | 30,8 Kio | file de lecture (`.queuebuf` : 400 entrées, 20 Kio de noms, dossiers de `q_from_tree`) | 1,3 Kio sur 32 Kio |
+| `0x03078000`–`0x0308f6af` | 93,7 Kio | liste du dossier affiché (`.dirbuf` : 1 000 entrées, 80 Kio de noms) | 2,3 Kio sur 96 Kio |
+| `0x0308f6b0`–`0x0308ffff` | 2,3 Kio | libre | — |
+| `0x03090000`–`0x0309bfff` | 48 Kio | PMU-SRAM libre (ancien emplacement prévu de l'anneau PCM) | 48 Kio |
+| `0x0309c000`–`0x0309efff` | 12 Kio | anneau du journal (`log.c`), conservé à travers un reset | — |
+| `0x0309ffe0` | 4 o | marque `FAST` (essai à 200 MHz, repli de la PLL) | — |
 
-**Flux audio proposé** :
-1. Le cœur A lit le fichier, par blocs, dans un anneau d'entrée en HIGHRAM1. On garde le
-   protocole d'origine (§1.2) pour pouvoir charger les modules d'origine 73 et 75 tels quels, et
-   on y ajoute le bloc d'état.
-2. Le cœur B décode et écrit le PCM 32 bits directement dans l'anneau de la PMU-SRAM.
-3. Le DMAC1, canal 5, lit l'anneau en boucle par une liste chaînée vers le TXDR de l'I2S1, sans
-   intervention du cœur A.
-4. Le cœur A surveille les positions de lecture et d'écriture, règle le volume dans les DAC (I2C)
-   et la fréquence du cœur B (diviseur, §1.4).
+Le chargeur IDB tourne, pendant qu'il nous charge, depuis sa copie en `0x0304a000`–`0x0304dfff`, avec données et pile en `0x03088000`–`0x0308ffff` (§23.2) : l'anneau du DAC et la liste de dossier, posés sur lui, ne sont ni chargés ni effacés et ne servent qu'une fois le firmware lancé.
 
-Point à trancher : **les modules d'origine** (73 MP3, 75 AAC) renvoient leur PCM 16 bits dans
-leur propre tampon et attendent le cœur A (message 5).
-- Soit le cœur A le recopie dans l'anneau, en le passant sur 32 bits (coût faible, une boucle).
-- Soit on patche leur runtime pour écrire directement dans l'anneau, comme la sonde HIFIEC64
-  a patché leur boucle principale.
+Plus gros blocs de `.bss` : `first` 17,2 Kio, tampon de lecture des tags (`rd`, `tags.c`) 16 Kio, cache de la police 14 Kio, `group` 10,2 Kio, `index_` 8,6 Kio, `buf.0` 8 Kio.
+
+**Cœur B (HiFi), HIGHRAM** (`fw/hifi/link.ld`, `hifi_proto.h`) :
+
+| Adresses (vue du cœur A) | Taille | Contenu |
+|---|---|---|
+| HIGHRAM0 `0x01000000`–`0x0101ffff` (vue en 0 par le cœur B) | 128 Kio | code du codec chargé : Opus 67,4 Kio, Vorbis 58,6, MP3 34,9, FLAC 32,8, WAV 2,8 |
+| HIGHRAM1 `0x01020000`–`0x01020fff` | 4 Kio | bloc de contrôle `struct hp_ctl` (protocole entre les cœurs, état, mesures) |
+| `0x01021000`–`0x01022fff` | 8 Kio | pile du cœur B (SP `0x01023000`) |
+| `0x01023000`–`0x0104ffff` | 180 Kio | données et `.bss` du codec : Vorbis 114,6 Kio (dont 96 Kio de tas), Opus 72,8, MP3 40,7, FLAC 4,1, WAV 4 |
+| `0x01050000`–`0x01057fff` | 32 Kio | anneau d'entrée : données compressées écrites par le cœur A |
+| `0x01058000`–`0x0105ffff` | 32 Kio | anneau de sortie : PCM écrit par le cœur B (garde de 4 Kio) |
+
+**Flux audio** :
+1. Le cœur A lit le fichier (eMMC ou carte) dans l'anneau d'entrée en HIGHRAM1.
+2. Le cœur B décode et écrit le PCM dans son anneau de sortie.
+3. Le cœur A le recopie dans l'anneau du DAC en SYSRAM (192 Kio), qui absorbe les pointes de charge et les lectures lentes.
+4. Le DMAC1, canal 5, lit l'anneau du DAC en boucle vers le TXDR de l'I2S1 ; le cœur A suit les positions, règle le volume des DAC (I2C, ReplayGain compris) et la fréquence du cœur B.
+
+**eMMC** : IDB en `64 + 1024·i` (5 copies, jamais écrites) ; FW1 en `0x2000` ; FW2 en `0x2000 + R` (`R` = `0xd800` sur cet appareil) ; volume utilisateur FAT32 à `0x81000` (secteur de démarrage `0x81040`), qui contient `NEWFWLOG.TXT` (journal et état de reprise).
+
+**Marges à surveiller** : la `.bss` (9 Kio ; la variante de test `SD_WALK` l'a dépassée), la file et la liste de dossier (1 à 2 Kio chacune). La PMU-SRAM basse (48 Kio) et l'espace après le code (55 Kio) sont les réserves disponibles.
 
 ## 10. Reste à faire dans l'étape 1
 1. Chargeur de l'IDB (§2.1) :
@@ -2403,3 +2418,151 @@ La carte microSD (S1 à S4) est validée ; S5 (accès USB à la carte) reste pou
 - écran de lecture : rafraîchissement partiel 3,8 à 3,9 ms en moyenne (4,3 ms au plus), 4 fois par seconde, soit environ 1,5 % du temps du cœur A ; dessin complet 10,7 à 11,5 ms (13,9 ms au plus) ;
 - navigateur : partiel 1,3 à 2,5 ms en moyenne (12,3 ms au plus, changement de page) ; complet 12,9 à 15,0 ms (17,1 ms au plus).
 Un écran complet est envoyé en moins de 20 ms, sous la durée d'une trame à 30 images/s : l'affichage par DMA (point c) n'apporterait pas de gain visible et n'est pas retenu.
+
+## 40. Abandon des modules du firmware d'origine (0.61, 2026-10-24)
+Demande de l'utilisateur : les modules de codec d'origine sont abandonnés au profit des codecs libres, et la page « Audio tests » n'est plus utile.
+- Retirés : le lecteur des modules d'origine et leur protocole par la boîte aux lettres (`player_play`, `serve`, `wait_for`, descripteur de fichier) ; le chargement d'un module depuis une image d'origine sur le volume (`hifi_find_image`, `hifi_load`, `hifi_start` et son bloc de paramètres, `hifi_poll`, `hifi_dump`) ; les anneaux du DAC en HIGHRAM1, HIGHRAM0 et PMU-SRAM (`RING_*`, `select_ring`, `ring_check`) ; le générateur de son de test (table de sinus) ; la page « Audio tests » (essai du son, lectures de fichiers et enchaînements `CH*`/`TEST*`, lecture M4A par le module 75) et sa forme bloquante `player_play_own`.
+- Il reste : nos codecs, l'anneau du DAC en SYSRAM (`audio_start(rate, bits16)`), la sonnette du cœur B (`hifi_ring`, seule écriture dans la boîte aux lettres). Pendant une rampe de volume sans lecteur, le tampon est rempli de silence (`fill_silence`).
+- L'écran « System screen » n'affiche plus les touches de l'ancien écran principal : « any key: back ».
+- Taille : code de 73,4 à 62,9 Kio ; `.bss` de 102,7 à 96,7 Kio (marge de 15,3 Kio).
+- Non-régression (émulateur) : même scénario sur la 0.60 (recompilée depuis le dépôt) et la 0.61 (WAV, saut vers Opus 48 kHz, enchaînement vers Ogg 44,1 kHz, accord de recherche) : sortie du DAC identique octet pour octet (9,4 Mo), mêmes événements dans le journal.
+- **0.61** : `work/NEWFW061.IMG`, CRC `0x27e8263c`.
+
+## 41. Contrôle qualité : code mort, doublons, dépôt autonome (0.62, 2026-10-24)
+Points 1, 2 et 4 de la passe de contrôle demandée par l'utilisateur ; le découpage de `ui.c` (point 3) reste à faire.
+- **Code mort retiré** : `audio_dma_err()` ; `audio_i2s_fifo()` devenue interne ; `lcd_char()` (`lcd_text()` passe maintenant par `utf8_next()` comme les autres fonctions de texte) ; `audio.external`, jamais mis à 1 ; les champs `buffers`, `seeks`, `wait_us_max` et `b_out` de `struct player_state`, écrits mais jamais lus ; l'état `ST_DRAIN` ; `hifi_code_size`. Le code de test de la carte (`SD_WALK`) quitte `main.c` pour `sdtest.c`, compilé seulement avec `make EXTRA=-DSD_WALK`.
+- **Doublons supprimés** : `dir_add()` sert à `collect()` et `top_entry()` ; `q_add()` à `q_from_dir()` et `q_from_tree()` (la piste choisie n'est plus indiquée si le pool de noms est plein avant elle) ; `text.h` regroupe `le16()`, `le32()` et `utf8_put()`, utilisés par `fat.c` et `tags.c` ; une seule table de noms de touches (`key_name()`).
+- **Dépôt autonome** : `fw/tools/rkcrc.py` remplace l'import de `rknanofw.py`, extérieur au dépôt (`mkimg.py`) ; la vérification des modules d'origine de `emu_coreb.py` est retirée ; `mkdisk.py` prend le dump de la zone de démarrage par `--boot` ou `$ECHO_BOOTDUMP` (plus de chemin propre à la machine) ; `fw/README.md` décrit l'état actuel. Une copie des seuls fichiers du dépôt se compile sans rien d'autre et donne la même image.
+- Taille : code 62,8 Kio ; `.bss` 96,7 Kio.
+- **Non-régression** (émulateur) : même scénario que pour la 0.61 (WAV, saut vers Opus 48 kHz, enchaînement vers Ogg 44,1 kHz, accord) : sortie du DAC identique octet pour octet, mêmes événements ; variante `SD_WALK` sur l'image exFAT de test : les mêmes empreintes de fichiers qu'au §37 ; navigation sur la carte avec noms accentués.
+- **0.62** : `work/NEWFW062.IMG`, CRC `0xcbe53e80`.
+
+## 42. Découpage de l'interface, événements des touches et des prises (0.63, 2026-10-24)
+Point 3 du contrôle qualité, avec la suggestion de l'utilisateur : un module qui transforme les touches et leurs combinaisons en événements simples pour les écrans ; puis, à sa demande, les prises (casque, câble USB) dans la même liste d'événements.
+
+**`keys.c` / `keys.h`** : le lissage de l'échelle (`key_scan`, venu de `main.c`) et la fabrique d'événements (venue de `ui.c`). `key_poll(struct key_ev *)` rend `{touche, type}` : `EV_PRESS` (au relâchement), `EV_LONG` (600 ms), `EV_REPEAT` (VOL+/VOL− tenues), `EV_CHORD` (VOL+ et VOL−), et maintenant `EV_PLUG` / `EV_UNPLUG` pour `SRC_JACK35` (GPIO0_13), `SRC_JACK44` (GPIO2_8) et `SRC_USB` (VBUS). Une prise change d'état après 100 ms stables (lecture toutes les 10 ms) ; la première lecture fixe l'état sans événement ; le journal note `keys: jack 3.5 mm in/out`, `keys: usb cable in/out`. Aucune action n'y est encore attachée (pistes : pause au débranchement du casque, écran de montage USB de l'eMMC ou de la carte). `key_edge()` sert les écrans simples (système, installation).
+
+**`ui.c` découpé** (1 751 lignes en huit fichiers, état partagé dans `ui_priv.h`) :
+
+| Fichier | Contenu |
+|---|---|
+| `ui.c` | la boucle : un événement va à l'écran affiché, le menu principal, le dessin, l'économie d'énergie |
+| `browser.c` | niveau supérieur, listes de dossiers et tri, chemin, carte (mise en route, détection), écran et touches du navigateur (`browser_key`) |
+| `queue.c` | file de lecture et modes |
+| `playback.c` | ouverture des pistes, tags, ReplayGain, enchaînement, sauts, arrêt, rangement en pause, volume, recherche |
+| `playscreen.c` | écran de lecture, ses touches (`play_key`) et celles de la recherche (`seek_key`) |
+| `menu.c` | menu principal, date et heure |
+| `resume.c` | état de reprise |
+| `uidraw.c` | aides au dessin (temps, barre, texte à droite, heure) |
+
+Chaque écran a sa fonction de touches, qui rend à la boucle ce qu'elle doit faire (`UI_FULL`, `UI_QUICK`, `UI_TO_PLAYING`) ; la longue chaîne de conditions de `ui_main` disparaît.
+
+**Non-régression** (émulateur), la 0.62 recompilée avec le même numéro de version :
+- scénario complet (navigateur, carte, lecture, sauts, recherche, volume, menu principal, retour) : mêmes événements dans le journal, aux millisecondes près ; 13 captures d'écran sur 14 identiques au pixel près (la 14e ne diffère que d'un pixel de barre de progression) ;
+- scénario du §40 : même audio ; le saut arrive 0,8 ms plus tard (la boucle n'a plus exactement le même temps de parcours), le reste est identique octet pour octet ;
+- prise 3,5 mm simulée (`emu_fw.py --gpio-at MS:BANC:BROCHE:NIVEAU`) : `keys: jack 3.5 mm in` puis `out`.
+- **0.63** : `work/NEWFW063.IMG`, CRC `0x9f6c2701`.
+
+## 43. Batterie faible (0.64, 2026-10-24)
+Priorité de sécurité du `ROADMAP.md`. Avant la 0.64, aucune action : l'appareil tournait jusqu'à la coupure par la batterie, éventuellement pendant une écriture.
+
+**Choix validés par l'utilisateur** : seuils du firmware d'origine et de RECHO ; moyenne sur 10 s ; bandeau de 3 s et, pendant la lecture, trois bips mêlés à la musique, puis un bip toutes les 5 min ; 30 s sous 3 300 mV avant l'extinction, annoncée par deux bips graves ; une annonce vocale plus tard (`ROADMAP.md`).
+
+**Fonctionnement** :
+- `battery_service()` (`ui.c`), appelée par la boucle de l'interface seulement, donc jamais au milieu d'une écriture (journal, état de reprise, installation, disque USB) : une lecture par seconde sans câble USB, décision sur la moyenne des 10 dernières.
+  - Sous 3 400 mV : `battery: low (N mV)`, bandeau plein écran « Low battery / plug the USB cable » pendant 3 s (l'écran s'allume), pourcentage en rouge sur l'écran de lecture ; pendant la lecture, trois bips de 1 kHz (120 ms, séparés de 120 ms), puis un bip toutes les 5 min ; si rien ne joue, les trois bips sont donnés à la reprise de la lecture. Réarmé au-dessus de 3 500 mV.
+  - Sous 3 300 mV pendant 30 s : `battery: empty`, deux bips de 500 Hz (200 ms), attente de 1,8 s (le tampon du DAC les joue), pause avec rampe, « Battery empty » 2 s, puis `sys_power_off("battery empty")` : état de reprise enregistré en pause à la position atteinte, journal vidé, alimentation coupée.
+- Au démarrage (`battery_check_boot`, `main.c`) : sous 3 350 mV sans câble (moyenne de 8 lectures), « Battery empty / plug the USB cable » 2 s, une ligne de journal et extinction, sans passer par `sys_power_off()`, qui aurait écrasé l'état de reprise enregistré avant le chargement (défaut trouvé à l'essai émulé).
+- Bips (`audio_beep()`, `audio.c`) : générés par le cœur A au moment où il recopie le PCM dans le tampon du DAC ; la musique est abaissée de 12 dB pendant le motif et une sinusoïde à −12 dBFS est ajoutée (fondus de 5 ms), en trames de 16 ou de 32 bits ; le volume du DAC (ReplayGain compris) s'applique aux deux. Un saut ou un redémarrage de la sortie abandonne un bip en attente.
+
+**Essais émulés** (`emu_fw.py --adc0-at MS:VALEUR` fait varier la lecture de la batterie ; variante de test avec 5 s au lieu de 30 et un rappel à 12 s, `make EXTRA="-DBAT_OFF_MS=5000u -DBAT_REMIND_MS=12000u"`) :
+- 4 003 mV puis 3 378 mV : `battery: low` 9 s plus tard (moyenne), bandeau, puis dans la sortie du DAC trois bips de 1 kHz de 100 ms environ, et le rappel 12 s après ;
+- 3 291 mV : `battery: empty` une fois la moyenne sous 3 300 mV et le délai écoulé, deux bips de 500 Hz dans la sortie du DAC, `audio: paused`, `power off (battery empty), battery 3291 mV` (l'émulateur ne coupe pas l'alimentation : le firmware note `still powered (USB)` et continue) ;
+- 3 334 mV au démarrage : message, `power off (battery empty at start)`, et l'état de reprise reste intact ;
+- batterie normale : la lecture du §40 est inchangée (le saut tombe quelques millisecondes plus tôt, la boucle ayant un peu plus de travail).
+- **0.64** : `work/NEWFW064.IMG`, CRC `0x8239e945`.
+
+## 44. Fichiers vides ou abîmés, message d'échec (0.65, 2026-10-24)
+**Constat sur l'appareil** (journal de la nuit en 0.61, puis essais en 0.64) : sur la carte, des pistes de plus de 208 s s'arrêtaient à 208 s, puis à 103 s, et le fichier était lu jusqu'au bout sans son. La cause est dans les fichiers eux-mêmes, vérifiés sur le PC en lecture seule. Dans le dossier « Redacted top 2025 », 61 fichiers ne contiennent que des zéros après 8 Mio, 44 après 4 Mio, et 53 sont vides (0 octet). Cela ressemble à une copie interrompue, ou à une carte retirée avant la fin de l'écriture. Le firmware lisait correctement. Il n'avait en revanche aucune réponse adaptée : silence pendant toute la lecture des zéros, puis arrêt de la file sur les fichiers vides. En 0.64, l'écran de lecture restait ensuite figé, sans message, sur un album dont tous les MP3 étaient vides.
+
+**Choix validés par l'utilisateur** : les trois propositions et le texte du message.
+- **Message d'échec** : quand rien ne peut être joué, un bandeau de 3 s s'affiche, « Cannot play: », suivi du nom du fichier et de la raison, puis le navigateur. Les raisons possibles sont :
+  - `empty file (0 bytes)` ;
+  - `damaged file (no audio data)` ;
+  - `unreadable file (format)` ;
+  - `read error` ;
+  - `no codec for it in the firmware` ;
+  - `core B did not answer`.
+
+  `play_failed()` (`playback.c`) note le nom et la raison ; la boucle (`ui.c`) affiche le bandeau. Il apparaît quand `play_index` ne trouve aucune piste à ouvrir, et quand la file s'arrête sur un échec pendant l'enchaînement. Une piste ratée suivie d'une piste lue ne donne pas de bandeau.
+- **Fichiers vides** : ils apparaissent en gris dans le navigateur. Ils ne sont mis ni dans la file d'un dossier ni dans celle d'une arborescence. PLAY sur l'un d'eux donne le bandeau et laisse la file en cours intacte. Si le fichier de départ est vide, la file part du suivant.
+- **Fichier abîmé** (`player_service`, `player.c`) : 5 s sans aucune trame décodée, alors que le cœur B a lu plus de 1 Mio d'entrée, provoquent l'erreur `PLAYER_ENOAUDIO`. Le journal note « damaged file », puis l'enchaînement passe à la piste suivante. La condition sur l'entrée évite les faux positifs en pause et pendant l'attente d'un changement de fréquence, quand le cœur B ne lit plus. Un saut dans l'en-tête (ID3) est instantané, et des trames suivent aussitôt.
+- **Compteur d'échecs** : `q_errors` revient à zéro quand une piste s'est terminée normalement, ou a joué plus de 10 s. Seuls 9 échecs de suite arrêtent la file. Avant, le compteur s'accumulait sur toute la file.
+
+**Essais émulés** :
+- **File** : `1A` normal, `2E` vide, `3Z` (300 Ko de MP3 puis 8 Mio de zéros), `4B` normal. La file compte 3 pistes. `3Z` joue 7,4 s, puis `no audio decoded for 5014 ms over 6029312 bytes of input: damaged file`, et `4B` est joué.
+- **PLAY sur `2E`** : bandeau « empty file (0 bytes) », puis le navigateur, où `2E` est en gris.
+- **PLAY sur `5G`** (octets aléatoires) : bandeau « unreadable file (format) ».
+
+**Limite** : un Ogg dont l'en-tête de commentaires est énorme (pochette de plus de 10 Mo) et qui serait lu sans l'indication de `tags.c` pourrait être pris pour un fichier abîmé.
+
+- **0.65** : `work/NEWFW065.IMG`, CRC `0x8cda5d10`.
+
+## 45. Carte réinitialisée après le mode USB (0.66, 2026-10-24)
+**Constat** (journal 0.64, 12:57) : en sortant d'une session USB de 814 s, « SD card » affichait un dossier vide (`folder sd:0: 0 entries`, deux fois). Il a fallu retirer puis remettre la carte. Pendant les écrans bloquants (disque USB, installation, écran système, chargeur), `sd_watch` ne tourne plus. La carte avait été sortie puis remise entre-temps, et le firmware gardait le montage de la précédente : la nouvelle carte n'était pas initialisée et les lectures échouaient. `dir_load` donnait alors une liste vide, sans message.
+
+**Correction validée par l'utilisateur** :
+- **`sd_forget()`** (`browser.c`) : le montage et l'état du pilote sont oubliés après chacun de ces écrans (`menu_open`, `ui.c`). Le journal note `ui: card to be set up again (after the ...)`, et la carte est réinitialisée au prochain accès, en 240 ms environ sur l'appareil. `sd_watch` utilise la même fonction.
+- **Erreur de lecture d'un dossier de la carte** : le journal note `ui: card read failed`, la carte est oubliée et marquée illisible, puis le navigateur revient au niveau du haut. On y voit « SD card (not readable) », et une nouvelle tentative a lieu à l'entrée suivante.
+- **Pistes de la carte** : `q_open` remonte d'abord la carte si elle a été oubliée. Si le montage échoue, le bandeau affiche « read error ».
+
+**Essai émulé** : carte exFAT de test montée, puis menu → System → retour. Le journal montre `card to be set up again (after the system screen)`. À l'entrée suivante dans « SD card », la carte est réinitialisée et montée, avec ses 2 entrées. Le cas de l'erreur de lecture n'est pas simulé : l'émulateur ne sait pas faire échouer une lecture de la carte.
+
+- **0.66** : `work/NEWFW066.IMG`, CRC `0x2f75c369`.
+
+## 46. Fichiers abîmés : essais sur l'appareil et corrections (0.67, 2026-10-24)
+**Base de test** : `work/damage.py` crée, à partir des fichiers `CH*` (3 s chacun), des copies abîmées de chaque format (WAV, FLAC, MP3, Ogg Vorbis, Opus). Les originaux restent à côté. Les octets aléatoires viennent d'une graine fixe, donc le script recrée toujours les mêmes fichiers. Les préfixes :
+- `E_` : fichier vide ;
+- `T_` : coupé à la moitié ;
+- `H_` : 4 premiers Kio aléatoires ;
+- `M_` : 16 Kio aléatoires au milieu ;
+- `Z_` : fichier complet suivi de 3 Mio de zéros ;
+- `R_` : fichier complet suivi de 3 Mio d'octets aléatoires ;
+- `ZZ_` : 3 Mio de zéros seulement ;
+- `RR_` : 3 Mio d'octets aléatoires seulement.
+
+**Essai sur l'appareil en 0.66** (journal `work/hwlog_1024_066/`) : la file de 46 pistes va jusqu'au bout, sans blocage, et se termine sur le bandeau « Cannot play ». La détection des fichiers abîmés (§44) se déclenche sur `R_CH7.OGG` et `Z_CH7.OGG`. MP3 et Opus se resynchronisent après une zone abîmée. L'essai a aussi révélé cinq défauts :
+1. BACK vers une piste qui ne s'ouvre pas : `play_index` passait à la suivante, donc on revenait sur la piste de départ, et il était impossible de reculer au-delà.
+2. FLAC abîmé au milieu : arrêt à la zone abîmée. dr_flac rend 0 trame sur une erreur de décodage qui n'est pas une erreur de CRC, et le codec prenait cela pour la fin du flux.
+3. Vorbis suivi de zéros ou d'octets aléatoires : il ne s'arrêtait pas à la page de fin (drapeau 4), d'où 5 s de silence avant la détection. L'Opus, lui, s'arrêtait déjà.
+4. Ogg ou Opus sans aucune page : 3 s avant le refus (expiration de l'ouverture), car le cœur B cherchait « OggS » octet par octet dans tout le fichier.
+5. FLAC suivi de zéros : tout le reste était lu, d'où un trou d'environ 1 s avant la piste suivante.
+
+**Corrections validées par l'utilisateur** :
+1. `play_step(i, dir)` (`playback.c`) : une piste qui ne s'ouvre pas est sautée dans le sens demandé, en arrière pour BACK (`playscreen.c`). `play_index(i)` correspond à `play_step(i, 1)`.
+2. `codec_flac.c` : quand aucune trame n'est rendue et que l'entrée n'est pas finie, le codec rend « du travail fait ». L'appel suivant cherche alors le prochain code de synchronisation de trame.
+3. `codec_vorbis.c` : après le paquet de la dernière page (`e_o_s`), plus rien n'est lu.
+4. `oggpage.c` : sans aucune page dans les 64 premiers Kio (`PG_FIRST_MAX`), l'entrée n'est pas de l'Ogg.
+5. `codec_flac.c` : le flux s'arrête au nombre de trames de STREAMINFO. La demande à dr_flac est bornée aux trames restantes : sans cette borne, dr_flac cherchait la trame suivante dans les zéros, dans le même appel.
+
+**Essais émulés** (10 fichiers de la base, sur la mémoire interne) :
+- `M_CH3.FLAC` : 123 084 trames sur 132 300 (64 512 avant) ;
+- `Z_CH3.FLAC` : 425 984 octets lus au lieu de 3,5 Mo, sans sous-alimentation de la sortie ;
+- `R_CH7.OGG` et `Z_CH7.OGG` : fin propre après 98 304 octets, sans attente ;
+- `RR_RANDOM.OGG` et `ZZ_ZEROS.OPUS` : refus en 160 ms (3 s avant) ;
+- BACK sur `T_CH3.FLAC` : `RR_RANDOM.OGG` échoue, puis `R_CH7.OGG` est joué.
+
+**Limites** :
+- Un Ogg suivi de données inutiles affiche une durée de 0 ms : la recherche de la dernière page, côté cœur A, ne lit que la fin du fichier.
+- Le MP3 parcourt encore tout un fichier sans trame valide avant de le refuser (1,6 s pour 3 Mio).
+
+**Essai sur l'appareil en 0.67** (journal `work/hwlog_1024_067b/`, même dossier de 46 pistes) : les résultats sont ceux de l'émulateur.
+- `M_CH3.FLAC` : 123 084 trames ;
+- `R_CH3.FLAC` et `Z_CH3.FLAC` : 425 984 octets lus, sans sous-alimentation de la sortie ;
+- `R_CH7.OGG` et `Z_CH7.OGG` : fin après 98 304 octets, sans « damaged file » ;
+- Ogg et Opus sans contenu : refus en 150 ms (3 s en 0.66) ;
+- la file entière dure 89 s au lieu de 107 s.
+
+Le seul trou restant vient du MP3 suivi de données inutiles : 116 772 octets de sortie manquants (environ 0,66 s), le temps de parcourir les 3 Mio. BACK sur une piste qui ne s'ouvre pas n'a pas été essayé sur l'appareil.
+
+- **0.67** : `work/NEWFW067.IMG`, CRC `0x2bf2016f`.
