@@ -3,6 +3,10 @@
 This manual is for the ECHO MINI new firmware, version 0.73. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
+The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing Daft
+Punk's "Discovery" in Opus. The emulator has no real-time clock, so the clock is missing from the
+status line and the date screen says it is not set.
+
 ## The keys
 
 | Key | Where |
@@ -35,7 +39,11 @@ pressed in a pocket does not change the track or the volume.
 The screen goes off by itself after 30 s without a key.
 
 **With the USB cable**: plugging the cable into a player that is off shows the **charging
-screen**. It has a battery bar and "Charging NN %", or "Charged 100 %" once the charger has
+screen**:
+
+![Charging screen](docs/manual/charging-screen.png)
+
+It has a battery bar and "Charging NN %", or "Charged 100 %" once the charger has
 finished. On the charging screen:
 
 - any key switches the screen on again;
@@ -46,16 +54,7 @@ Holding Power 2 s while playing with the cable in also leads to the charging scr
 
 ## The play screen
 
-```
-playing  12/45  shuffle             14:32   87%
-Title of the track, at twice the
-size, on two lines
-Artist
-Album
-1:23 / 4:56
-[=========-------------------------------]
-FLAC  44.1 kHz  16 bit   -40 dB   RG -8.5
-```
+![Play screen: playing, track 4 of 14, repeat all, title on two lines, artist, album, time, bar, format line with the track gain on yellow](docs/manual/play-screen.png)
 
 From top to bottom:
 
@@ -95,7 +94,9 @@ follows it therefore does not move the volume.
 ### Seek mode
 
 Press **VOL+ and VOL- together** on the play screen. The music goes on, and the screen shows
-a target ("go to 2:30 / 4:56 +1:07") as a mark on the bar.
+a target as a mark on the bar, and how far it is from the current position:
+
+![Seek mode: go to 0:36 / 3:46, +0:30](docs/manual/seek-mode.png)
 
 | Key | Action |
 |---|---|
@@ -122,6 +123,14 @@ one is inserted). In a folder, the subfolders come first, then the playable file
 sorted in natural order, ignoring case, so "track 2" comes before "track 10". Empty files
 (0 bytes) are greyed and never played.
 
+![Top level of the internal memory](docs/manual/browser-internal.png)
+![A folder of the internal memory](docs/manual/browser-album.png)
+
+The number at the top right is the number of entries in the folder. Below, an empty file is
+greyed. While a track plays, the browser shows its progress bar at the bottom.
+
+![An empty file, greyed](docs/manual/browser-empty-file.png)
+
 | Key | Action |
 |---|---|
 | **VOL+** / **VOL-** | move up / down (held: repeats) |
@@ -139,6 +148,8 @@ takes the first 400.
 
 VOL+ / VOL- move, PLAY chooses, BACK or MENU closes the menu. The music goes on while the menu
 is open, except for the USB and system entries, which stop it.
+
+![Main menu](docs/manual/main-menu.png)
 
 | Entry | What it does |
 |---|---|
@@ -160,6 +171,8 @@ is open, except for the USB and system entries, which stop it.
 
 ### Date and time
 
+![Date and time screen, the year selected](docs/manual/date-and-time.png)
+
 | Key | Action |
 |---|---|
 | **VOL+** / **VOL-** | change the highlighted field |
@@ -171,6 +184,8 @@ The clock keeps local time. There is no automatic summer / winter time change: s
 hand.
 
 ## Messages
+
+![Cannot play: an empty file](docs/manual/cannot-play.png)
 
 | Message | Meaning |
 |---|---|
