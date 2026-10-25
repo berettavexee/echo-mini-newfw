@@ -5,17 +5,20 @@ A from-scratch firmware for the main core of the SNOWSKY ECHO MINI digital audio
 by studying the official firmware V3.9.0; no code of it, of the Rockchip SDK, of ReChord or
 of RECHO is included.
 
-Status (version 0.60): playback of WAV, FLAC, MP3, Ogg Vorbis and Opus, gapless, with
+Status (version 0.73): playback of WAV, FLAC, MP3, Ogg Vorbis and Opus, gapless, with
 non-blocking sample-rate changes; folder browser with long names (FAT32 internal memory,
 FAT32 or exFAT microSD card); resume, ReplayGain (album / track / off), seek on the bar,
 play modes, real-time clock, USB mass storage of the internal memory, power saving in
-pause. No equaliser.
+pause, low-battery warning and power off, charging screen. No equaliser.
+
+**New users: see [`MANUAL.md`](MANUAL.md)** for the keys on each screen and how to install.
 
 ## Layout
 
 | Path | Content |
 |---|---|
 | `ETUDE.md` | the study (in French): hardware, boot, cores, codecs, every version and its tests |
+| `MANUAL.md` | user manual: screens, keys, messages, formats, installing |
 | `ROADMAP.md` | what is done, waiting for a test, to do, ideas, known limitations |
 | `fw/src/` | main-core firmware (C) |
 | `fw/hifi/` | HiFi-core runtime and codec glue |
