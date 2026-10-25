@@ -23,7 +23,8 @@ Each key knows three gestures:
 - a **long press**: PLAY, BACK and MENU held for 0.6 s;
 - a **held** VOL+ or VOL-: repeats from 0.45 s, about ten steps a second.
 
-**VOL+ and VOL- together**, the "chord", opens the seek mode on the play screen.
+**VOL+ and VOL- together**, the "chord", opens the seek mode on the play screen. 
+*On my device, it works better when I press Vol+ and then Vol-*
 
 When the screen is off, the first key only switches it on. It does nothing else, so a key
 pressed in a pocket does not change the track or the volume.
