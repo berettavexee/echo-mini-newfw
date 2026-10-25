@@ -23,8 +23,11 @@ Each key knows three gestures:
 - a **long press**: PLAY, BACK and MENU held for 0.6 s;
 - a **held** VOL+ or VOL-: repeats from 0.45 s, about ten steps a second.
 
-**VOL+ and VOL- together**, the "chord", opens the seek mode on the play screen. 
-*On my device, it works better when I press Vol+ and then Vol-*
+**VOL+ and VOL- together**, the "chord", opens the seek mode on the play screen. Press and hold
+**VOL+ first, then press VOL-** while still holding VOL+, and release both. The other order does
+not work: with both keys down, the player only reads VOL-, so starting with VOL- looks like a
+plain VOL- press. Starting with VOL+, the player sees VOL+ turn into VOL- without a release,
+which is how it recognises the chord.
 
 When the screen is off, the first key only switches it on. It does nothing else, so a key
 pressed in a pocket does not change the track or the volume.
@@ -85,7 +88,7 @@ From top to bottom:
 | **BACK** | back to the start of the track; within its first 3 s, the track before |
 | **BACK held** | next play mode: in order → repeat all → repeat one → shuffle → in order |
 | **VOL+** / **VOL-** | volume up / down, 1 dB a step (held: repeats) |
-| **VOL+ and VOL- together** | seek mode (below) |
+| **VOL+ held, then VOL-** | seek mode (below) |
 | **MENU** | to the folder browser; the music goes on |
 | **MENU held** | main menu |
 
@@ -94,7 +97,7 @@ follows it therefore does not move the volume.
 
 ### Seek mode
 
-Press **VOL+ and VOL- together** on the play screen. The music goes on, and the screen shows
+Hold **VOL+, then press VOL-** on the play screen (in that order, see "The keys"). The music goes on, and the screen shows
 a target as a mark on the bar, and how far it is from the current position:
 
 ![Seek mode: go to 0:36 / 3:46, +0:30](docs/manual/seek-mode.png)

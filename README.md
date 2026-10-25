@@ -34,6 +34,16 @@ pause, low-battery warning and power off, charging screen. No equaliser.
 Needs `arm-none-eabi-gcc` and Python 3. Output: `fw/build/HIFIEC70.IMG`, installed from the
 device's own firmware menu or the loader's USB mode. See `fw/README.md`.
 
+## Acknowledgments
+
+More ambitious custom firmware projects exist for this player, and are worth a look:
+- **[RECHO](https://recho.atzkey.workers.dev/)** by atzkey: a from-scratch firmware for the ECHO
+  MINI (gapless playback, improved navigation, files in name order).
+- **[ReChord](https://github.com/brnomt/ReChord)**: a from-source custom firmware for the ECHO
+  MINI, in progress.
+
+This project is independent from both and shares no code with them (but I will be happy to share).
+
 ## Licenses
 
 Our code: see the headers. Third-party code keeps its license: libopus (BSD, `third_party/opus/COPYING`),
