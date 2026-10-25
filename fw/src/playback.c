@@ -130,6 +130,7 @@ static int q_open(int i, int chain)
         fresh = 1;
     log_printf("ui: queue %d/%d: %s (%d)", i + 1, q_n, q_name(i), r);
     if (!r) {
+        q.e[i].flags = (uint16_t)((q.e[i].flags & ~F_CODEC) | player.codec);   /* M4A: AAC or ALAC */
         q_dec = i;
         heard_sync();                           /* at once unless the last one still plays */
     }

@@ -1,6 +1,6 @@
 # User manual
 
-This manual is for the ECHO MINI new firmware, version 0.75. It describes what the player shows
+This manual is for the ECHO MINI new firmware, version 0.76. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
 The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing Daft
@@ -212,11 +212,12 @@ the next one.
 | Ogg Vorbis | `.ogg` | |
 | Opus | `.opus` | R128 gain tags |
 | AAC | `.m4a`, `.m4b`, `.mp4` | AAC-LC, mono or stereo; iTunes tags and ReplayGain; gapless |
+| ALAC | `.m4a`, `.m4b`, `.mp4` | Apple Lossless, 16, 20 or 24 bits, mono or stereo; iTunes tags and ReplayGain |
 
 Sample rates of 44.1, 48 and 96 kHz. Tracks play gapless: the next track is queued behind the
 end of the current one.
 
-Not supported yet: ALAC, HE-AAC, AAC in `.aac` files; floating-point WAV and AIFF. Files of 4 GiB or more are not
+Not supported yet: HE-AAC, AAC in `.aac` files; floating-point WAV and AIFF. Files of 4 GiB or more are not
 listed.
 
 Storage:

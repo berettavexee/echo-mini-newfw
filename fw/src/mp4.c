@@ -4,7 +4,7 @@
  * read as they are needed through 512-byte windows, one per table (as the stock firmware does,
  * ETUDE §54): sizes (stsz), chunk offsets (stco/co64), samples per chunk (stsc). The frames
  * themselves are copied through a 4 KiB window, so that the frames of a chunk, contiguous in the
- * file, cost one read. Only the first audio track is played; AAC-LC only (ALAC: later).
+ * file, cost one read. Only the first audio track is played: AAC-LC (0.75) or ALAC (0.76).
  * Gapless: the encoder delay and padding from iTunSMPB (iTunes), else from the edit list. */
 #include "mp4.h"
 #include "hifi_proto.h"
@@ -436,31 +436,52 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
         find(stbl.body, stbl.end, FOURCC('s', 't', 's', 'd'), &stsd) ||
         box_at(stsd.body + 8, stsd.end, &entry_box))
         return MP4_EFORMAT;
-    if (entry_box.type == FOURCC('a', 'l', 'a', 'c'))
-        return MP4_EALAC;
-    if (entry_box.type != FOURCC('m', 'p', '4', 'a') || rd(entry_box.body, buf, 28))
+    int alac = entry_box.type == FOURCC('a', 'l', 'a', 'c');
+    if ((!alac && entry_box.type != FOURCC('m', 'p', '4', 'a')) || rd(entry_box.body, buf, 28))
         return MP4_EUNSUPPORTED;
     /* AudioSampleEntry: QuickTime versions 1 and 2 have 16 or 36 more bytes before the children */
     uint32_t qt = be16(buf + 8), kids = entry_box.body + 28 + (qt == 1 ? 16 : qt == 2 ? 36 : 0);
-    if (find(kids, entry_box.end, FOURCC('e', 's', 'd', 's'), &esds)) {
+    uint8_t *cfg = head + sizeof *h;
+    uint32_t cfg_len = 0, flen = 1024;          /* frames per packet */
+    if (alac) {                                 /* the 'alac' box: version, ALACSpecificConfig */
+        struct box cb;
+        if (find(kids, entry_box.end, FOURCC('a', 'l', 'a', 'c'), &cb) || cb.end - cb.body < 28 ||
+            rd(cb.body + 4, cfg, 24))
+            return MP4_EFORMAT;
+        cfg_len = 24;
+        flen = be32(cfg);
+        t->bits = cfg[5];
+        t->channels = cfg[9];
+        t->rate = be32(cfg + 20);
+        if (t->channels < 1 || t->channels > 2 || !flen || flen > 16384 || !t->rate ||
+            (t->bits != 16 && t->bits != 20 && t->bits != 24)) {
+            log_printf("mp4: ALAC %u bits, %u channels, %u frames per packet: not played (16, 20 "
+                       "or 24 bits, mono or stereo)", t->bits, t->channels, flen);
+            return MP4_EUNSUPPORTED;
+        }
+        t->codec = HP_CODEC_ALAC;
+    } else if (find(kids, entry_box.end, FOURCC('e', 's', 'd', 's'), &esds)) {
         struct box wave;                        /* QuickTime: esds inside 'wave' */
         if (find(kids, entry_box.end, FOURCC('w', 'a', 'v', 'e'), &wave) ||
             find(wave.body, wave.end, FOURCC('e', 's', 'd', 's'), &esds))
             return MP4_EFORMAT;
     }
-    uint8_t *cfg = head + sizeof *h;
-    uint32_t cfg_len = 0;
-    if (esds_config(&esds, cfg, &cfg_len) || cfg_len < 2)
+    if (!alac && (esds_config(&esds, cfg, &cfg_len) || cfg_len < 2))
         return MP4_EFORMAT;
     uint32_t aot = cfg[0] >> 3, sri = (cfg[0] & 7) << 1 | cfg[1] >> 7, ch = cfg[1] >> 3 & 15;
-    if (aot != 2 || sri > 12 || ch < 1 || ch > 2 || (cfg[1] & 4)) {
+    if (!alac && (aot != 2 || sri > 12 || ch < 1 || ch > 2 || (cfg[1] & 4))) {
         log_printf("mp4: audio object type %u, rate index %u, %u channels%s: not played (AAC-LC "
                    "only, mono or stereo, 1024-sample frames)", aot, sri, ch,
                    cfg[1] & 4 ? ", 960-sample frames" : "");
         return MP4_EUNSUPPORTED;
     }
-    t->rate = aac_rates[sri];
-    t->channels = ch;
+    if (!alac) {
+        t->rate = aac_rates[sri];
+        t->channels = ch;
+        t->bits = 16;
+        t->codec = HP_CODEC_AAC;
+    }
+    t->frame_len = flen;
 
     /* tables */
     if (find(stbl.body, stbl.end, FOURCC('s', 't', 's', 'z'), &b) || rd(b.body, buf, 12))
@@ -485,9 +506,21 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
     if (!total || !stco.count)
         return MP4_EFORMAT;
 
-    /* length, delay and padding: iTunSMPB, else the edit list, else the whole track */
-    uint32_t decoded = total > 0xffffffffu / 1024 ? 0xffffffffu : total * 1024;
-    if (find_itunsmpb(&moov, t) || t->delay + t->length > decoded) {
+    /* length, delay and padding. ALAC: no delay, the length from the sample durations (the last
+     * packet is shorter). AAC: iTunSMPB, else the edit list, else the whole track. */
+    uint32_t decoded = total > 0xffffffffu / flen ? 0xffffffffu : total * flen;
+    if (alac) {
+        static struct table stts;               /* static: its window is 0.5 KiB */
+        uint64_t sum = 0;
+        const uint8_t *e;
+        if (!find(stbl.body, stbl.end, FOURCC('s', 't', 't', 's'), &b) && !table_init(&stts, &b, 8, 0))
+            for (uint32_t i = 0; i < stts.count && (e = entry(&stts, i)); i++)
+                sum += (uint64_t)be32(e) * be32(e + 4);
+        if (ts && ts != t->rate)
+            sum = sum * t->rate / ts;
+        t->length = sum && sum <= decoded ? (uint32_t)sum : decoded;
+        t->padding = decoded - t->length;
+    } else if (find_itunsmpb(&moov, t) || t->delay + t->length > decoded) {
         struct box edts, elst, mvhd;
         uint32_t movie_ts = 0;
         t->delay = t->padding = 0;
@@ -510,17 +543,18 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
     }
     (void)dur;
 
-    /* where the stream starts: a frame before the target (the overlap of the transform) */
+    /* where the stream starts: AAC a packet before the target (the overlap of the transform),
+     * ALAC the packet of the target (packets are independent) */
     uint32_t t0 = seek_ms ? (uint32_t)((uint64_t)seek_ms * t->rate / 1000) : 0;
     if (t0 >= t->length)
         t0 = 0;
-    uint32_t d0 = t0 + t->delay, k = d0 / 1024, start = seek_ms && k ? k - 1 : 0;
+    uint32_t d0 = t0 + t->delay, k = d0 / flen, start = !seek_ms ? 0 : alac ? k : k ? k - 1 : 0;
     if (start >= total)
         start = total - 1;
     h->magic = HP_PKT_MAGIC;
     h->rate = t->rate;
     h->channels = t->channels;
-    h->skip = d0 - start * 1024;
+    h->skip = d0 - start * flen;
     h->length = t->length;
     h->start_frame = t0;
     h->config_len = cfg_len;
@@ -528,8 +562,8 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
     locate(start);
     if (failed)
         return MP4_EREAD;
-    log_printf("mp4: AAC-LC %u Hz, %u ch, %u frames of 1024, delay %u, padding %u, length %u; "
-               "start at frame %u (skip %u)", t->rate, t->channels, total, t->delay, t->padding,
-               t->length, start, h->skip);
+    log_printf("mp4: %s %u Hz, %u ch, %u bits, %u packets of %u, delay %u, padding %u, length %u; "
+               "start at packet %u (skip %u)", alac ? "ALAC" : "AAC-LC", t->rate, t->channels, t->bits,
+               total, flen, t->delay, t->padding, t->length, start, h->skip);
     return MP4_OK;
 }

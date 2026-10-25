@@ -5,13 +5,15 @@
 #include <stdint.h>
 #include "fat.h"
 
-enum { MP4_OK, MP4_EFORMAT = -1, MP4_EREAD = -2, MP4_EALAC = -3, MP4_EUNSUPPORTED = -4 };
+enum { MP4_OK, MP4_EFORMAT = -1, MP4_EREAD = -2, MP4_EUNSUPPORTED = -4 };
 
 struct mp4_track {
-    uint32_t rate, channels;
+    uint32_t codec;                     /* HP_CODEC_AAC or HP_CODEC_ALAC: the core B image */
+    uint32_t rate, channels, bits;
+    uint32_t frame_len;                 /* frames per packet: 1024 (AAC), 4096 (ALAC usually) */
     uint32_t length;                    /* frames once the delay and padding are removed */
     uint32_t delay, padding;            /* encoder delay and padding, frames */
-    uint32_t samples;                   /* AAC frames in the track */
+    uint32_t samples;                   /* packets in the track */
 };
 
 /* Reads the container of f and prepares the packet stream from seek_ms (0: the start) */

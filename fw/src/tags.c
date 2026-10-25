@@ -675,6 +675,6 @@ void tags_read(const struct fat_file *f, uint32_t codec, struct tags *t)
         wav(t);
     else if (codec == HP_CODEC_AIFF)
         aiff(t);
-    else if (codec == HP_CODEC_AAC)
+    else if (codec == HP_CODEC_AAC || codec == HP_CODEC_ALAC)
         mp4(t);
 }

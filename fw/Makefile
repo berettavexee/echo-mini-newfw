@@ -138,9 +138,33 @@ build/hifi_aac.elf: hifi/rt.c hifi/codec_aac.c hifi/rt.h hifi/link.ld src/hifi_p
 	  $(HLDFLAGS) -Wl,-Map=build/hifi_aac.map -o $@
 	$(CROSS)size $@
 
-build/codecs.bin: build/hifi_pcm.elf build/hifi_flac.elf build/hifi_mp3.elf build/hifi_vorbis.elf build/hifi_opus.elf build/hifi_aac.elf tools/mkpack.py
+# ALAC: Apple's reference decoder (third_party/alac, unmodified, Apache-2.0); the glue is C++
+ALAC_DIR ?= ../third_party/alac/codec
+ALAC_SRCS := ALACDecoder.cpp ALACBitUtilities.c EndianPortable.c ag_dec.c dp_dec.c matrix_dec.c
+ALAC_OBJS := $(patsubst %,build/alac/%.o,$(basename $(ALAC_SRCS)))
+ALAC_FLAGS = -mcpu=cortex-m3 -mthumb -O2 -g -ffreestanding -nostdlib -ffunction-sections \
+             -fdata-sections -w -DTARGET_RT_LITTLE_ENDIAN=1 -I$(ALAC_DIR)
+
+build/alac/%.o: $(ALAC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(ALAC_FLAGS) -c $< -o $@
+
+build/alac/%.o: $(ALAC_DIR)/%.cpp hifi/alac_alloc.h
+	@mkdir -p $(dir $@)
+	$(CROSS)g++ $(ALAC_FLAGS) -fno-exceptions -fno-rtti -include hifi/alac_alloc.h -c $< -o $@
+
+build/alac/codec_alac.o: hifi/codec_alac.cpp hifi/rt.h src/hifi_proto.h
+	@mkdir -p $(dir $@)
+	$(CROSS)g++ $(ALAC_FLAGS) -fno-exceptions -fno-rtti -fno-threadsafe-statics -Wall -c $< -o $@
+
+build/hifi_alac.elf: hifi/rt.c hifi/rt.h hifi/link.ld src/hifi_proto.h build/alac/codec_alac.o $(ALAC_OBJS)
+	$(CC) $(HCFLAGS) hifi/rt.c build/alac/codec_alac.o $(ALAC_OBJS) \
+	  $(HLDFLAGS) -Wl,-Map=build/hifi_alac.map -o $@
+	$(CROSS)size $@
+
+build/codecs.bin: build/hifi_pcm.elf build/hifi_flac.elf build/hifi_mp3.elf build/hifi_vorbis.elf build/hifi_opus.elf build/hifi_aac.elf build/hifi_alac.elf tools/mkpack.py
 	python3 tools/mkpack.py $@ 1:build/hifi_pcm.elf 2:build/hifi_flac.elf 3:build/hifi_mp3.elf \
-	  4:build/hifi_vorbis.elf 5:build/hifi_opus.elf 7:build/hifi_aac.elf
+	  4:build/hifi_vorbis.elf 5:build/hifi_opus.elf 7:build/hifi_aac.elf 8:build/hifi_alac.elf
 
 $(OUT): build/fw.elf build/codecs.bin build/font.bin tools/mkimg.py
 	python3 tools/mkimg.py build/fw.elf $@ --pack build/codecs.bin --font build/font.bin

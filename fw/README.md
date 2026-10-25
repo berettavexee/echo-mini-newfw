@@ -53,6 +53,7 @@ core's RAM when a track needs it; the protocol with core A is `src/hifi_proto.h`
 | `codec_vorbis.c` | Ogg Vorbis | Tremor lowmem (BSD) |
 | `codec_opus.c` | Opus | libopus 1.5.2 (BSD) |
 | `codec_aac.c` | AAC-LC (from M4A, read by `src/mp4.c`) | PacketVideo `aacdec` (AOSP, Apache-2.0), without AAC+ |
+| `codec_alac.cpp` | ALAC (from M4A, read by `src/mp4.c`) | Apple's reference decoder (Apache-2.0) |
 
 ## Test in emulation
 

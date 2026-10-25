@@ -88,10 +88,10 @@ struct hp_ctl {
  * code (loaded at HIGHRAM0), then data (loaded at data_addr). */
 #define HP_PACK_MAGIC 0x50434e4eu       /* "NNCP" */
 /* HP_CODEC_AIFF: core A's own (file type, tags, screen); core B runs the HP_CODEC_WAV image for
- * it, which reads both containers (hifi/codec_pcm.c). HP_CODEC_AAC: AAC-LC in MP4, fed by core A
- * as a packet stream (below). */
+ * it, which reads both containers (hifi/codec_pcm.c). HP_CODEC_AAC and HP_CODEC_ALAC: in MP4, fed
+ * by core A as a packet stream (below); the browser gives AAC to every M4A, the container says. */
 enum hp_codec { HP_CODEC_WAV = 1, HP_CODEC_FLAC, HP_CODEC_MP3, HP_CODEC_VORBIS, HP_CODEC_OPUS,
-                HP_CODEC_AIFF, HP_CODEC_AAC };
+                HP_CODEC_AIFF, HP_CODEC_AAC, HP_CODEC_ALAC };
 
 /* Packet stream (MP4 audio, ETUDE §55): core A reads the container and its tables and writes
  * into the input ring this header, the decoder configuration (AAC: the AudioSpecificConfig),

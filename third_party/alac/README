@@ -1,0 +1,3 @@
+Apple Lossless (ALAC) reference decoder, from https://github.com/macosforge/alac (commit
+c38887c, 2016-05-11), the decoder files of codec/ only, unmodified. Apache License 2.0 (see
+LICENSE and codec/APPLE_LICENSE.txt). Core B glue: fw/hifi/codec_alac.cpp. ETUDE §56.

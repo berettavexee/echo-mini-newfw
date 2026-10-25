@@ -502,16 +502,18 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     ps.ur0 = audio.ring_ur;
     ps.lost0 = audio.ring_lost;
     log_printf("player: %s, %u bytes, our codec %u", f->name, f->size, codec);
-    mp4_on = codec == HP_CODEC_AAC;
+    mp4_on = codec == HP_CODEC_AAC || codec == HP_CODEC_ALAC;
     if (mp4_on) {                               /* the container read here, the seek done here */
         struct mp4_track t;
         r = mp4_open(file, seek, &t);         /* own_file: f may be the caller's copy */
         if (r)
             return fail(r == MP4_EREAD ? HIFI_EREAD : r == MP4_EFORMAT ? HIFI_EPROTO : HIFI_EIMG,
-                        r == MP4_EALAC ? "ALAC: not played yet" : r == MP4_EUNSUPPORTED ?
-                        "MP4: not AAC-LC" : "MP4: container not readable");
+                        r == MP4_EUNSUPPORTED ? "MP4: neither AAC-LC nor ALAC as we play them" :
+                        "MP4: container not readable");
         seek = 0;
+        codec = t.codec;                        /* an M4A: AAC or ALAC, the container says */
     }
+    player.codec = codec;
     gov_start();                                /* automatic: top level for the load and open */
     uint32_t img = codec == HP_CODEC_AIFF ? HP_CODEC_WAV : codec;  /* one image for PCM */
     if (hifi_own_loaded() == img && !hifi_restart_own())

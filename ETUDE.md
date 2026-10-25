@@ -2968,3 +2968,39 @@ Image `work/NEWFW075.IMG`, CRC `0xad161731`. Pour l'appareil : `work/aac_test/` 
 - **ALAC** : refusé, « Cannot play … no codec for it in the firmware ».
 - **Fichiers abîmés** (lecture aléatoire de `test_damanged_files/`, 62 fichiers) : `H_`, `RR_`, `ZZ_` et `T_CHC.M4A` refusés ; `M_`, `R_`, `Z_` lus en entier ; `T_CHB.AIFF` s'arrête à la coupure.
 - **Défaut de journal relevé** (pas propre à l'AAC) : après trois ouvertures refusées de suite (`ZZ_ZEROS.MP3` deux fois, 1,15 s chacune, et `H_CHB.AIFF`), la fin de la piste précédente avait fini de jouer. La ligne « queued behind 24346666 ms of the last track » affiche alors une durée négative lue comme non signée, et la piste suivante compte un manque de 217 Ko : le blanc réel pendant les refus. À corriger dans le calcul de `tail` (considérer la fin comme jouée quand `tail.end` est dépassé).
+
+## 56. ALAC en M4A (0.76, 2026-10-25)
+
+Choix validés : le décodeur de référence d'Apple, sur le lecteur MP4 et le flux de paquets de la 0.75, en logiciel (le firmware d'origine passait par le prédicteur matériel HIFIACC, comme pour son FLAC).
+
+**Cœur B** (`fw/hifi/codec_alac.cpp`, image `HP_CODEC_ALAC` = 8) : décodeur d'Apple (`third_party/alac`, dépôt macosforge, commit `c38887c`, Apache-2.0, fichiers de décodage non modifiés), compilé en C++ sans exceptions ni RTTI, avec `TARGET_RT_LITTLE_ENDIAN=1` (sans cette option, le code d'Apple prend l'ARM pour une machine gros-boutiste). 9 Ko de code seulement. Ses `calloc` passent par le tas du runtime (`rt_alloc`, libéré en bloc à l'ouverture suivante) ; l'objet `ALACDecoder` est construit par placement (aucun constructeur global n'est appelé au démarrage du cœur B). Mémoire pour des paquets de 4096 trames : environ 48 Ko pour le décodeur, plus un paquet (`maxFrameBytes` de la configuration) et sa sortie.
+- 16 bits : trames de 16 bits empaquetées (stéréo copiée telle quelle) ; 20 et 24 bits : trames de 32 bits, données en haut ; mono dupliqué.
+- **Défaut trouvé dans l'émulateur et corrigé** : 4096 trames de 24 bits occupent 32 Kio, toute la taille de l'anneau de sortie, qui ne peut jamais être plein : le cœur B attendait sans fin. La sortie s'écrit désormais par morceaux, à mesure que la place se libère.
+- Un paquet illisible donne un paquet de silence (la durée est gardée).
+
+**Cœur A** (`mp4.c`) : l'entrée `alac` est lue (la boîte `alac` qu'elle contient : version, puis l'ALACSpecificConfig de 24 octets, envoyé tel quel au cœur B) ; 16, 20 ou 24 bits, mono ou stéréo, sinon refus. Taille de paquet lue dans la configuration (4096 en général). Pas d'amorce : la longueur est la somme des durées de `stts` (le dernier paquet est plus court). Les paquets sont indépendants : un déplacement repart du paquet de la cible, sans pré-décodage. Le navigateur donne « AAC » à tout M4A ; c'est le conteneur qui décide, et la file d'attente retient ensuite le vrai codec (« ALAC » à l'écran, tags lus de la même façon).
+
+**Essais dans l'émulateur** (FLAC de la bibliothèque beets, Pink Floyd « Echoes », convertis par ffmpeg) :
+- 16 bits 44,1 kHz, 20 s : sortie **identique au bit près** au décodage de ffmpeg, y compris après un déplacement de 4 s à 12,6 s (premier échantillon exactement à la cible) ;
+- 24 bits / 96 kHz (rééchantillonné) et mono 16 bits : **identiques au bit près** ;
+- tags et ReplayGain (écrits avec mutagen comme le fait beets : `----:com.apple.iTunes:replaygain_*`) lus sur un fichier entier ;
+- fichiers abîmés : milieu aléatoire et aléatoire ajouté → lus jusqu'au bout sans faute ; tronqué (`moov` en fin) → refusé ;
+- pas de régression de l'AAC (76,7 dB, comme en 0.75).
+- Remarque : ffmpeg avec `-movflags use_metadata_tags` écrit les tags au format QuickTime « mdta » (clés numérotées), qui n'est ni celui d'iTunes ni celui de beets ; ces fichiers n'affichent pas de tags.
+
+Image `work/NEWFW076.IMG`, CRC `0x712826f0`. Pour l'appareil : `work/alac_test/` (quatre pistes enchaînées de « Echoes » en ALAC 16 bits, dont le passage sans blanc entre « The Happiest Days of Our Lives » et « Another Brick in the Wall (Part 2) », une piste en 24/96, une en mono, `CHE.M4A` pour `damage.py`). À mesurer : la charge du cœur B.
+
+**Essai sur l'appareil de la 0.76** (journal `work/hwlog_1025_076/`, 2026-10-25 à partir de 17:40) : **aucune faute**, démarrage à 200 MHz.
+
+| Contenu | Charge moyenne du cœur B | Palier principal |
+|---|---|---|
+| ALAC 16 bits 44,1 kHz stéréo (« Echoes », pistes 01 à 04) | **40 à 42 MHz** | 57 MHz |
+| ALAC 16 bits mono (« Money ») | 23 à 28 MHz | 50 MHz |
+| ALAC 24 bits / 96 kHz (« The Great Gig in the Sky », rééchantillonné) | **108 à 110 MHz** | 200 MHz en permanence |
+| pour mémoire : FLAC 16 bits (§52), AAC 125 kb/s (§55) | 15 MHz, 25 MHz | 50 MHz |
+
+- **Enchaînement sans blanc** des pistes 01 à 04 (dont 03 → 04, enchaînées dans le disque) : le DAC est gardé, l'anneau plein au changement, 0 manque.
+- Tags et ReplayGain lus ; « ALAC » à l'écran.
+- Déplacements : un seul blanc de 2 à 2,5 Ko en mono, de 44 Ko (~0,1 s) en 24/96.
+- Fichiers abîmés (`CHE.M4A` et ses variantes, au milieu de la série complète) : comme dans l'émulateur.
+- **Le décodeur d'Apple est lent** : 40 MHz pour de l'ALAC 16 bits, presque trois fois notre FLAC (15 MHz) pour un travail comparable, et le 24/96 tient le cœur B à 200 MHz. C'est son code de référence en C portable (décodage de Rice bit par bit, `dyn_decomp`, et prédicteur générique), sans aucune optimisation pour l'ARM. Il tient, sans manque, mais coûte de l'autonomie : une optimisation (ou le prédicteur matériel HIFIACC, comme le firmware d'origine) serait à étudier.

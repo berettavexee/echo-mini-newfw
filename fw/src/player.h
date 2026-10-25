@@ -10,6 +10,7 @@ struct player_state {
     int error;
     uint32_t rate, channels, bps, length_ms, time_ms;
     uint32_t frames, reads, read_bytes;
+    uint32_t codec;             /* the core B codec of the track (M4A: AAC or ALAC, from its content) */
     /* our codecs: core B in the last 250 ms window (step 5g) */
     uint32_t b_load;            /* per mille of the time awake */
     uint32_t b_mhz10;           /* tenths of MHz used */

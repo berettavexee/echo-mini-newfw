@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-25, version 0.75.
+Last update: 2026-10-25, version 0.76.
 
 ## Done, validated on the device
 
@@ -26,6 +26,7 @@ Last update: 2026-10-25, version 0.75.
 | Firmware installer from the main menu | 0.1x | §11 |
 | AIFF and AIFF-C (uncompressed), in the WAV image; tags after the samples read in WAV and AIFF | 0.74 | §53 |
 | AAC-LC in M4A: PacketVideo decoder, MP4 read on core A, gapless, exact seek, iTunes tags and ReplayGain | 0.75 | §54-§55 |
+| ALAC in M4A (16, 20, 24 bits): Apple's reference decoder, on the same MP4 reader | 0.76 | §56 |
 
 ## Done, waiting for a test on the device
 
@@ -80,6 +81,11 @@ Last update: 2026-10-25, version 0.75.
   (iTunSMPB, edit list), exact seek, iTunes tags and ReplayGain (§55). Checked in the emulator
   against ffmpeg. Validated on the device: an iTunes album gapless, seeks, tags, ALAC refused,
   damaged files; core B at 25 MHz for AAC 125 kb/s (lowest level), 16 MHz for AIFF 24/96.
+- 0.76: ALAC in M4A (16, 20 or 24 bits, mono or stereo): Apple's reference decoder on core B,
+  on the MP4 reader and packet stream of 0.75; exact seek (packets are independent), tags and
+  ReplayGain (§56). Bit-exact against ffmpeg in the emulator (16-bit, 24/96, mono, after a
+  seek). Validated on the device (Pink Floyd tracks converted from FLAC): gapless, tags, seeks,
+  damaged files; core B at 41 MHz for 16-bit stereo, 108 MHz (200 MHz level) for 24/96.
 
 ## To do
 
@@ -87,7 +93,7 @@ New formats, in this order (agreed 2026-10-24):
 
 1. ~~AIFF~~: done in 0.74.
 2. ~~AAC~~ in M4A: done in 0.75 (AAC-LC; HE-AAC not played).
-3. **ALAC** in M4A: Apple's reference decoder (Apache-2.0), on the MP4 reader of step 2.
+3. ~~ALAC~~ in M4A: done in 0.76.
 
 Other items:
 
@@ -171,6 +177,9 @@ Other items:
 - A spoken "battery low" instead of the beeps: a short recording in the image (15-30 KiB), made
   with a speech synthesiser whose licence lets us ship the sound.
 
+- ALAC: a faster decoder path. Apple's reference C decoder costs 41 MHz on 16-bit stereo (FLAC:
+  15 MHz) and keeps core B at 200 MHz on 24/96 (§56): its Rice decoding (dyn_decomp) and its
+  predictor, or the hardware LPC of the HIFIACC as the stock firmware does.
 - AAC: assembly optimisations, not a priority (core B already at 25 MHz, the lowest level, for
   AAC 125 kb/s, §55): a Cortex-M3 header for the fixed-point operations (smull/smlal; the
   decoder's ARMv5TE variant uses DSP instructions the M3 lacks), then hand-written Thumb-2 for
@@ -183,8 +192,8 @@ Other items:
 ## Known limitations
 
 - A track shorter than 1.1 s is not shown on the play screen (the DAC ring holds 1.1 s).
-- ALAC in M4A is not supported yet (see "To do"); nor HE-AAC (SBR, parametric stereo), AAC in
-  ADTS (`.aac`), or multichannel AAC.
+- HE-AAC (SBR, parametric stereo), AAC in ADTS (`.aac`), multichannel AAC and ALAC, and 32-bit
+  ALAC are not played.
 - Floating-point WAV and AIFF-C (core B has no FPU), and compressed AIFF-C (u-law, A-law) are not
   played.
 - Files of 4 GiB or more are not listed.

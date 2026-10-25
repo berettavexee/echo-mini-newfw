@@ -11,7 +11,7 @@ A from-scratch firmware for the main core of the SNOWSKY ECHO MINI digital audio
 by studying the official firmware V3.9.0; no code of it, of the Rockchip SDK, of ReChord or
 of RECHO is included.
 
-Status (version 0.75): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus and AAC (M4A), gapless, with
+Status (version 0.76): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A), gapless, with
 non-blocking sample-rate changes; folder browser with long names (FAT32 internal memory,
 FAT32 or exFAT microSD card); resume, ReplayGain (album / track / off), seek on the bar,
 play modes, real-time clock, USB mass storage of the internal memory, power saving in
@@ -30,7 +30,7 @@ pause, low-battery warning and power off, charging screen. No equaliser.
 | `fw/hifi/` | HiFi-core runtime and codec glue |
 | `fw/tools/` | image builder, emulator (`emu_fw.py`, Unicorn), test disk and exFAT image builders, log reader |
 | `fw/font/` | Fusion Pixel 12 px (SIL OFL 1.1) |
-| `third_party/` | libopus 1.5.2 (decoder-only variant), Tremor lowmem (patched), AOSP pvmp3dec and pvaacdec |
+| `third_party/` | libopus 1.5.2 (decoder-only variant), Tremor lowmem (patched), AOSP pvmp3dec and pvaacdec, Apple ALAC decoder |
 | `tools/` | reverse-engineering helpers used for the study (they expect the stock image and `re/rknanofw.py` next to this tree) |
 
 ## Build
@@ -54,4 +54,4 @@ This project is independent from both and shares no code with them (but I will b
 
 Our code: see the headers. Third-party code keeps its license: libopus (BSD, `third_party/opus/COPYING`),
 Tremor (BSD, `third_party/tremor-lowmem/COPYING`), pvmp3dec (Apache-2.0,
-`third_party/pvmp3dec/NOTICE`, `third_party/pvaacdec/NOTICE`), dr_flac (public domain / MIT-0), Fusion Pixel font (SIL OFL 1.1).
+`third_party/pvmp3dec/NOTICE`, `third_party/pvaacdec/NOTICE`), Apple ALAC decoder (Apache-2.0, `third_party/alac/LICENSE`), dr_flac (public domain / MIT-0), Fusion Pixel font (SIL OFL 1.1).
