@@ -8,9 +8,6 @@
 /* ---- the loop ---- */
 enum { SCR_BROWSER, SCR_PLAYING };
 
-#ifndef SCREEN_TIMEOUT_US
-#define SCREEN_TIMEOUT_US 30000000u          /* screen off after 30 s without a key */
-#endif
 #ifndef PARK_MS
 #define PARK_MS     60000u                      /* a pause this long: the track is parked */
 #endif

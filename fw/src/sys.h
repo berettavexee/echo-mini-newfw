@@ -12,6 +12,10 @@
 #define TITLE RGB(255, 200, 0)
 #define WARN  RGB(255, 80, 60)
 
+#ifndef SCREEN_TIMEOUT_US
+#define SCREEN_TIMEOUT_US 30000000u     /* screen off after 30 s without a key */
+#endif
+
 char *put_str(char *p, const char *s);
 char *put_dec(char *p, uint32_t v);
 char *put_hex(char *p, uint32_t v, int digits);
@@ -25,5 +29,11 @@ void sys_usb(int writable);     /* USB mass storage until ejected */
 void sys_install(void);         /* firmware installer */
 void sys_screen(void);          /* the diagnostic screen, until a key */
 void sys_loader_usb(void);      /* reboot into the loader's USB mode */
+
+/* Charging screen (charge.c): at boot, when the USB cable switched the player on (returns at
+ * once otherwise, or for the normal start), or after Power held with the cable in (never
+ * returns: restart or off) */
+void charge_screen(int at_boot);
+extern int sys_power_mine;      /* the charging screen reads Power itself (not sys_idle) */
 
 #endif

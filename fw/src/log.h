@@ -27,6 +27,9 @@ struct log_state {
 extern struct log_state logs;
 
 void log_init(void);            /* at boot, before anything is logged */
+/* A word for the next boot, kept in PMU-SRAM across a reset; taken (and cleared) once */
+void log_boot_note(uint32_t v);
+uint32_t log_boot_note_take(void);
 void log_printf(const char *fmt, ...);   /* %s %c %d %u %x, width, 0 flag */
 int log_attach(void);           /* finds the file (after the volume is mounted) */
 void log_detach(void);          /* writes what is pending, then stops writing (USB mode) */

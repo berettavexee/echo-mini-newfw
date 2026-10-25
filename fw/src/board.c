@@ -130,7 +130,7 @@ int clock_init(void)
             return 0;
     pll_con1 = REG(CRU_PLL_CON1);
 
-    REG(GRF_INTER_CON0) = 0x30403040;
+    REG(GRF_INTER_CON0) = 0xf0403040;           /* bits 14/15: core B RAMs without wait (§51) */
     /* The stock firmware and RECHO both wait a little after each divider change. Without the
      * waits, 0.1 to 0.5 read MODE_CON back as 0: the core stayed on the crystal, at 24 / 2. */
     REG(CRU_CLKSEL0) = 0xffff1001;              /* core / 2, HiFi core / 2 */
@@ -329,6 +329,20 @@ int charging(void)
 unsigned battery_mv(void)
 {
     return adc_read(0) * 5000 / 1024;
+}
+
+/* Charge in %, a generic Li-ion curve on the voltage (to be measured on the device) */
+unsigned battery_pct(unsigned v)
+{
+    static const uint16_t mv[] = { 3300, 3600, 3700, 3780, 3850, 3920, 4000, 4080, 4160 };
+    static const uint8_t pc[] = { 0, 8, 20, 35, 50, 65, 80, 92, 100 };
+    if (v >= mv[8])
+        return 100;
+    for (int i = 1; i < 9; i++)
+        if (v < mv[i])
+            return v <= mv[i - 1] ? pc[i - 1] :
+                   pc[i - 1] + (v - mv[i - 1]) * (pc[i] - pc[i - 1]) / (mv[i] - mv[i - 1]);
+    return 0;
 }
 
 /* ---- reset and power ---- */

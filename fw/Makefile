@@ -11,7 +11,7 @@ CFLAGS = -mcpu=cortex-m3 -mthumb -Os -g -ffreestanding -fno-builtin -nostdlib \
          -ffunction-sections -fdata-sections -Wall -Wextra -Isrc $(EXTRA)
 LDFLAGS = -T link.ld -Wl,--gc-sections -Wl,-Map=build/fw.map -nostdlib -lgcc
 
-SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/resume.c src/uidraw.c src/main.c src/font.c src/rtc.c build/font_ascii.c
+SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/resume.c src/uidraw.c src/main.c src/charge.c src/font.c src/rtc.c build/font_ascii.c
 OBJS = $(patsubst %.c,build/%.o,$(notdir $(SRCS)))
 
 all: $(OUT)
@@ -89,8 +89,10 @@ build/hifi_vorbis.elf: hifi/rt.c hifi/heap.c hifi/oggpage.c hifi/codec_vorbis.c 
 	  hifi/codec_vorbis.c $(TREMOR_OBJS) $(HLDFLAGS) -Wl,-Map=build/hifi_vorbis.map -o $@
 	$(CROSS)size $@
 
-# MP3: PacketVideo decoder of AOSP (third_party/pvmp3dec, unmodified, Apache-2.0), portable C
-# (the AOSP ARM assembly is ARM mode, not Thumb-2), compiled as C++ without exceptions or RTTI
+# MP3: PacketVideo decoder of AOSP (third_party/pvmp3dec, unmodified, Apache-2.0), compiled as C++
+# without exceptions or RTTI. PV_ARM_GCC_V5: its ARM fixed-point operations, and its assembly for
+# the polyphase window, the 18-point MDCT and the DCTs (ETUDE §49), ported to Thumb-2 in
+# hifi/mp3asm (the AOSP files are ARM mode)
 PVMP3_DIR ?= ../third_party/pvmp3dec
 PVMP3_SRCS := pvmp3_normalize pvmp3_alias_reduction pvmp3_crc pvmp3_decode_header pvmp3_decode_huff_cw \
               pvmp3_getbits pvmp3_dequantize_sample pvmp3_framedecoder pvmp3_get_main_data_size \
@@ -99,10 +101,15 @@ PVMP3_SRCS := pvmp3_normalize pvmp3_alias_reduction pvmp3_crc pvmp3_decode_heade
               pvmp3_huffman_parsing pvmp3_tables pvmp3_imdct_synth pvmp3_mdct_6 pvmp3_dct_6 \
               pvmp3_poly_phase_synthesis pvmp3_equalizer pvmp3_seek_synch pvmp3_stereo_proc \
               pvmp3_reorder pvmp3_polyphase_filter_window pvmp3_mdct_18 pvmp3_dct_9 pvmp3_dct_16
-PVMP3_OBJS := $(patsubst %,build/pvmp3/%.o,$(PVMP3_SRCS))
+PVMP3_ASM := pvmp3_polyphase_filter_window pvmp3_mdct_18 pvmp3_dct_9 pvmp3_dct_16
+PVMP3_OBJS := $(patsubst %,build/pvmp3/%.o,$(PVMP3_SRCS)) $(patsubst %,build/pvmp3/%_thumb.o,$(PVMP3_ASM))
 PVMP3_CFLAGS = -mcpu=cortex-m3 -mthumb -O2 -g -ffreestanding -nostdlib -fno-exceptions -fno-rtti \
-               -ffunction-sections -fdata-sections -w "-DOSCL_UNUSED_ARG(x)=(void)(x)" \
+               -ffunction-sections -fdata-sections -w "-DOSCL_UNUSED_ARG(x)=(void)(x)" -DPV_ARM_GCC_V5 \
                -I$(PVMP3_DIR)/include -I$(PVMP3_DIR)/src
+
+build/pvmp3/%_thumb.o: hifi/mp3asm/%_thumb.S
+	@mkdir -p $(dir $@)
+	$(CC) -mcpu=cortex-m3 -mthumb -Wa,-mimplicit-it=always -c $< -o $@
 
 build/pvmp3/%.o: $(PVMP3_DIR)/src/%.cpp
 	@mkdir -p $(dir $@)

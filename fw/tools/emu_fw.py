@@ -534,6 +534,8 @@ def main():
         print(l)
     print(f"-- stopped at pc {u.reg_read(UC_ARM_REG_PC):#x}, simulated time {ms} ms, "
           f"{len(panel.cmds)} panel commands")
+    print(f"-- GPIO2 out {struct.unpack('<I', u.mem_read(0x50030000, 4))[0]:#010x} "
+          f"(bit 6 power hold, bit 4 backlight)")
     if "--trace-lcd" in sys.argv:
         for c, args in panel.cmds:
             print(f"  {c:02x} " + " ".join(f"{x:02x}" if isinstance(x, int) else x for x in args))

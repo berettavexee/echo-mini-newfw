@@ -44,15 +44,12 @@ void hifi_power(void)
     REG(CRU_SOFTRST(0)) = 0x80000000;
     REG(B2A_STATUS) = 0xf;
     REG(B2A_INTEN) = 0xf;
-    /* Core B at PLL / 4 (100 MHz; the stock MP3 module needs about 31) and the multi-cycle
-     * access of its two RAMs on (GRF inter_con0 bits 14 caliram, 15 caldram): with core B at
-     * PLL / 2 and single-cycle access, 0.20-0.22 saw core B hang after a file read and core A
-     * take imprecise bus faults writing into HIGHRAM1, at random (ETUDE §18.2) */
-    REG(GRF_INTER_CON0) = 0xc000c000;
-    hifi_set_div(hifi_div);                     /* 100 MHz, or what the player set already */
+    /* Core B at PLL / 4 (100 MHz; the stock MP3 module needs about 31), or what the player set
+     * already */
+    hifi_set_div(hifi_div);
     udelay(5);
     powered = 1;
-    log_printf("hifi: PD_HIGH on, core B in reset, %u MHz, HIGHRAM multi-cycle", hifi_hz / 1000000);
+    log_printf("hifi: PD_HIGH on, core B in reset, %u MHz", hifi_hz / 1000000);
 }
 
 void hifi_prepare(void)
@@ -219,7 +216,10 @@ uint32_t hifi_own_forget(void)
 }
 
 /* Core B clock = PLL (400 MHz) / div, 1 <= div <= 8 (cal_core_div, CLKSEL0 bits 14:12), changed
- * on the fly; the multi-cycle HIGHRAM access stays on (ETUDE §24) */
+ * on the fly (ETUDE §24). Core B's two RAMs run without their wait state at every level (GRF
+ * inter_con0 bits 14 caliram = HIGHRAM0, 15 caldram = HIGHRAM1, cleared by clock_init and
+ * clock_slow; the stock firmware sets it only from 300 MHz): about 22 % less load. Switching
+ * that wait state while core B runs gave its bus faults (0.72, ETUDE §51). */
 uint32_t hifi_div = 4;
 
 void hifi_set_div(uint32_t div)

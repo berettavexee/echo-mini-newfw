@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-24, version 0.67.
+Last update: 2026-10-25, version 0.73.
 
 ## Done, validated on the device
 
@@ -43,6 +43,30 @@ Last update: 2026-10-24, version 0.67.
   that does not open backwards, FLAC skips a damaged frame and stops at the STREAMINFO length,
   Vorbis stops at its last page, an input with no Ogg page in its first 64 KiB is refused at
   once (3 s before) (§46). Validated on the device with the test set, BACK included, and no regression on real FLAC and Ogg files (seek, gapless, large cover art).
+- 0.68: charging screen when the USB cable switches the player on, or Power is held with the
+  cable in: a battery bar, "Charging" / "Charged" from the charger, screen off after 30 s, any
+  key wakes it, PLAY or Power held starts the player, the cable out powers it off (§48).
+  Checked on the device, except the way in through Power held with the cable in.
+- 0.69: that way in fixed: the power hold and the backlight on again (power_off() had let them
+  go: black screen, and Power restarted the whole player) (§48). Validated on the device.
+- 0.70: MP3: the PacketVideo ARM assembly (polyphase window, 18-point MDCT, DCTs) ported to
+  Thumb-2: 8 % fewer instructions on the QEMU bench, same quality (within 1 LSB); the load on the
+  device is to be measured (§49).
+- 0.71: no 24 MHz fallback after an install started less than 5 s after boot (the installer loop
+  did not clear the 200 MHz attempt marker) (§50).
+- 0.72: the wait state of core B's RAMs (GRF inter_con0 bits 14/15) only above 100 MHz: about
+  22 % less load at 67 MHz in an A/B test (MP3 49.7 -> 38.8 MHz, Opus without underruns at
+  67 MHz) (§51). **Failed** the endurance test (NEWFWST1, 100 <-> 133 MHz every 250 ms, 8 h): 43
+  core B faults in 101 min of Vorbis, 1 in MP3, 1 in Opus. Not for use; 0.71 stays the reference.
+  Diagnostic images to tell the causes apart: NEWFWST2 (100 MHz fixed, no wait) and NEWFWST3
+  (100 <-> 133 MHz every 250 ms, wait always on).
+  Results: no fault at 100 MHz fixed without the wait (ST2), nor at 100 <-> 133 MHz with the wait
+  always on (ST3), nor at 133 <-> 200 MHz without the wait (ST4): only switching the wait state
+  while core B runs caused the faults.
+- 0.73: core B's RAMs without the wait state at every level (50-200 MHz, as the stock firmware
+  below 300 MHz), never switched; about 22 % less load; a core B fault also logs the clock (§52).
+  Checked on the device: no fault, MP3BENCH 38.9 MHz mean at 57 MHz (49.7 before), FLAC about
+  15 MHz at 50 MHz, Opus 52 MHz; the overnight battery measurement is still to do.
 
 ## To do
 
@@ -57,6 +81,7 @@ New formats, in this order (agreed 2026-10-24):
 
 Other items:
 
+- Overnight battery measurement on 0.73 (no RAM wait state), against the 70 mV/h of 0.61.
 - Actions on the plug events (to be proposed and agreed first):
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
@@ -110,8 +135,6 @@ Other items:
     the HiFi core), while our MP3 decoder (PacketVideo) does it all in software (about 50 MHz
     on average on the device); whether the stock FLAC module uses any hardware help is not
     known yet.
-- Charging while off: the cable turns the device on and it starts as usual (tested 0.67, §47);
-  a charging screen of its own (no music, screen off after a while) is possible, to be proposed.
 - Battery percentage: the curve is a generic Li-ion one, to be measured on the device. Overnight
   test (0.61, 2026-10-24): 6 h of MP3 320 kbps from the card, screen off, 4,184 to 3,710 mV (about
   70 mV/h after the first hour); about 9-10 h of playback estimated, a full discharge still to do.

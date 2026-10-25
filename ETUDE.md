@@ -2588,3 +2588,263 @@ Journal `work/hwlog_1024_067d/`. L'utilisateur confirme que tous les essais de l
 - **Carte retirée pendant la lecture d'une de ses pistes** (« Road to Burn ») : la lecture s'arrête aussitôt, sans blocage. Pendant la remise, le journal montre plusieurs `card removed` et `card inserted` toutes les 0,5 s, le temps que la carte soit bien en place. Ensuite, la carte est montée en 251 ms et la piste est relancée.
 - **Prise 3,5 mm** : branchements et débranchements journalisés (`jack 3.5 mm in` / `out`), sans effet sur la lecture. La prise 4,4 mm n'a pas été essayée.
 - **Câble USB branché sur l'appareil éteint** : l'appareil démarre normalement, avec reprise sur la carte, et se recharge. Il n'y a pas d'écran de charge à part. Le branchement du câble suffit à l'allumer.
+
+## 48. Écran de charge (0.68, 2026-10-25)
+**Constat** (§47) : brancher le câble USB sur l'appareil éteint suffit à l'allumer, et le firmware démarrait alors normalement, avec la reprise de la lecture.
+
+**Choix validés par l'utilisateur** : toutes les propositions, avec une seule durée d'extinction de l'écran, 30 s (`SCREEN_TIMEOUT_US`, déplacé de `ui.c` dans `sys.h`).
+- **Quand il apparaît** (`charge.c`) :
+  - au démarrage, si le câble est branché et que la touche Power n'est pas enfoncée, c'est le câble qui a allumé l'appareil. Le journal de démarrage note maintenant l'état de la touche (`power key`) ;
+  - après Power 2 s avec le câble branché, l'écran de charge remplace « power off: unplug the USB cable ». L'état de reprise est enregistré avant, comme pour une extinction, et la lecture ainsi que le cœur B sont arrêtés.
+- **L'écran** :
+  - une batterie de 10 segments, remplie selon la tension (courbe Li-ion commune avec la barre d'état, `battery_pct()` dans `board.c`, moyenne glissante), dont le dernier segment clignote pendant la charge ;
+  - dessous, « Charging NN % » tant que le chargeur tire sa broche au niveau bas, puis « Charged 100 % » ;
+  - une ligne d'aide : « PLAY or Power held: start ».
+
+  Le passage à « Charged » vient du chargeur et reste donc fiable. La tension, elle, est un peu gonflée pendant la charge (environ +40 mV).
+- **Touches** :
+  - un appui court sur n'importe quelle touche, Power comprise, rallume l'écran ;
+  - PLAY tenu (0,6 s) ou Power tenu (1 s) donne le démarrage normal.
+
+  Depuis Power 2 s, le démarrage normal passe par un redémarrage. Un mot gardé dans la mémoire PMU-SRAM (`log_boot_note()`, en-tête de l'anneau du journal, nouvelle signature « NLG2 ») évite alors de revenir sur l'écran de charge, PLAY pouvant déjà être relâché.
+- **Câble débranché** pendant 0,5 s : extinction.
+- **Écran éteint** au bout de 30 s : l'horloge passe sur le quartz, et `sys_screen_set(1)` remet la PLL.
+- **Journal** : `charge: screen (...)`, `charge: charged`, `charge: start (PLAY held)` ou `(Power held)`, `charge: power off (cable out)`.
+
+**Essais émulés** (variante `make EXTRA=-DSCREEN_TIMEOUT_US=5000000u` : écran éteint au bout de 5 s) :
+- **Allumage par le câble** :
+  - écran de charge à 80 % (captures) ;
+  - écran éteint à 6,0 s, rallumé par PLAY à 9,3 s ;
+  - broche du chargeur au niveau haut à 12 s : « Charged 100 % » ;
+  - PLAY tenu à 15,6 s : navigateur.
+- **Allumage par Power, câble branché** : démarrage normal.
+- **Power 2 s avec le câble branché** : `power off (Power 2 s)`, puis `still powered (USB)`, puis l'écran de charge ; PLAY tenu donne `charge: start`.
+
+L'émulateur ne modélise ni le redémarrage qui suit, ni le débranchement du câble : ces deux points sont à vérifier sur l'appareil.
+
+- **0.68** : `work/NEWFW068.IMG`, CRC `0x1c7438de`.
+
+**Essai sur l'appareil en 0.68** (journal `work/hwlog_1025_068/`) :
+- Fonctionnent :
+  - allumage par le câble (5 fois, `power key 0`) ;
+  - écran éteint au bout de 30 s, puis rallumé par PLAY ;
+  - « charged » à la fin de la charge ;
+  - depuis l'écran de charge ouvert au démarrage, PLAY tenu et Power tenu donnent le démarrage normal ;
+  - câble débranché : extinction en 0,4 s ;
+  - allumage par Power, câble branché (`power key 1`) : démarrage normal.
+- **Défaut, après Power 2 s avec le câble branché** : `power_off()` avait mis à 0 le rétroéclairage et le maintien d'alimentation (`PIN_POWER_HOLD`). L'écran restait noir, et `sys_screen_set(1)` ne le rallumait pas, puisqu'il le croyait allumé. Un appui sur Power relançait l'alimentation, d'où un redémarrage complet sans `charge: start`, puis, Power étant relâché, l'écran de charge comme après un allumage par le câble.
+
+**Correction (0.69, validée par l'utilisateur)** : à l'entrée de l'écran de charge par Power 2 s, `PIN_POWER_HOLD` est remis à 1 et le rétroéclairage rallumé. Le débranchement du câble repasse par `power_off()`. Dans l'émulateur, `emu_fw.py` affiche maintenant en fin de course la sortie de GPIO2 : `0x50` sur l'écran de charge, maintien et rétroéclairage à 1.
+
+**Essai sur l'appareil en 0.69** (journal `work/hwlog_1025_069b/`) : trois passages par Power 2 s avec le câble branché, tous corrects.
+- **Sortie par PLAY tenu** : redémarrage, puis démarrage normal avec `power key 0`. Le mot gardé en PMU-SRAM a bien évité l'écran de charge.
+- **Sortie par Power tenu** (deux fois) : redémarrage, puis démarrage normal.
+- **Allumage par le câble** : l'écran de charge apparaît, et Power tenu donne le démarrage normal.
+
+L'écran de charge est validé.
+
+- **0.69** : `work/NEWFW069.IMG`, CRC `0x0502d1d0`.
+
+## 49. MP3 : l'assembleur de PacketVideo en Thumb-2 (0.70, 2026-10-25)
+**Contexte** : notre décodeur MP3 (PacketVideo, en C) consomme environ 50 MHz du cœur B en 320 kb/s, contre environ 31 MHz pour le module d'origine, qui utilisait les accélérateurs IMDCT36 et SYNTH. L'évaluation de ces accélérateurs (registres non documentés, formats à déterminer sur l'appareil, gain modeste) a conduit à essayer d'abord l'optimisation en assembleur, à la demande de l'utilisateur.
+
+**Banc** : `re/mp3/bench/`, local, sur le même principe que les bancs Vorbis et Opus : QEMU `mps2-an385`, `-icount shift=0`, `PROF=1` pour un profil par fonction. Les fonctions `mem*` sont celles de `fw/hifi/rt.c` (`mkrtmem.sh`), pour que le profil corresponde au firmware. Les mesures portent sur 20 s d'un MP3 à 320 kb/s (`work/long/L.mp3`).
+
+**Profil de la version C** :
+
+| Fonction | Part |
+|---|---|
+| `pvmp3_polyphase_filter_window` | 31,1 % |
+| `pvmp3_mdct_18` | 12,5 % |
+| `pvmp3_dct_16` | 6,8 % |
+| `pvmp3_dct_9` | 6,3 % |
+| déquantification | 5,0 % |
+| décodage de Huffman et lecture des bits | environ 10 % |
+
+Les quatre premières fonctions font 57 % du temps, et l'AOSP fournit pour chacune une version en assembleur ARM (`third_party/pvmp3dec/src/asm/*_gcc.s`). Celles-ci sont en mode ARM, que le Cortex-M3 n'exécute pas. Elles n'utilisent cependant que des instructions de base et `smull` / `smlal`, sans DSP ni `smmul`.
+
+**Portage** (`fw/hifi/mp3asm/*_thumb.S`, Apache-2.0, en-tête conservé, changements décrits dans le fichier) :
+- syntaxe unifiée et fonctions Thumb ;
+- `mov rd, rm, lsl rs` devient `lsl rd, rm, rs`, le décalage par registre n'existant pas comme opérande en Thumb-2 ;
+- blocs IT ajoutés par l'assembleur (`-mimplicit-it=always`).
+
+Le calcul est inchangé. Le C est compilé avec `-DPV_ARM_GCC_V5`, qui retire les versions C de ces quatre fonctions et prend les opérations en virgule fixe ARM de PacketVideo. `third_party/` reste intact.
+
+**Résultats sur le banc** (millions d'instructions par seconde d'audio, 320 kb/s) :
+
+| Version | M instr/s | Écart avec la version C | Écart avec ffmpeg |
+|---|---|---|---|
+| C | 15,96 | — | 88,3 dB, 1 bit de poids faible au plus |
+| Thumb-2 | 14,69 (−8 %) | 87,1 dB, 1 bit au plus, 90,7 % d'échantillons identiques | **90,5 dB**, 1 bit au plus |
+
+En 128 kb/s, la version C fait 16,0 M instr/s.
+
+Le gain en instructions est faible. La synthèse polyphase approche son plancher : 16 multiplications-accumulations et deux chargements par échantillon de sortie, soit environ 4,2 M instr/s en stéréo à 44,1 kHz. GCC en `-O2` produisait déjà un code proche. Le gain en cycles peut toutefois différer, sur un cœur B qui fait environ 2,8 cycles par instruction (code en HIGHRAM, accès multi-cycles). Seule la mesure sur l'appareil le dira.
+
+**Émulateur** : le firmware complet décode `l320s` (25 s) sans erreur. La sortie du DAC est identique à celle du banc : 90,5 dB par rapport à ffmpeg, 1 bit au plus.
+
+**Pistes suivantes, selon la mesure** :
+- `memset` par mots dans `rt.c` (1,3 %) ;
+- l'égaliseur de PacketVideo, appelé même à plat (1,4 %) ;
+- l'accès mono-cycle à la HIGHRAM quand le cœur B tourne lentement : le réglage multi-cycles n'était nécessaire qu'à 200 MHz. Ce point concernerait tous les codecs, et c'est sans doute le gain le plus important, à vérifier.
+
+- **0.70** : `work/NEWFW070.IMG`, CRC `0xe33cf19b`.
+
+**Essai sur l'appareil en 0.70** (journal `work/hwlog_1025_070/`) : le son des MP3 est haché et inintelligible. Le cœur B ne fournit que 12 MHz environ, avec 96 coupures du DAC en 21 s, et le dessin de l'écran prend 20 ms au lieu de 4 ms. La cause n'est pas le codec : ce démarrage était en **repli à 24 MHz** (`clock: 24 MHz (fallback: 24 MHz)`), voir ci-dessous.
+
+**Essai sur l'appareil en 0.70, à 200 MHz** (après un redémarrage, journal `work/hwlog_1025_070b/`) : le son est normal. `MP3BENCH.MP3` (copie de `work/long/L.mp3`, 239 s, 320 kb/s) est joué en entier sans manque, avec une **charge moyenne de 49,7 MHz** et un palier de 67 MHz (232 s sur 239). Les albums MP3 en 320 kb/s de Daft Punk donnent 49,5 et 43,8 MHz.
+
+Ces valeurs ne se distinguent pas des mesures précédentes en C : environ 50 MHz (« 04 Within », 0.64), 51,4 MHz (TEST1.MP3, 0.36). Les 8 % d'instructions en moins ne se voient pas sur la charge réelle, qui reste dominée par les accès à la mémoire. Il manque toutefois une comparaison exacte, `MP3BENCH.MP3` n'ayant pas été joué en 0.69.
+
+## 50. Repli à 24 MHz après une installation rapide (0.71, 2026-10-25)
+**Constat** : la 0.69 a été démarrée, l'installeur ouvert 4,6 s plus tard, puis la 0.70 installée.
+- Le repère de la tentative à 200 MHz (PMU-SRAM, `clock_init`) n'est effacé qu'au bout de 5 s passées dans `sys_idle()`.
+- La boucle de l'installeur (`firmware_menu`) n'appelle que `wdt_kick()`, donc le repère était toujours posé au redémarrage qui suit l'installation.
+- Le démarrage suivant l'a pris pour un échec à 200 MHz et est resté sur le quartz.
+
+Le repli s'efface tout seul après 5 s, et le redémarrage suivant revient à 200 MHz. Le défaut existe depuis la 0.23. Il n'apparaît que si l'on installe moins de 5 s après le démarrage.
+
+**Correction validée par l'utilisateur** : `clock_fast_ok()` juste avant les deux redémarrages volontaires, après une installation réussie et en sortie de l'écran de charge ouvert par Power 2 s. Ces redémarrages prouvent que le fonctionnement à 200 MHz était stable. Le redémarrage qui suit une faute garde le repère, car c'est le cas que la sécurité doit couvrir.
+
+- **0.71** : `work/NEWFW071.IMG`, CRC `0xd38df64d`.
+
+## 51. Cycle d'attente des mémoires du cœur B : essai A/B (étape 1, 2026-10-25)
+**Le réglage** (TRM chap. 12 et `GRF_INTER_CON0`) : les SRAM internes répondent en un cycle jusqu'à environ 150 MHz. Au-delà, il faut activer « one more response cycle », par mémoire : bits 12 et 13 pour le cœur A ; 14 `caliram` (HIGHRAM0, code et tables des codecs) et 15 `caldram` (HIGHRAM1, données, pile, tampons) pour le cœur B. Le firmware d'origine ne les active qu'au-delà de 300 MHz. Nous les gardons actifs depuis la 0.23, à tous les paliers, pour corriger les fautes et les blocages des versions 0.20 à 0.22, quand le cœur B tournait à 200 MHz en un cycle (§18.2).
+
+**Pourquoi le revoir** : le MP3 en 320 kb/s fait 14,7 M instructions/s sur le banc, pour 49,7 MHz sur l'appareil, soit environ 3,4 cycles par instruction. Supprimer l'attente aux paliers ≤ 100 MHz pourrait réduire la charge de 25 à 35 % (estimation).
+
+**Proposition validée par l'utilisateur** :
+1. Une image de test A/B.
+2. Si elle est concluante, l'attente selon le palier : sans attente jusqu'à 100 MHz, avec attente à 133 et 200 MHz. On active l'attente avant de monter, et on la retire après être descendu ; le bit n'est basculé que pendant un sommeil du cœur B, et ce changement en marche passe un essai d'endurance.
+3. Une nuit de lecture pour mesurer l'autonomie.
+
+**Étape 1, image `make EXTRA=-DHIFI_WAIT_AB`** (`work/NEWFWAB1.IMG`, CRC `0xfe6073a2`, base 0.71) :
+- cœur B fixe à 67 MHz (`player_clock = 6`) ;
+- l'attente retirée pour une piste et remise pour la suivante, basculée seulement dans `hifi_start_own()`, cœur B en reset ;
+- journal : `hifi: HIGHRAM wait off|on (A/B test)` avant chaque piste, puis la ligne `clock:` de la piste.
+
+Dans l'émulateur, les pistes alternent `off`, puis `on`, à 66 MHz, palier fixe, sans manque. L'émulateur ne modélise pas les cycles de la mémoire : l'effet ne se mesure que sur l'appareil. La version normale reconstruite reste identique : CRC `0xd38df64d`.
+
+**Résultat de l'étape 1** (journal `work/hwlog_1025_ab1/`, 19 min de lecture, cœur B fixe à 67 MHz) :
+
+| Piste | Attente active | Sans attente | Écart |
+|---|---|---|---|
+| `MP3BENCH.MP3` (MP3 320 kb/s, 239 s entières, deux lectures de suite) | 49,7 MHz | **38,8 MHz**, 0 manque | **−22 %** |
+| `OPEN_aotuv.ogg` (Vorbis) | 61,3 MHz (76 s) | 47,2 MHz (30 s) | −23 % |
+| « 01 Human After All » / « 02 The Prime » (MP3) | 49,9 MHz (318 s) | 40,0 et 44,2 MHz (14 s chacune) | −11 à −20 % |
+| « Daft Punk » Discovery (Opus) | 65,4 MHz, **78 manques** (67 MHz trop lent) | **46,3 MHz, 0 manque** | |
+
+Les pistes courtes, sautées après quelques secondes, ne se comparent pas.
+
+Aucune faute, aucun « descriptor not taken », aucun dépassement de délai, aucune erreur dans tout l'essai. L'Opus, qui ne tenait pas à 67 MHz avec l'attente, y tient sans elle. Le gain, environ −22 %, entre dans la fourchette estimée.
+
+Les pistes sans attente ne totalisent qu'environ 6 min. L'endurance d'une heure reste à faire, sur l'image de l'étape 2.
+
+**Étape 2** (0.72, `work/NEWFW072.IMG`, CRC `0xcde23882`) : l'attente suit le palier dans `hifi_set_div()`.
+- Elle est retirée jusqu'à 100 MHz et activée à 133 et 200 MHz.
+- En montant, l'attente est activée avant le changement de fréquence ; en descendant, elle n'est retirée qu'après.
+- Le changement se fait pendant un sommeil du cœur B s'il en vient un dans les 2 ms, sinon tout de suite.
+- La ligne `clock:` de chaque piste compte les basculements, et ceux faits pendant que le cœur B travaillait.
+
+L'image d'endurance `make EXTRA=-DHIFI_WAIT_STRESS` (`work/NEWFWST1.IMG`, CRC `0x853f0941`) alterne 100 et 133 MHz toutes les 250 ms. Dans l'émulateur, les deux images décodent sans manque et donnent le même son, mais le régulateur n'y tourne pas (TIMER1 non modélisé) : le basculement en marche ne s'essaie que sur l'appareil.
+
+**Pourquoi l'attente à 133 et 200 MHz : une marge, pas une exigence.** Le TRM donne environ 150 MHz sans le cycle supplémentaire, et ne réclame ce cycle que vers 300 MHz. Le firmware d'origine ne l'active qu'à partir de 300 MHz de `hclk_cal`, donc il tourne en un cycle à 200 MHz. Notre seul argument est la 0.22 : blocages et fautes à 200 MHz en un cycle. Or la 0.23 a changé deux choses à la fois, le cœur B passé de 200 à 100 MHz et l'attente activée, et l'on ne sait pas laquelle a corrigé ces défauts.
+
+**Essais ajoutés au plan (validés par l'utilisateur)**, après une endurance propre de la 0.72 :
+- **Étape 2b, 133 MHz sans attente** (sous la limite du TRM) : le seuil passe à 133 MHz, puis un essai d'endurance alterne 100 et 133 MHz, et enfin 133 et 200 MHz pour éprouver le basculement autour du nouveau seuil.
+- **Étape 2c, 200 MHz sans attente** (comme le firmware d'origine) : une image A/B à 200 MHz fixes, comme l'étape 1, avec une longue lecture et des lectures de fichiers pendant le décodage.
+
+Si les deux passent, l'attente ne sert plus sur nos paliers, qui ne dépassent jamais 200 MHz, et on la retire partout.
+
+**Étape 3** : une nuit de lecture pour mesurer l'autonomie, sur la version retenue.
+
+**Résultat de l'endurance NEWFWST1** (journal `work/hwlog_1025_st1/`, 2026-10-25 de 02:10 à 10:23, 8 h 13, 177 pistes) : **échec**.
+
+| Codec | Lecture | Fautes du cœur B |
+|---|---|---|
+| WAV | 7,5 min | 0 |
+| FLAC | 2,4 min | 0 |
+| MP3 | 27 min | 1 |
+| Vorbis | 101 min | **43** (une toutes les 2 à 3 min) |
+| Opus | 259 min | 1 |
+
+- Aucun journal antérieur ne contient de `core B error` : ni les 0.6x (régulateur de 50 à 200 MHz, attente toujours active), ni l'essai A/B (67 MHz fixes).
+- Les fautes Vorbis sont des sauts vers des adresses fausses : `pc` dans le tas (`0x0102xxxx`), en `0xfffxxxxx` ou ailleurs, CFSR `0x20000` (INVSTATE) ou `0x1` (IACCVIOL). Dans la plupart, `lr` pointe dans `mdct_butterfly_generic` ou `presymmetry` (`mdct.c` de Tremor). Une donnée lue fausse en mémoire (adresse de retour, pointeur) en est l'explication la plus simple.
+- Chaque faute fait échouer la piste : un manque, puis la piste suivante.
+- Les 13 « open failed » tombent tous sur des fichiers abîmés de la base d'essai : c'est attendu.
+- La fin de la ligne `clock:` est coupée par le tampon de 200 octets de `log_printf()`. Le nombre de basculements faits pendant que le cœur B travaillait est donc perdu.
+
+L'essai ne sépare pas deux causes : 100 MHz sans attente, ou le basculement de l'attente pendant le décodage. Dans l'essai A/B, le Vorbis sans attente n'a tourné que 30 s : cela ne prouve rien. **La 0.72 ne doit pas servir à l'usage courant** ; la 0.71 reste la version de référence.
+
+**Diagnostic (validé par l'utilisateur)** : deux images pour séparer les causes, plus deux corrections du journal, qui valent pour toutes les images.
+- Le tampon de `log_printf()` passe à 256 octets : la ligne `clock:` tient en entier.
+- Une faute du cœur B ajoute le palier, l'état de l'attente et le temps écoulé depuis le dernier basculement (`hifi_wait_t`).
+- **NEWFWST2** (`make EXTRA=-DHIFI_WAIT_FIXED100`, CRC `0xe7231488`) : cœur B fixe à 100 MHz (`player_clock = 4`), sans attente et sans aucun basculement. Si elle faute, 100 MHz sans attente n'est pas sûr.
+- **NEWFWST3** (`make EXTRA="-DHIFI_WAIT_STRESS -DHIFI_WAIT_ALWAYS"`, CRC `0x88ecc15c`) : alternance de 100 et 133 MHz toutes les 250 ms comme la ST1, mais l'attente reste toujours active (`WAIT_DIV 9`). Si elle faute, c'est le changement de fréquence lui-même qui est en cause.
+- Si aucune des deux ne faute, la cause est le basculement de l'attente pendant le décodage.
+
+Dans l'émulateur, les deux images décodent `CH7.OGG` sans manque. La ST2 démarre à 100 MHz sans attente, la ST3 à 200 MHz avec. Chacune doit tourner environ 30 min en Vorbis seul sur l'appareil.
+
+**Résultat de la ST2** (journal `work/hwlog_1025_st2/`, 2026-10-25 à partir de 10:41, 20 min de Vorbis, Beast In Black, 6 pistes) : **aucune faute**, aucun manque.
+- Charge moyenne à 100 MHz sans attente : environ 48 MHz par piste, contre 53 à 62 MHz dans la ST1, où l'attente était active la moitié du temps.
+- Au taux de la ST1 (43 fautes en 101 min de Vorbis), on en attendait au moins 8 en 20 min. Si toutes venaient des moments sans attente, on en attendait environ 17. La probabilité de n'en voir aucune est négligeable.
+- Conclusion : 100 MHz sans attente, en régime stable, n'est pas en cause. Le suspect est le basculement en marche ; la ST3 dira si c'est celui de l'attente ou celui de la fréquence.
+
+**Résultat de la ST3** (journal `work/hwlog_1025_st3/`, 2026-10-25 à partir de 11:05, 16 min de Vorbis, 3 pistes) : **aucune faute**, aucun manque.
+- 3 972 changements de fréquence entre 100 et 133 MHz, l'attente toujours active, jamais basculée.
+- Au taux de la ST1, on attendait environ 7 fautes.
+
+**Conclusion des essais** :
+
+| Image | Fréquence | Attente | Vorbis | Fautes |
+|---|---|---|---|---|
+| ST1 | 100 ↔ 133 MHz | basculée en marche | 101 min | 43 |
+| ST2 | 100 MHz fixes | jamais active | 20 min | 0 |
+| ST3 | 100 ↔ 133 MHz | toujours active | 16 min | 0 |
+| AB1 | 67 MHz fixes | basculée cœur B en reset | 19 min (tous codecs) | 0 |
+
+Chaque mode de fonctionnement est sûr ; seul le basculement de l'attente pendant que le cœur B tourne cause les fautes. Attendre un sommeil du cœur B pendant 2 ms ne suffit pas, ou bien le sommeil n'est pas toujours arrivé à temps. On ne sait pas lequel des deux : le compteur était coupé dans le journal de la ST1.
+
+**Étape 2c, image NEWFWST4** (`make EXTRA="-DHIFI_WAIT_STRESS -DHIFI_WAIT_NEVER"`, CRC `0x0ef485e9`) : l'attente n'est jamais active (`WAIT_DIV 1`), à aucun palier, et n'est jamais basculée. Le cœur B alterne 133 et 200 MHz toutes les 250 ms : c'est la tenue à 200 MHz en un cycle, comme dans le firmware d'origine. Dans l'émulateur, Vorbis et Opus décodent sans manque, avec `HIGHRAM wait off` à 200 MHz. Sur l'appareil : lecture de tout le répertoire racine de l'eMMC, fichiers abîmés compris.
+
+**Résultat de la ST4** (journal `work/hwlog_1025_st4/`, 2026-10-25 à partir de 11:30, 33 min, lecture aléatoire depuis la racine, 13 pistes) : **aucune faute**.
+- 19 min de Vorbis, 14 min d'Opus, des WAV et MP3 courts, deux fichiers abîmés (`RR_RANDOM.MP3`, `ZZ_ZEROS.OGG`) refusés comme attendu.
+- La moitié du temps à 200 MHz sans attente ; aucun basculement. Au taux de la ST1, on attendait environ 8 fautes en Vorbis.
+- Trois manques brefs, de 27 540, 7 936 et 2 616 octets (le compteur est cumulé sur les pistes enchaînées). Ils tombent sur `R_CH5.MP3` (MP3 suivi de 3 Mio d'octets aléatoires), sur le `CH7.OGG` de 1,9 s joué juste après, et au refus de `RR_RANDOM.MP3`. Ce sont les manques connus des fichiers abîmés, déjà présents en 0.67 : pas une régression.
+- Non couverts : le FLAC (aucune piste tirée) et un MP3 long.
+
+Les essais ST2 à ST4 montrent que le cœur B tourne sans attente de 67 à 200 MHz, à fréquence fixe comme en alternance. Le défaut de la 0.72 ne venait que du basculement de l'attente en marche. Pour la 0.22, l'explication la plus probable est donc autre chose que la fréquence de 200 MHz en un cycle.
+
+## 52. Mémoires du cœur B sans attente (0.73, 2026-10-25)
+
+Conclusion des essais du §51 : l'attente est retirée partout, et n'est plus jamais basculée.
+- `clock_init()` écrit `GRF_INTER_CON0 = 0xf0403040` : les bits 14 et 15 sont mis à 0 au démarrage, cœur B éteint. Avant, cette écriture n'y touchait pas, et c'est `wait_set()` qui les fixait. `clock_slow()` les met déjà à 0.
+- `hifi_set_div()` ne change plus que le diviseur. `wait_set()`, l'attente d'un sommeil du cœur B (2 ms), `hifi_wait` et les compteurs de basculements disparaissent, ainsi que la fin « RAM wait switched » de la ligne `clock:`.
+- Les variantes d'essai `HIFI_WAIT_STRESS`, `HIFI_WAIT_ALWAYS`, `HIFI_WAIT_NEVER` et `HIFI_WAIT_FIXED100` sont retirées. Les images ST1 à ST4 restent dans `work/`.
+- Ce qui reste des essais :
+  - le tampon de `log_printf()` à 256 octets ;
+  - une faute du cœur B donne aussi la fréquence du moment.
+
+Image `work/NEWFW073.IMG`, CRC `0x80647abf`. Dans l'émulateur, les cinq formats (WAV, FLAC, MP3, Vorbis, Opus) décodent sans manque, enchaînés avec un changement de fréquence d'échantillonnage. On y voit l'écriture `0xf0403040` au démarrage.
+
+À vérifier sur l'appareil :
+- du FLAC, dont `Epic_Trailer_Theme.flac` : le FLAC n'a été tiré dans aucun essai sans attente ;
+- `MP3BENCH.MP3` au régulateur normal, avec un palier attendu autour de 50 ou 57 MHz ;
+- l'absence de faute sur une longue lecture ;
+- puis la nuit de mesure d'autonomie, à comparer aux 70 mV/h de la nuit du 24 octobre.
+
+**Essai sur l'appareil** (journal `work/hwlog_1025_073/`, 2026-10-25 à partir de 12:12, 19 min, 12 pistes) : **aucune faute**. Démarrage à 200 MHz, sans repli.
+
+| Piste | Charge moyenne du cœur B | Palier principal | 0.70/0.71 (avec attente) |
+|---|---|---|---|
+| `MP3BENCH.MP3` (239 s entières) | **38,9 MHz** | 57 MHz (233 s) | 49,7 MHz |
+| `Epic_Trailer_Theme.flac`, `TEST4.FLAC` | 15,0 à 15,7 MHz | 50 MHz | — |
+| `TEST5.OPUS` | 51,9 MHz | 67 et 80 MHz | — |
+
+- Le MP3 au régulateur normal retrouve le −22 % de l'essai A/B, et le FLAC reste au palier le plus bas.
+- **Manques** :
+  - 2 manques (3 652 octets, 20 ms) au lancement de `MP3BENCH.MP3` depuis le navigateur : l'anneau du DAC est vidé au changement de piste (2 304 octets « at the switch »), c'est le blanc normal d'un saut de piste ;
+  - 1 manque d'environ 0,65 s à chacun des deux déplacements dans `TEST5.OPUS` : l'anneau est vidé, puis la réouverture Opus et le premier PCM prennent 0,6 à 0,66 s. Les journaux des 0.64 à 0.66 montrent déjà le même délai (0,6 à 1 s avant le premier PCM après un déplacement), mais leur ligne `chain:` était coupée avant le compteur : celui-ci n'apparaît qu'avec le tampon de 256 octets. Ce n'est pas une régression.
+- Pas de Vorbis dans cet essai ; la ST4 l'a couvert sans attente, à 133 et 200 MHz.
+
+Reste : la nuit de mesure d'autonomie.

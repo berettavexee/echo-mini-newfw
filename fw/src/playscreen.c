@@ -21,24 +21,13 @@ static int battery_low;                         /* under 3,400 mV without USB: s
 
 static char *battery_text(char *p)
 {
-    static const uint16_t mv[] = { 3300, 3600, 3700, 3780, 3850, 3920, 4000, 4080, 4160 };
-    static const uint8_t pc[] = { 0, 8, 20, 35, 50, 65, 80, 92, 100 };
     static uint32_t t_read, last_mv;
     if (!last_mv || ticks() - t_read > 5000000) {
         t_read = ticks();
         last_mv = battery_mv();
         battery_low = !vbus() && last_mv < 3400;
     }
-    uint32_t v = 0;
-    if (last_mv >= mv[8])
-        v = 100;
-    else
-        for (int i = 1; i < 9; i++)
-            if (last_mv < mv[i]) {
-                v = last_mv <= mv[i - 1] ? pc[i - 1] :
-                    pc[i - 1] + (last_mv - mv[i - 1]) * (pc[i] - pc[i - 1]) / (mv[i] - mv[i - 1]);
-                break;
-            }
+    uint32_t v = battery_pct(last_mv);
     if (vbus())
         p = put_str(p, charging() ? "CHG " : "USB ");
     p = put_dec(p, v);

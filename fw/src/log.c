@@ -9,14 +9,15 @@
 
 #define RING_ADDR   0x0309c000u
 #define RING_BYTES  0x3000u
-#define RING_MAGIC  0x474f4c4eu                 /* "NLOG" */
-#define DATA_BYTES  (RING_BYTES - 16)
+#define RING_MAGIC  0x32474c4eu                 /* "NLG2" (0.68: the note word added) */
+#define DATA_BYTES  (RING_BYTES - 20)
 #define FLUSH_US    5000000u                    /* at most every 5 s ... */
 #define FLUSH_BYTES 2048u                       /* ... or as soon as this much is pending */
 
 struct ring {
     uint32_t magic, boots;
     uint32_t wr, fl;                            /* bytes written / copied to the file, ever */
+    uint32_t note;                              /* log_boot_note(): for the next boot */
     char data[DATA_BYTES];
 };
 
@@ -136,7 +137,7 @@ static char *format(char *p, char *end, const char *f, ...)
 /* One line: "[ssss.mmm] text\n" */
 void log_printf(const char *fmt, ...)
 {
-    char b[200], *p = b, *end = b + sizeof b - 1;
+    char b[256], *p = b, *end = b + sizeof b - 1;
     uint32_t ms = millis();
     va_list ap;
 
@@ -158,10 +159,23 @@ void log_init(void)
         r->magic = RING_MAGIC;
         r->boots = 0;
         r->wr = r->fl = 0;
+        r->note = 0;
     }
     logs.recovered = r->wr - r->fl;
     logs.boots = ++r->boots;
     logs.attached = 0;
+}
+
+void log_boot_note(uint32_t v)
+{
+    R->note = v;
+}
+
+uint32_t log_boot_note_take(void)
+{
+    uint32_t v = R->note;
+    R->note = 0;
+    return v;
 }
 
 /* ---- file ---- */

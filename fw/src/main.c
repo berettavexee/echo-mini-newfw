@@ -373,7 +373,8 @@ static void firmware_menu(void)
         }
         message(112, "installed: restarting", TITLE);
         mdelay(1500);
-        reboot();
+        clock_fast_ok();                        /* this loop skips sys_idle(): a restart on */
+        reboot();                               /* purpose is not a failed 200 MHz attempt */
     }
 }
 
@@ -525,8 +526,10 @@ void sys_idle(void)
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) / 10 : 0,
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) % 10 : 0);
     }
-    /* Power: a short press switches the screen off and on, 2 s switch the player off */
-    if (!sys_power_released) {
+    /* Power: a short press switches the screen off and on, 2 s switch the player off (with the
+     * cable in: the charging screen) */
+    if (sys_power_mine) {
+    } else if (!sys_power_released) {
         sys_power_released = !power_key();      /* ignore the press that switched us on */
     } else if (power_key()) {
         if (!sys_t_power)
@@ -535,13 +538,7 @@ void sys_idle(void)
             sys_screen_set(1);
             message(122, "power off", WARN);
             sys_power_off("Power 2 s");
-            message(122, "power off: unplug the USB cable", WARN);
-            while (power_key())
-                wdt_kick();
-            mdelay(200);
-            while (!power_key() && !key_read())
-                wdt_kick();
-            reboot();
+            charge_screen(0);                   /* still powered: the USB cable is in */
         }
     } else if (sys_t_power) {
         if (now - sys_t_power > 30000)          /* a press, not a bounce */
@@ -698,10 +695,12 @@ int main(void)
     storage_init();
     font_init();
     rtc_init();
-    log_printf("battery %u mV, usb %d, charge pin %d, jack 3.5 %d 4.4 %d", battery_mv(), vbus(),
-               gpio_get(PIN_CHARGING), gpio_get(PIN_JACK35), !gpio_get(PIN_JACK44));
+    log_printf("battery %u mV, usb %d, charge pin %d, jack 3.5 %d 4.4 %d, power key %d",
+               battery_mv(), vbus(), gpio_get(PIN_CHARGING), gpio_get(PIN_JACK35),
+               !gpio_get(PIN_JACK44), power_key());
     log_flush();
     battery_check_boot();
+    charge_screen(1);                           /* switched on by the USB cable: until PLAY held */
     draw_static();
     draw_status();
 

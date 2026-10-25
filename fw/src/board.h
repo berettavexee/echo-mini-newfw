@@ -53,6 +53,7 @@ int power_key(void);
 int vbus(void);
 int charging(void);
 unsigned battery_mv(void);
+unsigned battery_pct(unsigned mv);  /* a Li-ion curve: 0 to 100 */
 
 void reboot(void);
 void reboot_loader_usb(void);

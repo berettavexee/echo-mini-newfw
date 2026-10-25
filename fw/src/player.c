@@ -653,8 +653,8 @@ int player_service(void)
     player.time_ms = player.rate ? (uint32_t)((uint64_t)player.frames * 1000 / player.rate) : 0;
     heard_update();
     if (c->state == HP_ERROR) {
-        log_printf("player: core B error %u, fault pc %x lr %x cfsr %x", c->error, c->fault_pc,
-                   c->fault_lr, c->fault_cfsr);
+        log_printf("player: core B error %u, fault pc %x lr %x cfsr %x, at %u MHz", c->error,
+                   c->fault_pc, c->fault_lr, c->fault_cfsr, hifi_hz / 1000000);
         player.error = HIFI_EPROTO;
         return player.error;
     }
