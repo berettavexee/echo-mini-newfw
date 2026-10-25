@@ -47,7 +47,9 @@ static uint32_t codec_of(const char *name)
     static const struct { const char *ext; uint32_t codec; } t[] = {
         { "wav", HP_CODEC_WAV }, { "flac", HP_CODEC_FLAC }, { "fla", HP_CODEC_FLAC },
         { "mp3", HP_CODEC_MP3 }, { "ogg", HP_CODEC_VORBIS }, { "oga", HP_CODEC_VORBIS },
-        { "opus", HP_CODEC_OPUS }, { "opu", HP_CODEC_OPUS },
+        { "opus", HP_CODEC_OPUS }, { "opu", HP_CODEC_OPUS }, { "aiff", HP_CODEC_AIFF },
+        { "aif", HP_CODEC_AIFF }, { "aifc", HP_CODEC_AIFF }, { "m4a", HP_CODEC_AAC },
+        { "m4b", HP_CODEC_AAC }, { "mp4", HP_CODEC_AAC },
     };
     const char *dot = 0;
     for (const char *p = name; *p; p++)

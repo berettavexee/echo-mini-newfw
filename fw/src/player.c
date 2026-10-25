@@ -6,6 +6,7 @@
 #include "board.h"
 #include "hifi.h"
 #include "log.h"
+#include "mp4.h"
 
 enum { ST_IDLE, ST_LOAD, ST_OPEN, ST_PLAY, ST_END, ST_ERROR };
 
@@ -26,12 +27,27 @@ static int fail(int err, const char *what)
 #include "hifi_proto.h"
 
 static uint32_t fed_since_ring, freed_since_ring;
+static int mp4_on;                              /* the input is mp4.c's packet stream */
 
-/* Input ring from the file, in pieces up to the ring end, as much as fits */
+/* Input ring from the file, in pieces up to the ring end, as much as fits (MP4: the packet
+ * stream, once 4 KiB of room are free) */
 static void feed(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
     uint32_t wr = c->in_wr, rd = c->in_rd;
+    if (mp4_on) {
+        uint32_t room = HP_IN_SIZE - (wr - rd), nr;
+        if (mp4_done() || room < 4096)
+            return;
+        uint32_t n = mp4_feed(wr, room, &nr);
+        c->in_wr = wr + n;
+        fed_since_ring += n;
+        player.reads += nr;
+        player.read_bytes += n;
+        if (mp4_done())
+            c->in_end = wr + n;
+        return;
+    }
     if ((int32_t)(rd - wr) > 0) {               /* core B skipped past what we wrote */
         wr = rd;
         if (wr > file->size)
@@ -486,10 +502,21 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     ps.ur0 = audio.ring_ur;
     ps.lost0 = audio.ring_lost;
     log_printf("player: %s, %u bytes, our codec %u", f->name, f->size, codec);
+    mp4_on = codec == HP_CODEC_AAC;
+    if (mp4_on) {                               /* the container read here, the seek done here */
+        struct mp4_track t;
+        r = mp4_open(file, seek, &t);         /* own_file: f may be the caller's copy */
+        if (r)
+            return fail(r == MP4_EREAD ? HIFI_EREAD : r == MP4_EFORMAT ? HIFI_EPROTO : HIFI_EIMG,
+                        r == MP4_EALAC ? "ALAC: not played yet" : r == MP4_EUNSUPPORTED ?
+                        "MP4: not AAC-LC" : "MP4: container not readable");
+        seek = 0;
+    }
     gov_start();                                /* automatic: top level for the load and open */
-    if (hifi_own_loaded() == codec && !hifi_restart_own())
+    uint32_t img = codec == HP_CODEC_AIFF ? HP_CODEC_WAV : codec;  /* one image for PCM */
+    if (hifi_own_loaded() == img && !hifi_restart_own())
         ps.warm = 1;                            /* the image is still in the HIGHRAM */
-    else if ((r = hifi_load_own(codec)))
+    else if ((r = hifi_load_own(img)))
         return fail(r, "our codec is not in the firmware image");
     ps.t_load = ticks();
     if ((r = hifi_start_own()))
@@ -498,7 +525,7 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     gov_begin();
     if (ps.kept)
         audio_update();
-    c->in_end = f->size;                        /* known from the start (MP3 length estimate) */
+    c->in_end = mp4_on ? 0xffffffffu : f->size; /* known from the start (MP3 length estimate) */
     c->comment_end_page = codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS ? cpage : 0;
     c->comment_end_seg = cseg;
     c->seek_ms = seek;

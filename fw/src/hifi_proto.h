@@ -87,7 +87,25 @@ struct hp_ctl {
  * "NNCP", count, then entries; each blob at 'offset' from the pack start, 512-aligned:
  * code (loaded at HIGHRAM0), then data (loaded at data_addr). */
 #define HP_PACK_MAGIC 0x50434e4eu       /* "NNCP" */
-enum hp_codec { HP_CODEC_WAV = 1, HP_CODEC_FLAC, HP_CODEC_MP3, HP_CODEC_VORBIS, HP_CODEC_OPUS };
+/* HP_CODEC_AIFF: core A's own (file type, tags, screen); core B runs the HP_CODEC_WAV image for
+ * it, which reads both containers (hifi/codec_pcm.c). HP_CODEC_AAC: AAC-LC in MP4, fed by core A
+ * as a packet stream (below). */
+enum hp_codec { HP_CODEC_WAV = 1, HP_CODEC_FLAC, HP_CODEC_MP3, HP_CODEC_VORBIS, HP_CODEC_OPUS,
+                HP_CODEC_AIFF, HP_CODEC_AAC };
+
+/* Packet stream (MP4 audio, ETUDE §55): core A reads the container and its tables and writes
+ * into the input ring this header, the decoder configuration (AAC: the AudioSpecificConfig),
+ * then each audio frame as a u16 length (little-endian) and its bytes. Seeking is core A's: the
+ * stream starts at the frame wanted, 'skip' and 'start_frame' say what to drop and where it is. */
+#define HP_PKT_MAGIC 0x50345048u        /* "HP4P" */
+struct hp_pkt_header {
+    uint32_t magic;
+    uint32_t rate, channels;
+    uint32_t skip;                      /* decoded frames to drop first (encoder delay, seek) */
+    uint32_t length;                    /* frames to write in all (0xffffffff: up to the end) */
+    uint32_t start_frame;               /* position of the first frame written */
+    uint32_t config_len;                /* bytes of decoder configuration that follow */
+};
 
 struct hp_pack_entry {
     uint32_t codec, offset, code_size, data_addr, data_size, bss_end;

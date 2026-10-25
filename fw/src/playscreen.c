@@ -36,7 +36,7 @@ static char *battery_text(char *p)
 
 static const char *codec_name(uint32_t c)
 {
-    static const char *const n[] = { "", "WAV", "FLAC", "MP3", "Vorbis", "Opus" };
+    static const char *const n[] = { "", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF", "AAC" };
     return c < sizeof n / sizeof *n ? n[c] : "";
 }
 

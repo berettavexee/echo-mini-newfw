@@ -11,7 +11,7 @@ CFLAGS = -mcpu=cortex-m3 -mthumb -Os -g -ffreestanding -fno-builtin -nostdlib \
          -ffunction-sections -fdata-sections -Wall -Wextra -Isrc $(EXTRA)
 LDFLAGS = -T link.ld -Wl,--gc-sections -Wl,-Map=build/fw.map -nostdlib -lgcc
 
-SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/resume.c src/uidraw.c src/main.c src/charge.c src/font.c src/rtc.c build/font_ascii.c
+SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/resume.c src/uidraw.c src/main.c src/charge.c src/mp4.c src/font.c src/rtc.c build/font_ascii.c
 OBJS = $(patsubst %.c,build/%.o,$(notdir $(SRCS)))
 
 all: $(OUT)
@@ -36,9 +36,9 @@ HCFLAGS = -mcpu=cortex-m3 -mthumb -O2 -g -ffreestanding -fno-builtin -nostdlib \
           -ffunction-sections -fdata-sections -Wall -Wextra
 HLDFLAGS = -T hifi/link.ld -Wl,--gc-sections -nostdlib -lgcc
 
-build/hifi_wav.elf: hifi/rt.c hifi/codec_wav.c hifi/rt.h hifi/link.ld src/hifi_proto.h
+build/hifi_pcm.elf: hifi/rt.c hifi/codec_pcm.c hifi/rt.h hifi/link.ld src/hifi_proto.h
 	@mkdir -p build
-	$(CC) $(HCFLAGS) hifi/rt.c hifi/codec_wav.c $(HLDFLAGS) -Wl,-Map=build/hifi_wav.map -o $@
+	$(CC) $(HCFLAGS) hifi/rt.c hifi/codec_pcm.c $(HLDFLAGS) -Wl,-Map=build/hifi_pcm.map -o $@
 	$(CROSS)size $@
 
 build/hifi_flac.elf: hifi/rt.c hifi/codec_flac.c hifi/ext/dr_flac.h hifi/rt.h hifi/link.ld src/hifi_proto.h
@@ -120,9 +120,27 @@ build/hifi_mp3.elf: hifi/rt.c hifi/codec_mp3.c hifi/rt.h hifi/link.ld src/hifi_p
 	  $(HLDFLAGS) -Wl,-Map=build/hifi_mp3.map -o $@
 	$(CROSS)size $@
 
-build/codecs.bin: build/hifi_wav.elf build/hifi_flac.elf build/hifi_mp3.elf build/hifi_vorbis.elf build/hifi_opus.elf tools/mkpack.py
-	python3 tools/mkpack.py $@ 1:build/hifi_wav.elf 2:build/hifi_flac.elf 3:build/hifi_mp3.elf \
-	  4:build/hifi_vorbis.elf 5:build/hifi_opus.elf
+# AAC-LC: PacketVideo decoder of AOSP (third_party/pvaacdec, unmodified, Apache-2.0), C++ without
+# exceptions or RTTI, without AAC_PLUS (no SBR, no parametric stereo); -O3 (8 % fewer instructions
+# than -O2 on the QEMU bench, ETUDE §54). Portable C fixed-point operations for now.
+PVAAC_DIR ?= ../third_party/pvaacdec/src
+PVAAC_OBJS := $(patsubst $(PVAAC_DIR)/%.cpp,build/pvaac/%.o,$(wildcard $(PVAAC_DIR)/*.cpp))
+PVAAC_CFLAGS = -mcpu=cortex-m3 -mthumb -O3 -g -ffreestanding -nostdlib -fno-exceptions -fno-rtti \
+               -ffunction-sections -fdata-sections -w -Wno-narrowing "-DOSCL_UNUSED_ARG(x)=(void)(x)" \
+               -DOSCL_IMPORT_REF= -DOSCL_EXPORT_REF= -I$(PVAAC_DIR)
+
+build/pvaac/%.o: $(PVAAC_DIR)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CROSS)g++ $(PVAAC_CFLAGS) -c $< -o $@
+
+build/hifi_aac.elf: hifi/rt.c hifi/codec_aac.c hifi/rt.h hifi/link.ld src/hifi_proto.h $(PVAAC_OBJS)
+	$(CC) $(HCFLAGS) -DOSCL_IMPORT_REF= -I$(PVAAC_DIR) hifi/rt.c hifi/codec_aac.c $(PVAAC_OBJS) \
+	  $(HLDFLAGS) -Wl,-Map=build/hifi_aac.map -o $@
+	$(CROSS)size $@
+
+build/codecs.bin: build/hifi_pcm.elf build/hifi_flac.elf build/hifi_mp3.elf build/hifi_vorbis.elf build/hifi_opus.elf build/hifi_aac.elf tools/mkpack.py
+	python3 tools/mkpack.py $@ 1:build/hifi_pcm.elf 2:build/hifi_flac.elf 3:build/hifi_mp3.elf \
+	  4:build/hifi_vorbis.elf 5:build/hifi_opus.elf 7:build/hifi_aac.elf
 
 $(OUT): build/fw.elf build/codecs.bin build/font.bin tools/mkimg.py
 	python3 tools/mkimg.py build/fw.elf $@ --pack build/codecs.bin --font build/font.bin

@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-25, version 0.73.
+Last update: 2026-10-25, version 0.75.
 
 ## Done, validated on the device
 
@@ -24,6 +24,8 @@ Last update: 2026-10-25, version 0.73.
 | Reliable keys (loose contacts filtered), volume on release, end of the queue | 0.53, 0.54 | §34 |
 | Flicker-free drawing | 0.60 | §39 |
 | Firmware installer from the main menu | 0.1x | §11 |
+| AIFF and AIFF-C (uncompressed), in the WAV image; tags after the samples read in WAV and AIFF | 0.74 | §53 |
+| AAC-LC in M4A: PacketVideo decoder, MP4 read on core A, gapless, exact seek, iTunes tags and ReplayGain | 0.75 | §54-§55 |
 
 ## Done, waiting for a test on the device
 
@@ -67,16 +69,24 @@ Last update: 2026-10-25, version 0.73.
   below 300 MHz), never switched; about 22 % less load; a core B fault also logs the clock (§52).
   Checked on the device: no fault, MP3BENCH 38.9 MHz mean at 57 MHz (49.7 before), FLAC about
   15 MHz at 50 MHz, Opus 52 MHz; the overnight battery measurement is still to do.
+- 0.74: AIFF and AIFF-C (`.aif`, `.aiff`, `.aifc`; uncompressed "NONE"/"twos" big-endian and
+  "sowt" little-endian, 8 to 32 bits, mono or stereo) in one core B image with WAV
+  (`hifi/codec_pcm.c`); tags from an ID3v2 chunk or NAME/AUTH, also after the samples; WAV
+  RIFF INFO or ID3v2 after the samples read too (§53). Bit-exact in the emulator; validated on
+  the device with 0.75 (Discovery as AIFF, AIFF-C, 24/48, 24/96, seeks, damaged files).
+- 0.75: AAC-LC in M4A (`.m4a`, `.m4b`, `.mp4`): PacketVideo decoder on core B (chosen against
+  Helix on a QEMU bench for its licence, §54); the MP4 container read on core A, tables read from
+  the file through small windows, frames sent as a packet stream (for ALAC later too); gapless
+  (iTunSMPB, edit list), exact seek, iTunes tags and ReplayGain (§55). Checked in the emulator
+  against ffmpeg. Validated on the device: an iTunes album gapless, seeks, tags, ALAC refused,
+  damaged files; core B at 25 MHz for AAC 125 kb/s (lowest level), 16 MHz for AIFF 24/96.
 
 ## To do
 
 New formats, in this order (agreed 2026-10-24):
 
-1. **AIFF**: uncompressed PCM like WAV (big-endian samples, `FORM`/`COMM`/`SSND` chunks), from
-   our WAV module.
-2. **AAC** in M4A: the PacketVideo/AOSP AAC decoder (Apache-2.0, the family of our MP3 decoder),
-   plus an MP4 container reader (sample tables for reading and seeking, iTunes tags and
-   ReplayGain, encoder delay and padding for gapless playback).
+1. ~~AIFF~~: done in 0.74.
+2. ~~AAC~~ in M4A: done in 0.75 (AAC-LC; HE-AAC not played).
 3. **ALAC** in M4A: Apple's reference decoder (Apache-2.0), on the MP4 reader of step 2.
 
 Other items:
@@ -161,11 +171,22 @@ Other items:
 - A spoken "battery low" instead of the beeps: a short recording in the image (15-30 KiB), made
   with a speech synthesiser whose licence lets us ship the sound.
 
+- AAC: assembly optimisations, not a priority (core B already at 25 MHz, the lowest level, for
+  AAC 125 kb/s, §55): a Cortex-M3 header for the fixed-point operations (smull/smlal; the
+  decoder's ARMv5TE variant uses DSP instructions the M3 lacks), then hand-written Thumb-2 for
+  the hot functions of the QEMU profile (fft_rx4_long 25 %, trans4m_freq_2_time_fxp_2 14 %,
+  inv_long_complex_rot 9 %, §54); no reference assembly exists in AOSP for this decoder.
+- Optional codecs built on Helix MP3 and Helix AAC (RealNetworks, RPSL/RCSL licence), a distant
+  prospect: about 22 % (MP3) and 12 % (AAC) fewer instructions and 1 to 2 LSB of error instead of
+  5 to 7 on the QEMU bench (ETUDE §19.9, §54); PacketVideo stays the default for its licence.
+
 ## Known limitations
 
 - A track shorter than 1.1 s is not shown on the play screen (the DAC ring holds 1.1 s).
-- M4A (AAC, ALAC) and AIFF are not supported yet (see "To do"); AAC relied on a stock module,
-  removed in 0.61.
+- ALAC in M4A is not supported yet (see "To do"); nor HE-AAC (SBR, parametric stereo), AAC in
+  ADTS (`.aac`), or multichannel AAC.
+- Floating-point WAV and AIFF-C (core B has no FPU), and compressed AIFF-C (u-law, A-law) are not
+  played.
 - Files of 4 GiB or more are not listed.
 
 ## Not planned

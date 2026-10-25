@@ -2848,3 +2848,123 @@ Image `work/NEWFW073.IMG`, CRC `0x80647abf`. Dans l'émulateur, les cinq formats
 - Pas de Vorbis dans cet essai ; la ST4 l'a couvert sans attente, à 133 et 200 MHz.
 
 Reste : la nuit de mesure d'autonomie.
+
+## 53. AIFF (0.74, 2026-10-25)
+
+Choix validé : pas de nouveau codec pour le cœur B, mais le codec WAV étendu en codec PCM (`fw/hifi/codec_pcm.c`, ex-`codec_wav.c`, 3,4 Ko de code contre 2,9 Ko). Mutualiser les gros codecs dans une même image n'est ni possible (zone de code de 128 Ko, Opus 69 Ko + Vorbis 60 Ko) ni utile (un chargement coûte 1 à 4 ms, l'enchaînement entre formats différents garde déjà le DAC). Le partage se fait au niveau des sources, comme `oggpage.c`.
+
+**Cœur B** : le conteneur se reconnaît à ses 4 premiers octets (`RIFF`/`WAVE`, `FORM`/`AIFF`, `FORM`/`AIFC`).
+- `COMM` : canaux, nombre de trames (la durée), taille d'échantillon arrondie à l'octet (les échantillons AIFF sont cadrés à gauche), fréquence en flottant étendu 80 bits (exposant et 32 bits hauts de la mantisse).
+- AIFF-C : compression `NONE` ou `twos` (gros-boutiste), `sowt` (petit-boutiste, le chemin WAV) ; le reste est refusé (`HP_ERR_UNSUPPORTED`).
+- `SSND` : décalage, taille de bloc, puis les données ; la durée est le plus petit des deux, `COMM` ou la taille de `SSND`. Le déplacement est exact, comme en WAV.
+- 16 bits stéréo gros-boutiste : copie directe après inversion des octets de chaque échantillon ; les autres formats passent par la conversion trame par trame. L'AIFF 8 bits est signé, le WAV 8 bits ne l'est pas.
+- `COMM` doit précéder `SSND` (l'entrée ne fait qu'avancer) : c'est l'ordre de tous les encodeurs connus.
+- Non lus : les flottants (`fl32`, `fl64`, WAV IEEE float ; le cœur B est un Cortex-M3 sans FPU), `ulaw`, `alaw`.
+
+**Cœur A** :
+- `HP_CODEC_AIFF` (6) : identifiant propre au cœur A (extension `aif`, `aiff`, `aifc` ; « AIFF » à l'écran ; lecture des tags). `player_open()` charge pour lui l'image `HP_CODEC_WAV` : WAV et AIFF s'enchaînent sur la même image, simplement redémarrée.
+- Tags : `id3v2()` prend un décalage. L'AIFF porte un chunk `ID3 ` (ffmpeg, iTunes), sinon `NAME` et `AUTH`. Le WAV lit `LIST INFO`, et désormais `id3 `/`ID3 `. Les deux lecteurs sautent les échantillons : la fenêtre de 512 Kio (`SCAN_MAX`) repart après eux (`rd.lim`), car ffmpeg écrit le chunk `ID3 ` après `SSND`. Avant, le lecteur WAV s'arrêtait à `data` et manquait les `LIST INFO` placés après.
+
+**Essais dans l'émulateur** (extrait de 3 s de `work/long/L.mp3`, fichiers produits par ffmpeg) :
+- AIFF 16 bits, 24 bits/48 kHz, 24 bits/96 kHz, 32 bits, 8 bits mono, 16 bits mono, AIFF-C `sowt`, AIFF avec `ID3 ` seul (sans `NAME`), WAV avec `LIST INFO` après `data` ;
+- tous enchaînés sans manque. La sortie du cœur B est identique à celle de ffmpeg pour les fichiers stéréo, et identique aux échantillons du fichier pour les mono (ffmpeg change le niveau quand il duplique un canal) ;
+- les tags sont trouvés dans tous les cas, y compris après les données ;
+- fichiers abîmés (variantes de `damage.py` sur un AIFF) : en-tête détruit, que des zéros, que de l'aléatoire → refusés à l'ouverture ; aléatoire ou zéros ajoutés à la fin → arrêt à la fin de `SSND` ; tronqué → arrêt à la coupure ; vide → grisé.
+- Gros fichiers (tirés de « Discovery », bibliothèque beets) : la lecture des tags placés à la fin prend 50 ms (37 Mo), 74 ms (57 Mo) et 157 ms (122 Mo), le temps de suivre la chaîne de la FAT. En enchaînement, ce délai est absorbé par l'ouverture 1,1 s à l'avance.
+
+Image `work/NEWFW074.IMG`, CRC `0xf52a2342`. Fichiers pour l'appareil dans `work/aiff_test/` : « Discovery » en AIFF 16 bits, AIFF-C `sowt`, 24/48, 24/96, et un WAV avec ses tags après les données.
+
+## 54. AAC-LC : comparatif PacketVideo et Helix sous QEMU (2026-10-25)
+
+Choix de conception validé (le lecteur MP4 sur le cœur A, des tables lues dans le fichier comme le firmware d'origine, un flux de paquets préfixés par leur longueur vers le cœur B, partagé avec l'ALAC). Reste à choisir le décodeur. Le firmware d'origine utilise Helix AAC sans SBR (REPORT §33).
+
+**Banc** (`re/aac/bench/`, local, sur le modèle du banc MP3 : Cortex-M3 nu sous QEMU `mps2-an385`, `-icount shift=0`, `memcpy`/`memset` du runtime du cœur B) :
+- PacketVideo `aacdec` (AOSP `android-4.0.4_r2.1`, Apache-2.0), sans `AAC_PLUS`, appelé à travers une petite couche C (`pvshim.cpp`) ;
+- Helix AAC (copie durcie d'ESP8266Audio, `e1f2a1a`, 2026-10-07), sans SBR ; chemin ARM de `assembly.h` activé (`smull`, `smlal`, `ssat`, `clz`, comme la compilation Rockchip), `abs()` mis en ligne (appelée en fonction, elle coûtait 6,6 % du temps) ;
+- entrée : trames brutes et AudioSpecificConfig (`mkstream.py`, depuis un ADTS), comme le cœur A les fournira depuis un MP4 ; référence : décodage de ffmpeg, SNR par `snr.py` ;
+- extraits de 20 s : t1 Rage Against the Machine « Testify » (M4A iTunes, 125 kb/s), t2 The Doors (M4A, 128 kb/s), t3 Daft Punk « One More Time » en AAC ffmpeg 256 kb/s sans PNS, t4 le même en 128 kb/s avec PNS (réglage par défaut), t5 le même en 256 kb/s à 48 kHz.
+
+**Instructions par seconde d'audio** (millions) :
+
+| Extrait | PV -O2 | PV -O3 | Helix -O2 | Helix -O3 | Helix -O3, `abs` en ligne | Écart Helix / PV -O3 |
+|---|---|---|---|---|---|---|
+| t1 iTunes 125k | 15,02 | 13,68 | 13,20 | 13,25 | **12,17** | −11 % |
+| t2 Doors 128k | 14,92 | 13,54 | 11,66 | 11,64 | **11,10** | −18 % |
+| t3 256k | 16,68 | 15,80 | 15,84 | 15,87 | **14,72** | −7 % |
+| t4 128k PNS | 15,16 | 13,92 | 12,76 | 12,79 | **11,92** | −14 % |
+| t5 256k 48 kHz | 17,80 | 16,66 | 16,31 | 16,34 | **15,22** | −9 % |
+
+**Précision face à ffmpeg** (identique pour toutes les options de compilation d'un même décodeur) :
+
+| Extrait | PacketVideo | Helix |
+|---|---|---|
+| t1 | 76,7 dB, écart max 6 LSB | 87,3 dB, 2 LSB |
+| t2 | 74,9 dB, 5 LSB | 82,3 dB, 1 LSB |
+| t3 | 75,6 dB, 7 LSB | 82,9 dB, 1 LSB |
+| t5 | 75,6 dB, 6 LSB | 82,9 dB, 1 LSB |
+| t4 (PNS) | 26,3 dB | 26,3 dB |
+
+Le PNS fait générer du bruit au décodeur : t4 ne se compare pas, comme déjà constaté (REPORT §34). Aucune erreur de décodage, pas de décalage (lag 0) pour les deux.
+
+**Mémoire et code** : état du décodeur 48,7 Ko (PV) contre 20,7 Ko (Helix) ; code et tables environ 59 Ko (PV -O3) contre 49 Ko (Helix). Les deux tiennent dans la zone de code de 128 Ko ; PV prend un quart de la zone de données (180 Ko), Helix un neuvième.
+
+**Profil** (t1, 5 s) : PV passe 25 % dans `fft_rx4_long`, 14 % dans `trans4m_freq_2_time_fxp_2`, 9 % dans `inv_long_complex_rot` ; Helix 19 % dans `R4Core`, 12 % dans `raac_DCT4`, 10 % dans `raac_IMDCT`, 10 % dans `raac_StereoProcess`.
+
+**Charge estimée sur l'appareil** : le MP3 PacketVideo fait 14,7 M instructions par seconde au banc et 38,9 MHz sur l'appareil sans attente mémoire (§52), soit environ 2,65 cycles par instruction. Par la même règle : AAC PacketVideo de 36 à 44 MHz, Helix de 29 à 40 MHz. Les deux tiennent au palier de 57 MHz, au pire à 67 MHz.
+
+**Bilan** : Helix est meilleur sur tous les critères mesurés : environ 12 % d'instructions en moins (de 7 à 18 %), 7 à 11 dB de précision en plus (1 à 2 LSB au lieu de 5 à 7), 28 Ko de mémoire en moins. Les écarts de PV restent inaudibles. Le seul argument de PV est la licence : Apache-2.0, contre RPSL/RCSL pour Helix (licence à réciprocité par fichier : les fichiers Helix modifiés et distribués restent sous RPSL avec leurs sources, à côté de notre code). C'est la même situation que pour le MP3 (§19.9 : Helix −22 %, PV retenu pour la licence).
+
+**Décision (utilisateur, 2026-10-25) : PacketVideo**, pour la licence (Apache-2.0), comme pour le MP3. Un portage Thumb-2 de sa FFT pourra réduire l'écart plus tard.
+
+## 55. AAC-LC en M4A (0.75, 2026-10-25)
+
+Mise en œuvre de la conception du §54 (décodeur PacketVideo).
+
+**Cœur B** (`fw/hifi/codec_aac.c`, image `HP_CODEC_AAC` = 7) : PacketVideo `aacdec` (`third_party/pvaacdec`, Apache-2.0, non modifié), compilé en C++ sans exceptions ni RTTI, sans `AAC_PLUS`, en -O3 ; C portable pour l'instant (pas encore d'assembleur Thumb-2). 59 Ko de code, 65 Ko de BSS (dont 52 Ko de mémoire du décodeur). Il lit le flux de paquets, décode 1024 trames par paquet (stéréo entrelacée 16 bits, mono dupliqué par le décodeur lui-même), jette `skip` trames au début et s'arrête à `length`. Une trame illisible donne 1024 trames de silence (la durée est gardée) et compte dans `error_info`.
+
+**Flux de paquets** (`hifi_proto.h`, `struct hp_pkt_header`, magie « HP4P ») : fréquence, canaux, `skip`, `length`, `start_frame`, taille de la configuration ; puis l'AudioSpecificConfig ; puis chaque trame précédée de sa longueur (u16). Prévu pour servir aussi à l'ALAC.
+
+**Cœur A** (`fw/src/mp4.c`) :
+- boîtes lues à travers un cache d'un secteur (sans lui, l'ouverture d'un M4A d'iTunes avec sa pochette prenait 166 ms dans l'émulateur ; 16 ms avec) ;
+- première piste son (`hdlr` = `soun`) ; entrée `mp4a` (versions QuickTime 1 et 2 comprises, `esds` éventuellement dans `wave`) ; configuration lue dans `esds` ; AAC-LC seul (type d'objet 2), mono ou stéréo, trames de 1024 : le reste est refusé avec un message (« no codec for it in the firmware ») ; `alac` reconnu et refusé pour l'instant ;
+- tables `stsz`, `stco`/`co64`, `stsc` jamais chargées : une fenêtre de 512 octets par table (plus 12 octets pour une entrée à cheval sur la fin du secteur, défaut trouvé dans l'émulateur), comme le firmware d'origine ;
+- données : une fenêtre de 4 Kio, si bien que les trames d'un même bloc (chunk), contiguës, coûtent une lecture ; le flux est écrit par 4 Kio au moins ;
+- amorce, remplissage et longueur : `iTunSMPB` (iTunes ; sa valeur fait 124 octets), sinon la liste d'édition (`elst`, ffmpeg), sinon toute la piste ;
+- déplacement : la trame cible est trouvée en parcourant les séries de `stsc`, puis les tailles du bloc ; le flux repart **une trame avant** la cible (le recouvrement de la transformée) et le cœur B jette ce qui précède la cible ;
+- fin de fichier atteinte au milieu d'une trame (fichier tronqué) : le flux s'arrête à la dernière trame complète. Défaut trouvé dans l'émulateur et corrigé : la même fenêtre était relue sans fin (568 587 commandes eMMC).
+
+**Tags** (`tags.c`) : `moov/udta/meta/ilst` : `©nam`, `©ART`, `©alb`, `trkn`, et les `----` nommés `replaygain_*` (beets, foobar2000). Si `moov` suit les données (ffmpeg), la fenêtre de lecture repart après `mdat`.
+
+**Navigateur** : extensions `m4a`, `m4b`, `mp4` ; « AAC » à l'écran.
+
+**Essais dans l'émulateur** :
+- RATM « Testify » (M4A iTunes complet, 3,4 Mo, `moov` en tête, `iTunSMPB`, pochette) : tags lus en 12 ms ; amorce 2112, remplissage 960 ; sortie alignée à l'échantillon près sur ffmpeg ;
+- déplacement de 4,8 s à 32,6 s : premier PCM 45 ms après la commande ; dès le premier échantillon, à 3 LSB de ffmpeg au plus (76,6 dB ensuite) ;
+- extrait recopié par ffmpeg (`moov` après `mdat`, `elst` : amorce 56, remplissage 31) : 76,7 dB face à ffmpeg, 265 129 trames comme la liste d'édition (ffmpeg en sort 31 de plus, le remplissage) ;
+- mono 48 kHz (encodeur AAC de ffmpeg, PNS actif) : L = R, aligné (décalage 0) ; 46 dB face à ffmpeg à cause du PNS, comme au §54 ;
+- enchaînement sans blanc entre M4A, et d'un M4A à 44,1 kHz vers un M4A à 48 kHz (changement de fréquence) ; ALAC refusé proprement ;
+- fichiers abîmés (deux variantes, `moov` en fin et en tête) : en-tête détruit, zéros, aléatoire, `moov` absent (tronqué) → refusés ; tronqué avec `moov` en tête → arrêt à la trame 124 ; milieu abîmé ou octets ajoutés → lecture complète.
+
+Image `work/NEWFW075.IMG`, CRC `0xad161731`. Pour l'appareil : `work/aac_test/` (l'album « The Battle of Los Angeles » d'iTunes copié depuis la bibliothèque beets, `CHC.M4A` pour `damage.py`, un ALAC qui doit être refusé). À mesurer : la charge du cœur B (estimée de 36 à 44 MHz au §54).
+
+**Mesure d'autonomie de la 0.73** (journal `work/hwlog_1025_bat073/`, 2026-10-25 de 13:15 à 14:53) : l'essai a duré **1 h 37 seulement**, et il a commencé juste après 43 min de charge en mode USB (4 179 mV).
+- Lecture aléatoire depuis la mémoire interne : 65 min de Vorbis, 29 min d'Opus, 3 min de MP3 ; écran éteint presque tout le temps.
+- **Aucune faute du cœur B, aucun manque** sur les 34 pistes. Charge moyenne du cœur B : 44 MHz ; paliers : 67 MHz pendant 4 233 s, 80 MHz pendant 1 312 s, presque jamais au-delà.
+- Batterie : 4 179 → 4 028 mV ; pente 87,5 mV/h sur toute la durée, 73,5 mV/h sur la dernière demi-heure.
+- **Pas comparable** aux 70 mV/h de la nuit du 24 octobre (0.61) : la durée est trop courte, l'essai démarre juste après une charge (le haut de la courbe descend plus vite), et les formats diffèrent (Vorbis et Opus, plus lourds que le MP3 320 kb/s lu depuis la carte). La comparaison demande une nuit dans les mêmes conditions.
+
+**Essai sur l'appareil de la 0.75** (journal `work/hwlog_1025_075/`, 2026-10-25 de 15:04 à 16:04 ; AIFF de la 0.74 compris) : **aucune faute**, démarrage à 200 MHz.
+
+| Contenu | Pistes | Charge moyenne du cœur B | Palier |
+|---|---|---|---|
+| AAC, RATM « The Battle of Los Angeles » (iTunes, ~125 kb/s), album entier | 13 | **25,0 à 25,3 MHz** | 50 MHz (le plus bas) |
+| AIFF 16 bits 44,1 kHz (« One More Time », AIFF-C `sowt`) | — | 0,5 à 1,5 MHz | 50 MHz |
+| AIFF 24 bits / 48 kHz | — | 7,8 MHz | 50 MHz |
+| AIFF 24 bits / 96 kHz | — | 15,7 à 16,4 MHz | 50 MHz |
+
+- **L'AAC coûte 25 MHz, bien moins que les 36 à 44 MHz estimés** au §54 depuis le MP3. L'assembleur Thumb-2 n'est pas nécessaire pour l'instant.
+- **Album AAC enchaîné sans blanc** : les 13 pistes de bout en bout, 0 manque ; les tags sont lus (3,4 ms).
+- **Déplacements** : 14 en AAC, chacun avec un seul blanc d'environ 16 ms (2,6 à 3,8 Ko vidés de l'anneau) ; en AIFF 24/96, de 54 à 72 Ko (60 à 80 ms) ; en AIFF 16 bits, 5 à 7 Ko.
+- **ALAC** : refusé, « Cannot play … no codec for it in the firmware ».
+- **Fichiers abîmés** (lecture aléatoire de `test_damanged_files/`, 62 fichiers) : `H_`, `RR_`, `ZZ_` et `T_CHC.M4A` refusés ; `M_`, `R_`, `Z_` lus en entier ; `T_CHB.AIFF` s'arrête à la coupure.
+- **Défaut de journal relevé** (pas propre à l'AAC) : après trois ouvertures refusées de suite (`ZZ_ZEROS.MP3` deux fois, 1,15 s chacune, et `H_CHB.AIFF`), la fin de la piste précédente avait fini de jouer. La ligne « queued behind 24346666 ms of the last track » affiche alors une durée négative lue comme non signée, et la piste suivante compte un manque de 217 Ko : le blanc réel pendant les refus. À corriger dans le calcul de `tail` (considérer la fin comme jouée quand `tail.end` est dépassé).

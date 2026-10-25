@@ -1,6 +1,7 @@
 /* Tags for the play screen (step 6, ETUDE §25): title, artist, album, track number, read by core A
  * when a track starts. ID3v2.2/2.3/2.4 (then ID3v1) for MP3, Vorbis comments for FLAC, Ogg
- * Vorbis and Opus (read through the Ogg pages), RIFF INFO for WAV. Big fields (cover art, lyrics)
+ * Vorbis and Opus (read through the Ogg pages), RIFF INFO or an ID3v2 chunk for WAV, ID3v2 or NAME
+ * and AUTH chunks for AIFF (0.74, ETUDE §53; both after the samples too). Big fields (cover art, lyrics)
  * are skipped by position, never read. Unsynchronised or compressed ID3v2 frames are skipped.
  * ReplayGain (0.55, ETUDE §35): REPLAYGAIN_TRACK/ALBUM_GAIN/PEAK in Vorbis comments and ID3v2
  * TXXX frames; R128_TRACK/ALBUM_GAIN in Opus (Q7.8 dB for -23 LUFS: +5 dB for the -18 LUFS of
@@ -11,7 +12,8 @@
 #include "tags.h"
 #include "text.h"
 
-#define SCAN_MAX (512 * 1024)                   /* never look further into a file */
+#define SCAN_MAX (512 * 1024)                   /* never look further into a file (past the */
+                                                /* samples of WAV and AIFF: further than them) */
 
 /* ---- reading the file ---- */
 static struct {
@@ -20,6 +22,7 @@ static struct {
     uint32_t pos;                               /* file offset of buf[0] */
     uint32_t len;
     uint32_t chunk;                             /* bytes read per miss: 2 KiB, 16 KiB for Ogg */
+    uint32_t lim;                               /* SCAN_MAX, or that much past the samples */
     uint8_t buf[16384] __attribute__((aligned(4)));
 } rd;
 
@@ -28,7 +31,7 @@ static struct {
  * device). The Ogg comment header is crossed page by page: 16 KiB at a time. */
 static int rd_at(uint32_t pos, uint32_t n, const uint8_t **p)
 {
-    if (n > sizeof rd.buf - 512 || pos >= rd.f->size || pos + n > rd.f->size || pos + n > SCAN_MAX)
+    if (n > sizeof rd.buf - 512 || pos >= rd.f->size || pos + n > rd.f->size || pos + n > rd.lim)
         return -1;
     if (pos < rd.pos || pos + n > rd.pos + rd.len) {
         uint32_t base = pos & ~511u, m = rd.chunk;
@@ -46,6 +49,7 @@ static int rd_at(uint32_t pos, uint32_t n, const uint8_t **p)
 }
 
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
+static uint32_t be16(const uint8_t *p) { return (uint32_t)p[0] << 8 | p[1]; }
 static uint32_t syncsafe(const uint8_t *p) { return p[0] << 21 | p[1] << 14 | p[2] << 7 | p[3]; }
 
 /* ---- text into a field: UTF-8 out, cut on a character boundary ---- */
@@ -263,10 +267,11 @@ static void id3_txxx(struct tags *t, const uint8_t *d, uint32_t n)
 }
 
 /* ---- ID3 ---- */
-static uint32_t id3v2(struct tags *t)
+/* An ID3v2 tag at 'base': the start of an MP3, or a chunk of WAV and AIFF */
+static uint32_t id3v2(struct tags *t, uint32_t base)
 {
     const uint8_t *h;
-    if (rd_at(0, 10, &h) || h[0] != 'I' || h[1] != 'D' || h[2] != '3' || h[3] < 2 || h[3] > 4)
+    if (rd_at(base, 10, &h) || h[0] != 'I' || h[1] != 'D' || h[2] != '3' || h[3] < 2 || h[3] > 4)
         return 0;
     int ver = h[3], flags = h[5];
     uint32_t end = 10 + syncsafe(h + 6), pos = 10;
@@ -274,14 +279,14 @@ static uint32_t id3v2(struct tags *t)
         return end;                             /* whole-tag unsynchronisation: not read */
     if (ver >= 3 && (flags & 0x40)) {           /* extended header */
         const uint8_t *x;
-        if (rd_at(10, 4, &x))
+        if (rd_at(base + 10, 4, &x))
             return end;
         pos += ver == 4 ? syncsafe(x) : 4 + be32(x);
     }
     int hl = ver == 2 ? 6 : 10;
     while (pos + hl <= end) {
         const uint8_t *fh;
-        if (rd_at(pos, (uint32_t)hl, &fh) || !fh[0])
+        if (rd_at(base + pos, (uint32_t)hl, &fh) || !fh[0])
             break;
         uint32_t size = ver == 2 ? (uint32_t)fh[3] << 16 | fh[4] << 8 | fh[5] :
                         ver == 4 ? syncsafe(fh + 4) : be32(fh + 4);
@@ -305,7 +310,7 @@ static uint32_t id3v2(struct tags *t)
         if ((dst || trk) && size >= 2 && !(fflags & (ver == 4 ? 0x0e : 0xc0))) {
             uint32_t n = size > 1024 ? 1024 : size;
             const uint8_t *d;
-            if (!rd_at(pos + hl, n, &d)) {
+            if (!rd_at(base + pos + hl, n, &d)) {
                 if (trk == 2)
                     id3_txxx(t, d, n);
                 else if (trk) {
@@ -505,15 +510,21 @@ static void ogg(struct tags *t)
 }
 
 /* ---- WAV: LIST INFO ---- */
+/* The tags may follow the samples: the window goes on past them */
+static void past_samples(uint32_t end)
+{
+    rd.lim = end < 0xffffffffu - SCAN_MAX ? end + SCAN_MAX : 0xffffffffu;
+}
+
 static void wav(struct tags *t)
 {
     const uint8_t *p;
     if (rd_at(0, 12, &p) || __builtin_memcmp(p, "RIFF", 4) || __builtin_memcmp(p + 8, "WAVE", 4))
         return;
-    for (uint32_t pos = 12; pos + 8 <= rd.f->size && pos < SCAN_MAX;) {
+    for (uint32_t pos = 12; pos + 8 <= rd.f->size && pos < rd.lim;) {
         if (rd_at(pos, 12, &p))
             return;
-        uint32_t len = le32(p + 4);
+        uint32_t len = le32(p + 4), next = pos + 8 + len + (len & 1);
         if (!__builtin_memcmp(p, "LIST", 4) && !__builtin_memcmp(p + 8, "INFO", 4)) {
             for (uint32_t q = pos + 12; q + 8 <= pos + 8 + len;) {
                 const uint8_t *s;
@@ -529,11 +540,114 @@ static void wav(struct tags *t)
                     set_text(dst, max, s, n, 3);
                 q += 8 + n + (n & 1);
             }
+        } else if (!__builtin_memcmp(p, "id3 ", 4) || !__builtin_memcmp(p, "ID3 ", 4))
+            id3v2(t, pos + 8);
+        else if (!__builtin_memcmp(p, "data", 4))
+            past_samples(next);
+        if (next <= pos)
             return;
+        pos = next;
+    }
+}
+
+/* AIFF and AIFF-C: chunk sizes big-endian; an "ID3 " chunk (iTunes, ffmpeg), else NAME / AUTH */
+static void aiff(struct tags *t)
+{
+    const uint8_t *p;
+    if (rd_at(0, 12, &p) || __builtin_memcmp(p, "FORM", 4) ||
+        (__builtin_memcmp(p + 8, "AIFF", 4) && __builtin_memcmp(p + 8, "AIFC", 4)))
+        return;
+    for (uint32_t pos = 12; pos + 8 <= rd.f->size && pos < rd.lim;) {
+        if (rd_at(pos, 8, &p))
+            return;
+        uint32_t len = be32(p + 4), next = pos + 8 + len + (len & 1);
+        int name = !__builtin_memcmp(p, "NAME", 4), auth = !__builtin_memcmp(p, "AUTH", 4);
+        char *dst = name && !t->title[0] ? t->title : auth && !t->artist[0] ? t->artist : 0;
+        if (dst && len <= 512 && !rd_at(pos + 8, len, &p))
+            set_text(dst, name ? (int)sizeof t->title : (int)sizeof t->artist, p, len, 0);
+        else if (!__builtin_memcmp(p, "ID3 ", 4) || !__builtin_memcmp(p, "id3 ", 4))
+            id3v2(t, pos + 8);
+        else if (!__builtin_memcmp(p, "SSND", 4))
+            past_samples(next);
+        if (next <= pos)
+            return;
+        pos = next;
+    }
+}
+
+/* MP4 (M4A, 0.75, ETUDE §55): moov/udta/meta/ilst; each item holds a 'data' box (type, locale,
+ * then the value): ©nam, ©ART, ©alb, trkn, and ---- items named replaygain_* (beets, foobar2000) */
+static int mp4_box(uint32_t pos, uint32_t end, const uint8_t **id, uint32_t *body, uint32_t *next)
+{
+    const uint8_t *p;
+    if (pos + 8 > end || rd_at(pos, 16 < end - pos ? 16 : 8, &p))
+        return -1;
+    uint32_t size = be32(p);
+    *id = p + 4;
+    *body = pos + 8;
+    if (size == 1) {
+        if (end - pos < 16 || be32(p + 8))
+            return -1;
+        size = be32(p + 12);
+        *body = pos + 16;
+    } else if (!size)
+        size = end - pos;
+    if (size < *body - pos || size > end - pos)
+        return -1;
+    *next = pos + size;
+    return 0;
+}
+
+static int mp4_find(uint32_t from, uint32_t end, const char *type, uint32_t *body, uint32_t *bend)
+{
+    const uint8_t *id;
+    for (uint32_t pos = from, next; !mp4_box(pos, end, &id, body, &next); pos = next) {
+        if (!__builtin_memcmp(id, type, 4)) {
+            *bend = next;
+            return 0;
         }
-        if (!__builtin_memcmp(p, "data", 4))
-            return;
-        pos += 8 + len + (len & 1);
+        if (!__builtin_memcmp(id, "mdat", 4))
+            past_samples(next);                 /* moov after the samples (ffmpeg) */
+    }
+    return -1;
+}
+
+static void mp4(struct tags *t)
+{
+    uint32_t b, e, end = rd.f->size;
+    if (mp4_find(0, end, "moov", &b, &e) || mp4_find(b, e, "udta", &b, &e) ||
+        mp4_find(b, e, "meta", &b, &e) || mp4_find(b + 4, e, "ilst", &b, &e))
+        return;
+    const uint8_t *id, *p;
+    for (uint32_t pos = b, ib, next; !mp4_box(pos, e, &id, &ib, &next); pos = next) {
+        char *dst = 0;
+        int max = 0;
+        uint32_t c = be32(id), db, de;
+        if (c == 0xa96e616d) { dst = t->title; max = sizeof t->title; }         /* ©nam */
+        else if (c == 0xa9415254) { dst = t->artist; max = sizeof t->artist; }  /* ©ART */
+        else if (c == 0xa9616c62) { dst = t->album; max = sizeof t->album; }    /* ©alb */
+        else if (c != 0x74726b6e && c != 0x2d2d2d2d)                            /* trkn, ---- */
+            continue;
+        char key[32];
+        key[0] = 0;
+        if (c == 0x2d2d2d2d) {                  /* ----: mean, name, data */
+            uint32_t nb, ne;
+            if (mp4_find(ib, next, "name", &nb, &ne) || ne - nb <= 4 || ne - nb > 4 + 31 ||
+                rd_at(nb + 4, ne - nb - 4, &p) || !rg_key(p, ne - nb - 4, key, sizeof key))
+                continue;
+        }
+        if (mp4_find(ib, next, "data", &db, &de) || de - db < 8 || de - db > 8 + 512 ||
+            rd_at(db, de - db, &p))
+            continue;
+        uint32_t n = de - db - 8;
+        if (dst)
+            set_text(dst, max, p + 8, n, 3);
+        else if (key[0]) {
+            char v[32];
+            set_text(v, sizeof v, p + 8, n, 3);
+            rg_field(t, key, v);
+        } else if (n >= 4)
+            t->track = be16(p + 10);
     }
 }
 
@@ -546,10 +660,11 @@ void tags_read(const struct fat_file *f, uint32_t codec, struct tags *t)
     t->ogg_end_page = t->ogg_end_seg = 0;
     rd.chunk = codec == HP_CODEC_VORBIS || codec == HP_CODEC_OPUS ? sizeof rd.buf : 2048;
     rd.f = f;
+    rd.lim = SCAN_MAX;
     rd.c.index = rd.c.cluster = 0;
     rd.pos = rd.len = 0;
     if (codec == HP_CODEC_MP3) {
-        id3v2(t);
+        id3v2(t, 0);
         if (!t->title[0] || !t->artist[0])
             id3v1(t);
     } else if (codec == HP_CODEC_FLAC)
@@ -558,4 +673,8 @@ void tags_read(const struct fat_file *f, uint32_t codec, struct tags *t)
         ogg(t);
     else if (codec == HP_CODEC_WAV)
         wav(t);
+    else if (codec == HP_CODEC_AIFF)
+        aiff(t);
+    else if (codec == HP_CODEC_AAC)
+        mp4(t);
 }

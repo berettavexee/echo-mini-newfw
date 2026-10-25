@@ -1,6 +1,6 @@
 # User manual
 
-This manual is for the ECHO MINI new firmware, version 0.73. It describes what the player shows
+This manual is for the ECHO MINI new firmware, version 0.75. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
 The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing Daft
@@ -202,16 +202,19 @@ the next one.
 
 | Format | Extensions | Notes |
 |---|---|---|
-| WAV | `.wav` | PCM |
+| WAV | `.wav` | PCM, 8 to 32 bits; RIFF INFO or ID3v2 tags |
+| AIFF | `.aif`, `.aiff`, `.aifc` | PCM, 8 to 32 bits (AIFF-C: uncompressed only); ID3v2 tags (ReplayGain too), else NAME / AUTH |
 | FLAC | `.flac` | |
 | MP3 | `.mp3` | ID3v2 tags, ReplayGain from ID3v2 |
 | Ogg Vorbis | `.ogg` | |
 | Opus | `.opus` | R128 gain tags |
+| AAC | `.m4a`, `.m4b`, `.mp4` | AAC-LC, mono or stereo; iTunes tags and ReplayGain; gapless |
 
 Sample rates of 44.1, 48 and 96 kHz. Tracks play gapless: the next track is queued behind the
 end of the current one.
 
-Not supported yet: M4A (AAC, ALAC), AIFF. Files of 4 GiB or more are not listed.
+Not supported yet: ALAC, HE-AAC, AAC in `.aac` files; floating-point WAV and AIFF. Files of 4 GiB or more are not
+listed.
 
 Storage:
 - the internal memory (FAT32);

@@ -29,15 +29,30 @@ into the code. Any copy of the image must ship with that license.
 | `playscreen.c`, `menu.c`, `uidraw.c` | play screen and its keys; main menu, date and time; drawing helpers |
 | `resume.c` | resume state in the last sector of the log file |
 | `player.c` | track playback: core B control, input and output rings, gapless chaining, rate changes, core B clock |
+| `mp4.c` | MP4 audio (M4A): boxes, sample tables read through small windows, gapless info (iTunSMPB, edit list), seek; the frames sent to core B as a packet stream |
 | `audio.c` | the two CS43131 DACs, I2S1, DMAC1 ring in SYSRAM, volume |
 | `hifi.c` | core B power, loading of our codec images, start |
-| `tags.c` | ID3v2/ID3v1, Vorbis comments, RIFF INFO, ReplayGain |
+| `tags.c` | ID3v2/ID3v1, Vorbis comments, RIFF INFO, AIFF chunks, MP4 `ilst` (iTunes), ReplayGain |
 | `fat.c` | FAT32 and exFAT, read only (internal memory and card) |
 | `mshc.c`, `emmc.c`, `sd.c` | SD/MMC host controller, eMMC, microSD card |
 | `usb.c`, `msc.c` | USB device and mass storage |
 | `lcd.c`, `font.c` | 320 x 170 panel, text |
 | `log.c` | log ring in PMU-SRAM, written to `NEWFWLOG.TXT` |
 | `rtc.c`, `i2c.c`, `board.c` | real-time clock, I2C, clocks and GPIO |
+
+## Core B codecs
+
+Each is an image of its own (`hifi/rt.c`, the runtime, plus one decoder), loaded into the HiFi
+core's RAM when a track needs it; the protocol with core A is `src/hifi_proto.h`.
+
+| Image | Formats | Decoder |
+|---|---|---|
+| `codec_pcm.c` | WAV, AIFF, AIFF-C (uncompressed, 8 to 32 bits) | ours |
+| `codec_flac.c` | FLAC | dr_flac (`ext/`) |
+| `codec_mp3.c` | MP3 | PacketVideo `pvmp3dec` (AOSP, Apache-2.0), Thumb-2 assembly in `mp3asm/` |
+| `codec_vorbis.c` | Ogg Vorbis | Tremor lowmem (BSD) |
+| `codec_opus.c` | Opus | libopus 1.5.2 (BSD) |
+| `codec_aac.c` | AAC-LC (from M4A, read by `src/mp4.c`) | PacketVideo `aacdec` (AOSP, Apache-2.0), without AAC+ |
 
 ## Test in emulation
 
