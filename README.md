@@ -1,5 +1,11 @@
 # ECHO MINI new firmware
 
+> The interface is minimalist and rough around the edges; the primary aim is to test codec
+> addition, gapless playback and ReplayGain. These are things I couldn’t do by patching the
+> official firmware.
+> This project should be seen as a test platform that has grown in scope. If you’re looking for
+> a more polished product, take a look at [Recho](https://recho.atzkey.workers.dev/).
+
 A from-scratch firmware for the main core of the SNOWSKY ECHO MINI digital audio player
 (Rockchip RKNanoD, 8 GB model), with our own decoders on the HiFi core (core B). It is built
 by studying the official firmware V3.9.0; no code of it, of the Rockchip SDK, of ReChord or
