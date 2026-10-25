@@ -43,7 +43,8 @@ into the code. Any copy of the image must ship with that license.
 ## Core B codecs
 
 Each is an image of its own (`hifi/rt.c`, the runtime, plus one decoder), loaded into the HiFi
-core's RAM when a track needs it; the protocol with core A is `src/hifi_proto.h`.
+core's RAM when a track needs it; the protocol with core A is `src/hifi_proto.h`. The runtime upsamples
+any rate the DACs do not take (they take 8 to 192 kHz: ETUDE §59-§60) before the output ring.
 
 | Image | Formats | Decoder |
 |---|---|---|
@@ -53,7 +54,7 @@ core's RAM when a track needs it; the protocol with core A is `src/hifi_proto.h`
 | `codec_vorbis.c` | Ogg Vorbis | Tremor lowmem (BSD) |
 | `codec_opus.c` | Opus | libopus 1.5.2 (BSD) |
 | `codec_aac.c` | AAC-LC (from M4A, read by `src/mp4.c`) | PacketVideo `aacdec` (AOSP, Apache-2.0), without AAC+ |
-| `codec_alac.cpp` | ALAC (from M4A, read by `src/mp4.c`) | Apple's reference decoder (Apache-2.0) |
+| `codec_alac.c` | ALAC (from M4A, read by `src/mp4.c`) | ours (`alacdec.c`), derived from Apple's reference decoder (Apache-2.0) |
 
 ## Test in emulation
 
@@ -66,7 +67,8 @@ keys, eMMC, microSD card, DACs, DMA and core B:
 
 `mkdisk.py` needs a dump of the device's boot area (`--boot`, or `$ECHO_BOOTDUMP`), which is
 not part of this repository. `tools/exfat_add.py` fills an exFAT image made by `mkfs.exfat`;
-`tools/readlog.py` decodes `NEWFWLOG.TXT`.
+`tools/readlog.py` decodes `NEWFWLOG.TXT`. `tools/mkupsample.py` generates the upsampler's filters
+(`hifi/upsample_tab.h`).
 
 ## On the device
 

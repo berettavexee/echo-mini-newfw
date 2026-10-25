@@ -37,5 +37,7 @@ int in_seek(uint32_t pos);      /* forward to stream offset pos: 0 ok; core A ju
 uint32_t out_space(void);       /* bytes that can be written now */
 void out_word(uint32_t w);      /* one word, the caller checked the space */
 void out_write(const uint32_t *w, uint32_t words);   /* several, the caller checked the space */
+void out_done(uint32_t frames);  /* frames written by the codec: ctl->frames (upsampled: the
+                                   runtime counts the frames it writes instead) */
 
 #endif

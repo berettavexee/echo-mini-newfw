@@ -254,6 +254,6 @@ int codec_run(void)
         for (uint32_t i = 0; i < n; i++, p++)
             out_word((uint16_t)p[0] | (uint32_t)(uint16_t)p[0] << 16);
     }
-    ctl->frames += n;
+    out_done(n);
     return 1;
 }

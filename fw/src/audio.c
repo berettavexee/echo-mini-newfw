@@ -74,6 +74,20 @@ static const struct rate {
     { 96000, { 0x00, 0x30, 0x19, 0x09 }, 0x00033f3f, 4 },
     { 176400, { 0x04, 0x49, 0x19, 0x03 }, 0x00013f3f, 5 },
     { 192000, { 0x00, 0x30, 0x19, 0x09 }, 0x00013f3f, 6 },
+    /* The other rates of the stock firmware (ETUDE §60), checked on the device with NEWFWRT2: its
+     * ACODEC PLL tables (HIFIEC39 0x48c8c) and DAC index (function 0x0306185e: 0 for the 8 kHz
+     * family, 1 for 11.025-44.1, 2 for 12-48), MCLK = PLL / 5. Its entries at 28.224 MHz (11.025,
+     * 22.05 kHz) and 81.92 MHz (64, 128 kHz) gave no clock or a far too slow one: proven PLLs
+     * instead, with another I2S MCLK/SCLK ratio (CKR bits 23:16 + 1) */
+    { 8000, { 0x00, 0x30, 0x32, 0x08 }, 0x00073f3f, 0 },
+    { 11025, { 0x06, 0x24, 0x19, 0x03 }, 0x000f3f3f, 1 },     /* 56.448 MHz, MCLK 1024 fs */
+    { 12000, { 0x00, 0x18, 0x19, 0x0a }, 0x00073f3f, 2 },
+    { 16000, { 0x00, 0x30, 0x32, 0x08 }, 0x00033f3f, 0 },
+    { 22050, { 0x06, 0x24, 0x19, 0x03 }, 0x00073f3f, 1 },     /* 56.448 MHz, MCLK 512 fs */
+    { 24000, { 0x00, 0x18, 0x19, 0x0a }, 0x00033f3f, 2 },
+    { 32000, { 0x00, 0x60, 0x32, 0x08 }, 0x00033f3f, 0 },
+    { 64000, { 0x00, 0x60, 0x32, 0x08 }, 0x00013f3f, 0 },     /* 40.96 MHz, MCLK 128 fs */
+    { 128000, { 0x00, 0x30, 0x19, 0x09 }, 0x00023f3f, 0 },    /* 122.88 MHz, MCLK 192 fs */
 };
 static const struct rate *cur_rate = &rates[0];
 static int standby;                             /* paused, headphone stage and ASP powered down */

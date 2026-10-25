@@ -143,13 +143,13 @@ void in_skip(uint32_t n)
     ctl->in_rd += n < a ? n : a;
 }
 
-uint32_t out_space(void)
+static uint32_t raw_space(void)
 {
     uint32_t fill = (ctl->out_wr + HP_OUT_SIZE - ctl->out_rd) % HP_OUT_SIZE;
     return fill < HP_OUT_SIZE - HP_OUT_GUARD ? HP_OUT_SIZE - HP_OUT_GUARD - fill : 0;
 }
 
-void out_write(const uint32_t *w, uint32_t words)
+static void raw_write(const uint32_t *w, uint32_t words)
 {
     uint32_t o = ctl->out_wr, n = words * 4;
     uint32_t k = HP_OUT_SIZE - o < n ? HP_OUT_SIZE - o : n;
@@ -159,12 +159,171 @@ void out_write(const uint32_t *w, uint32_t words)
     ctl->out_wr = o >= HP_OUT_SIZE ? o - HP_OUT_SIZE : o;
 }
 
-void out_word(uint32_t w)
+static void raw_word(uint32_t w)
 {
     uint32_t o = ctl->out_wr;
     *(volatile uint32_t *)(HP_OUT_BASE + o) = w;
     o += 4;
     ctl->out_wr = o == HP_OUT_SIZE ? 0 : o;
+}
+
+/* ---- upsampling (ETUDE §59) ----
+ * A rate the DACs do not take is raised by the smallest integer factor L (2, 3, 4 or 6) that gives
+ * 44.1, 48, 88.2 or 96 kHz. Since 0.79 the DACs take the 15 rates of the stock firmware (8 to
+ * 192 kHz, ETUDE §60): only unusual rates (7.35 kHz...) come here.
+ * after codec_open, the rate, the length and the start are multiplied by L, out_space() is
+ * divided by it, and every frame the codec writes goes through a polyphase windowed-sinc filter
+ * (hifi/upsample_tab.h, tools/mkupsample.py: 24 taps per phase, -0.1 dB up to 0.4 of the input
+ * rate, -82 dB from 0.6) before the ring. The filter's delay (a whole number of output frames:
+ * odd length) is dropped at the start and flushed at the end: the output has exactly L times the
+ * frames of the input (gapless kept). ctl->frames counts the frames written to the ring, as they
+ * are written (out_done() of the codecs does nothing then). */
+#include "upsample_tab.h"
+
+static struct {
+    uint32_t L;                         /* 1: off */
+    const int16_t *h;
+    uint32_t fb;                        /* bytes per frame in the ring (4 or 8) */
+    uint32_t half, have;                /* 8-byte frames: the left word, kept until the right */
+    uint32_t pos;                       /* next place in hist */
+    uint32_t drop;                      /* output frames still to drop: the filter delay */
+    uint32_t tail;                      /* at the end: output frames still to write */
+    int flushing;
+    int32_t hist[2][2 * UP_TAPS];       /* each sample twice: T in a row from any place */
+} up;
+
+static int up_setup(void)
+{
+    static const uint32_t dac[] = { 44100, 48000, 88200, 96000, 176400, 192000, 8000, 11025, 12000,
+                                    16000, 22050, 24000, 32000, 64000, 128000 };   /* §60 */
+    static const uint8_t factors[] = { 2, 3, 4, 6 };
+    uint32_t r = ctl->rate;
+    up.L = 1;
+    for (unsigned i = 0; i < sizeof dac / sizeof *dac; i++)
+        if (r == dac[i])
+            return 0;
+    for (unsigned f = 0; f < sizeof factors && up.L == 1; f++)
+        for (unsigned i = 0; i < 4; i++)        /* up to 96 kHz */
+            if (r * factors[f] == dac[i])
+                up.L = factors[f];
+    if (up.L == 1)
+        return -HP_ERR_UNSUPPORTED;
+    up.h = up.L == 2 ? up_h2 : up.L == 3 ? up_h3 : up.L == 4 ? up_h4 : up_h6;
+    up.fb = ctl->frame_bytes;
+    up.have = up.pos = up.flushing = 0;
+    up.drop = UP_TAPS * up.L / 2 - 1;       /* (taps - 1) / 2, with taps = T * L - 1 */
+    memset(up.hist, 0, sizeof up.hist);
+    ctl->rate = r * up.L;
+    ctl->total_frames *= up.L;
+    ctl->start_frame *= up.L;
+    return 0;
+}
+
+static inline int32_t sat(int32_t v, int32_t lim)
+{
+    return v > lim - 1 ? lim - 1 : v < -lim ? -lim : v;
+}
+
+/* One input frame (16-bit samples, or 24-bit right-aligned) into L output frames */
+static void up_frame(int32_t l, int32_t r)
+{
+    uint32_t p = up.pos, L = up.L;
+    up.hist[0][p] = up.hist[0][p + UP_TAPS] = l;
+    up.hist[1][p] = up.hist[1][p + UP_TAPS] = r;
+    up.pos = p + 1 == UP_TAPS ? 0 : p + 1;
+    const int32_t *xl = &up.hist[0][p + UP_TAPS], *xr = &up.hist[1][p + UP_TAPS];
+    for (uint32_t q = 0; q < L; q++) {
+        const int16_t *h = up.h + q;
+        if (up.fb == 4) {
+            int32_t al = 0, ar = 0;
+            for (int k = 0; k < UP_TAPS; k++, h += L) {
+                al += *h * xl[-k];
+                ar += *h * xr[-k];
+            }
+            if (up.drop) {
+                up.drop--;
+                continue;
+            }
+            if (up.flushing && !up.tail--)
+                return;
+            raw_word((uint16_t)sat(al >> 14, 32768) | (uint32_t)sat(ar >> 14, 32768) << 16);
+            ctl->frames++;
+        } else {
+            int64_t al = 0, ar = 0;
+            for (int k = 0; k < UP_TAPS; k++, h += L) {
+                al += (int64_t)*h * xl[-k];
+                ar += (int64_t)*h * xr[-k];
+            }
+            if (up.drop) {
+                up.drop--;
+                continue;
+            }
+            if (up.flushing && !up.tail--)
+                return;
+            raw_word((uint32_t)sat((int32_t)(al >> 14), 1 << 23) << 8);
+            raw_word((uint32_t)sat((int32_t)(ar >> 14), 1 << 23) << 8);
+            ctl->frames++;
+        }
+    }
+}
+
+static void up_word(uint32_t w)
+{
+    if (up.fb == 4)
+        up_frame((int16_t)w, (int16_t)(w >> 16));
+    else if (!up.have) {
+        up.half = w;
+        up.have = 1;
+    } else {
+        up.have = 0;
+        up_frame((int32_t)up.half >> 8, (int32_t)w >> 8);
+    }
+}
+
+/* At the end of the stream: silence pushes the last samples out, exactly the frames dropped at
+ * the start */
+static void up_flush(void)
+{
+    up.flushing = 1;
+    up.tail = UP_TAPS * up.L / 2 - 1;
+    for (uint32_t i = 0; i < UP_TAPS / 2 && up.tail; i++) {
+        while (raw_space() < up.L * up.fb)
+            rt_wait();
+        up_frame(0, 0);
+    }
+}
+
+uint32_t out_space(void)
+{
+    uint32_t s = raw_space();
+    if (up.L <= 1)
+        return s;
+    s /= up.L;
+    return s - s % up.fb;                       /* whole input frames */
+}
+
+void out_write(const uint32_t *w, uint32_t words)
+{
+    if (up.L <= 1) {
+        raw_write(w, words);
+        return;
+    }
+    while (words--)
+        up_word(*w++);
+}
+
+void out_done(uint32_t frames)
+{
+    if (up.L <= 1)                              /* upsampled: counted in up_frame() */
+        ctl->frames += frames;
+}
+
+void out_word(uint32_t w)
+{
+    if (up.L <= 1)
+        raw_word(w);
+    else
+        up_word(w);
 }
 
 /* ---- heap ---- */
@@ -290,6 +449,8 @@ static void run(void)
         ctl->work_loops++;
         if (ctl->state == HP_OPENING) {
             r = codec_open();
+            if (r == 0)
+                r = up_setup();                 /* a rate the DACs do not take: upsampled */
             if (r == 0) {
                 ctl->state = HP_FORMAT;
                 r = 1;
@@ -299,6 +460,8 @@ static void run(void)
                 error(r);
         } else if (ctl->state == HP_PLAYING) {
             r = codec_run();
+            if (r == 2 && up.L > 1)
+                up_flush();
             if (r == 2)
                 ctl->state = HP_END;
             else if (r < 0)

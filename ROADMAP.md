@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-25, version 0.76.
+Last update: 2026-10-25, version 0.79.
 
 ## Done, validated on the device
 
@@ -26,7 +26,8 @@ Last update: 2026-10-25, version 0.76.
 | Firmware installer from the main menu | 0.1x | §11 |
 | AIFF and AIFF-C (uncompressed), in the WAV image; tags after the samples read in WAV and AIFF | 0.74 | §53 |
 | AAC-LC in M4A: PacketVideo decoder, MP4 read on core A, gapless, exact seek, iTunes tags and ReplayGain | 0.75 | §54-§55 |
-| ALAC in M4A (16, 20, 24 bits): Apple's reference decoder, on the same MP4 reader | 0.76 | §56 |
+| ALAC in M4A (16, 20, 24 bits), on the same MP4 reader; our decoder derived from Apple's (half the load) | 0.76, 0.77 | §56-§57 |
+| Sample rates from 8 to 192 kHz played as they are (the stock firmware's 15 rates, two PLLs corrected); upsampling for unusual rates | 0.78, 0.79 | §59-§60 |
 
 ## Done, waiting for a test on the device
 
@@ -86,6 +87,21 @@ Last update: 2026-10-25, version 0.76.
   ReplayGain (§56). Bit-exact against ffmpeg in the emulator (16-bit, 24/96, mono, after a
   seek). Validated on the device (Pink Floyd tracks converted from FLAC): gapless, tags, seeks,
   damaged files; core B at 41 MHz for 16-bit stereo, 108 MHz (200 MHz level) for 24/96.
+- 0.77: our own ALAC decoder (`hifi/alacdec.c`, derived from Apple's): hardware clz in the Rice
+  decoder, word reads, the predictor unrolled for orders 1 to 8, output in the ring's format;
+  bit-exact with Apple's, half its instructions on the QEMU bench (16-bit stereo -50 %, 24/96
+  -59 %) (§57). Validated on the device: 21-25 MHz for 16-bit stereo, 49-51 MHz for 24/96.
+- 0.78: sample rates the DACs do not take (MP3 MPEG-2/2.5 at 8-24 kHz, 32 kHz files) were played
+  at 44.1 kHz, at the wrong speed (15 MP3 at 22.05 kHz in the library): now upsampled on core B
+  by 2, 3, 4 or 6 to 44.1-96 kHz with a polyphase filter (-0.1 dB to 0.4 of the input rate,
+  images -70 to -77 dB), exact length, gapless kept (§59). Emulator: bit-exact with a model,
+  72 dB against soxr.
+- 0.79: the DACs take the 15 rates of the stock firmware, 8 to 192 kHz (found in it: ACODEC PLL
+  tables and the DAC rate index; its two PLL entries for 11.025/22.05 and 64/128 kHz are wrong on
+  this hardware and replaced by proven ones): all checked by ear with a test image (NEWFWRT2).
+  Low rates now play as they are (the upsampler stays for unusual rates); the drain before a rate
+  change waits for the ring's real duration (a fixed 2 s cut the end of low-rate tracks) (§60).
+  Validated on the device: every rate plays its whole file.
 
 ## To do
 
@@ -177,9 +193,8 @@ Other items:
 - A spoken "battery low" instead of the beeps: a short recording in the image (15-30 KiB), made
   with a speech synthesiser whose licence lets us ship the sound.
 
-- ALAC: a faster decoder path. Apple's reference C decoder costs 41 MHz on 16-bit stereo (FLAC:
-  15 MHz) and keeps core B at 200 MHz on 24/96 (§56): its Rice decoding (dyn_decomp) and its
-  predictor, or the hardware LPC of the HIFIACC as the stock firmware does.
+- ALAC: the predictor (63 % of our decoder's time, §57) on the HIFIACC's adaptive FIR, as the
+  stock firmware does, or in Thumb-2 assembly; not needed for now (16-bit at the lowest step).
 - AAC: assembly optimisations, not a priority (core B already at 25 MHz, the lowest level, for
   AAC 125 kb/s, §55): a Cortex-M3 header for the fixed-point operations (smull/smlal; the
   decoder's ARMv5TE variant uses DSP instructions the M3 lacks), then hand-written Thumb-2 for

@@ -91,6 +91,6 @@ int codec_run(void)
     while (out_space() < k * 4)
         rt_wait();
     out_write((const uint32_t *)pcm + s, k);
-    ctl->frames += k;
+    out_done(k);
     return 1;
 }

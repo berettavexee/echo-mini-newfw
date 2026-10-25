@@ -398,6 +398,14 @@ static void gov_report(const char *name)
                gov.ms[2], gov.ms[3], gov.ms[4], gov.ms[5], gov.ms[6], gov.changes);
 }
 
+/* The longest a drain may take: the DAC ring at the rate playing (1.1 s at 44.1 kHz, 6.1 s at
+ * 8 kHz in 16 bits), plus 1 s (0.79, ETUDE §60: a fixed 2 s cut the end of the low rates) */
+static uint32_t drain_limit_us(void)
+{
+    uint32_t bps = audio.rate * audio.frame_bytes;
+    return (bps ? (uint32_t)((uint64_t)audio.ring_size * 1000000 / bps) : 2000000) + 1000000;
+}
+
 static void chain_done(void)
 {
     dac.running = 0;
@@ -414,12 +422,13 @@ void player_chain_end(void)
     if (dac.running) {
         static const uint32_t zero[256];
         uint32_t t0 = ticks(), end = audio.wr;  /* the end of the last track's frames */
-        while (audio_free() < sizeof zero && ticks() - t0 < 2000000) {
+        uint32_t lim = drain_limit_us();
+        while (audio_free() < sizeof zero && ticks() - t0 < lim) {
             wdt_kick();
             audio_update();
         }
         audio_write(zero, sizeof zero);         /* 1 KiB of silence: the margin of the cut */
-        while ((int32_t)(audio.rd - end) < 0 && ticks() - t0 < 2000000) {
+        while ((int32_t)(audio.rd - end) < 0 && ticks() - t0 < lim) {
             wdt_kick();                         /* until the DMA is past the last frame */
             audio_update();
         }
@@ -429,7 +438,8 @@ void player_chain_end(void)
 
 /* One round of a drain followed from the main loop: silence written behind the last frame as
  * the DMA frees room (the loop may come back late: the DMA never reaches stale data), 1 once
- * the DMA is past the last frame (or after 2 s of playing, a pause not counted) */
+ * the DMA is past the last frame (or after the ring's duration and 1 s of playing, a pause not
+ * counted) */
 static int drain_step(void)
 {
     static const uint32_t zero[256];
@@ -444,7 +454,7 @@ static int drain_step(void)
     heard_update();
     if (audio_paused)
         drain.t0 = ticks();                     /* a pause holds the DMA: no time-out then */
-    return (int32_t)(audio.rd - drain.end) >= 0 || ticks() - drain.t0 >= 2000000;
+    return (int32_t)(audio.rd - drain.end) >= 0 || ticks() - drain.t0 >= drain_limit_us();
 }
 
 int player_drain_service(void)

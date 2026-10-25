@@ -130,7 +130,7 @@ int codec_run(void)
             uint16_t l = (uint16_t)pcm.s16[i * ch], r = (uint16_t)pcm.s16[i * ch + ch - 1];
             out_word(l | (uint32_t)r << 16);
         }
-        ctl->frames += n;
+        out_done(n);
     } else {
         uint32_t n = (uint32_t)drflac_read_pcm_frames_s32(flac, want, pcm.s32);
         if (!n)
@@ -140,7 +140,7 @@ int codec_run(void)
             out_word((uint32_t)pcm.s32[i * ch]);
             out_word((uint32_t)pcm.s32[i * ch + ch - 1]);
         }
-        ctl->frames += n;
+        out_done(n);
     }
     return 1;
 }

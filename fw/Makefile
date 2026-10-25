@@ -33,15 +33,15 @@ build/fw.elf: $(OBJS) link.ld
 
 # Core B codec images (our runtime + one decoder each), packed into the image
 HCFLAGS = -mcpu=cortex-m3 -mthumb -O2 -g -ffreestanding -fno-builtin -nostdlib \
-          -ffunction-sections -fdata-sections -Wall -Wextra
+          -ffunction-sections -fdata-sections -Wall -Wextra $(EXTRA)
 HLDFLAGS = -T hifi/link.ld -Wl,--gc-sections -nostdlib -lgcc
 
-build/hifi_pcm.elf: hifi/rt.c hifi/codec_pcm.c hifi/rt.h hifi/link.ld src/hifi_proto.h
+build/hifi_pcm.elf: hifi/rt.c hifi/codec_pcm.c hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h
 	@mkdir -p build
 	$(CC) $(HCFLAGS) hifi/rt.c hifi/codec_pcm.c $(HLDFLAGS) -Wl,-Map=build/hifi_pcm.map -o $@
 	$(CROSS)size $@
 
-build/hifi_flac.elf: hifi/rt.c hifi/codec_flac.c hifi/ext/dr_flac.h hifi/rt.h hifi/link.ld src/hifi_proto.h
+build/hifi_flac.elf: hifi/rt.c hifi/codec_flac.c hifi/ext/dr_flac.h hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h
 	@mkdir -p build
 	$(CC) $(HCFLAGS) -Wno-unused-function hifi/rt.c hifi/codec_flac.c $(HLDFLAGS) -Wl,-Map=build/hifi_flac.map -o $@
 	$(CROSS)size $@
@@ -66,7 +66,7 @@ build/opus/%.o: $(OPUS_DIR)/%.c hifi/opus/custom_support.h
 	@mkdir -p $(dir $@)
 	$(CC) $(OPUS_CFLAGS) -c $< -o $@
 
-build/hifi_opus.elf: hifi/rt.c hifi/oggpage.c hifi/codec_opus.c hifi/rt.h hifi/oggpage.h hifi/link.ld src/hifi_proto.h $(OPUS_OBJS)
+build/hifi_opus.elf: hifi/rt.c hifi/oggpage.c hifi/codec_opus.c hifi/rt.h hifi/upsample_tab.h hifi/oggpage.h hifi/link.ld src/hifi_proto.h $(OPUS_OBJS)
 	$(CC) $(HCFLAGS) $(OPUS_DEFS) $(OPUS_INCS) hifi/rt.c hifi/oggpage.c hifi/codec_opus.c $(OPUS_OBJS) \
 	  $(HLDFLAGS) -Wl,-Map=build/hifi_opus.map -o $@
 	$(CROSS)size $@
@@ -84,7 +84,7 @@ build/tremor/%.o: $(TREMOR_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TREMOR_CFLAGS) -c $< -o $@
 
-build/hifi_vorbis.elf: hifi/rt.c hifi/heap.c hifi/oggpage.c hifi/codec_vorbis.c hifi/rt.h hifi/oggpage.h hifi/link.ld src/hifi_proto.h $(TREMOR_OBJS)
+build/hifi_vorbis.elf: hifi/rt.c hifi/heap.c hifi/oggpage.c hifi/codec_vorbis.c hifi/rt.h hifi/upsample_tab.h hifi/oggpage.h hifi/link.ld src/hifi_proto.h $(TREMOR_OBJS)
 	$(CC) $(HCFLAGS) -Wa,-mimplicit-it=thumb $(TREMOR_DEFS) -I$(TREMOR_DIR) hifi/rt.c hifi/heap.c hifi/oggpage.c \
 	  hifi/codec_vorbis.c $(TREMOR_OBJS) $(HLDFLAGS) -Wl,-Map=build/hifi_vorbis.map -o $@
 	$(CROSS)size $@
@@ -115,7 +115,7 @@ build/pvmp3/%.o: $(PVMP3_DIR)/src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CROSS)g++ $(PVMP3_CFLAGS) -c $< -o $@
 
-build/hifi_mp3.elf: hifi/rt.c hifi/codec_mp3.c hifi/rt.h hifi/link.ld src/hifi_proto.h $(PVMP3_OBJS)
+build/hifi_mp3.elf: hifi/rt.c hifi/codec_mp3.c hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h $(PVMP3_OBJS)
 	$(CC) $(HCFLAGS) -I$(PVMP3_DIR)/include -I$(PVMP3_DIR)/src hifi/rt.c hifi/codec_mp3.c $(PVMP3_OBJS) \
 	  $(HLDFLAGS) -Wl,-Map=build/hifi_mp3.map -o $@
 	$(CROSS)size $@
@@ -133,32 +133,19 @@ build/pvaac/%.o: $(PVAAC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CROSS)g++ $(PVAAC_CFLAGS) -c $< -o $@
 
-build/hifi_aac.elf: hifi/rt.c hifi/codec_aac.c hifi/rt.h hifi/link.ld src/hifi_proto.h $(PVAAC_OBJS)
+build/hifi_aac.elf: hifi/rt.c hifi/codec_aac.c hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h $(PVAAC_OBJS)
 	$(CC) $(HCFLAGS) -DOSCL_IMPORT_REF= -I$(PVAAC_DIR) hifi/rt.c hifi/codec_aac.c $(PVAAC_OBJS) \
 	  $(HLDFLAGS) -Wl,-Map=build/hifi_aac.map -o $@
 	$(CROSS)size $@
 
-# ALAC: Apple's reference decoder (third_party/alac, unmodified, Apache-2.0); the glue is C++
-ALAC_DIR ?= ../third_party/alac/codec
-ALAC_SRCS := ALACDecoder.cpp ALACBitUtilities.c EndianPortable.c ag_dec.c dp_dec.c matrix_dec.c
-ALAC_OBJS := $(patsubst %,build/alac/%.o,$(basename $(ALAC_SRCS)))
-ALAC_FLAGS = -mcpu=cortex-m3 -mthumb -O2 -g -ffreestanding -nostdlib -ffunction-sections \
-             -fdata-sections -w -DTARGET_RT_LITTLE_ENDIAN=1 -I$(ALAC_DIR)
+# ALAC: our decoder (hifi/alacdec.c, derived from Apple's reference decoder in third_party/alac,
+# Apache-2.0), -O3 (ETUDE §57: half the instructions of Apple's decoder on the QEMU bench)
+build/alacdec.o: hifi/alacdec.c hifi/alacdec.h
+	@mkdir -p build
+	$(CC) $(HCFLAGS) -O3 -c $< -o $@
 
-build/alac/%.o: $(ALAC_DIR)/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(ALAC_FLAGS) -c $< -o $@
-
-build/alac/%.o: $(ALAC_DIR)/%.cpp hifi/alac_alloc.h
-	@mkdir -p $(dir $@)
-	$(CROSS)g++ $(ALAC_FLAGS) -fno-exceptions -fno-rtti -include hifi/alac_alloc.h -c $< -o $@
-
-build/alac/codec_alac.o: hifi/codec_alac.cpp hifi/rt.h src/hifi_proto.h
-	@mkdir -p $(dir $@)
-	$(CROSS)g++ $(ALAC_FLAGS) -fno-exceptions -fno-rtti -fno-threadsafe-statics -Wall -c $< -o $@
-
-build/hifi_alac.elf: hifi/rt.c hifi/rt.h hifi/link.ld src/hifi_proto.h build/alac/codec_alac.o $(ALAC_OBJS)
-	$(CC) $(HCFLAGS) hifi/rt.c build/alac/codec_alac.o $(ALAC_OBJS) \
+build/hifi_alac.elf: hifi/rt.c hifi/codec_alac.c hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h build/alacdec.o
+	$(CC) $(HCFLAGS) hifi/rt.c hifi/codec_alac.c build/alacdec.o \
 	  $(HLDFLAGS) -Wl,-Map=build/hifi_alac.map -o $@
 	$(CROSS)size $@
 

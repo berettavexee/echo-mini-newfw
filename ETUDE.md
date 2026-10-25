@@ -3004,3 +3004,117 @@ Image `work/NEWFW076.IMG`, CRC `0x712826f0`. Pour l'appareil : `work/alac_test/`
 - Déplacements : un seul blanc de 2 à 2,5 Ko en mono, de 44 Ko (~0,1 s) en 24/96.
 - Fichiers abîmés (`CHE.M4A` et ses variantes, au milieu de la série complète) : comme dans l'émulateur.
 - **Le décodeur d'Apple est lent** : 40 MHz pour de l'ALAC 16 bits, presque trois fois notre FLAC (15 MHz) pour un travail comparable, et le 24/96 tient le cœur B à 200 MHz. C'est son code de référence en C portable (décodage de Rice bit par bit, `dyn_decomp`, et prédicteur générique), sans aucune optimisation pour l'ARM. Il tient, sans manque, mais coûte de l'autonomie : une optimisation (ou le prédicteur matériel HIFIACC, comme le firmware d'origine) serait à étudier.
+
+**Le décodeur ALAC d'origine (module 79)** : d'après la référence locale du SDK (`HIFI/alac/`, lue seulement), c'est le décodeur ALAC de **FFmpeg** (`alac.h` porte l'en-tête « This file is part of FFmpeg », licence LGPL-2.1), adapté par Rockchip dans une bibliothèque fermée (`RkNanoD_BHALAC_20151223.lib` puis `_20160926.lib`). Le symbole `HIFI_ACC` et la fonction `Alac_Decode_Lpc` envoient le prédicteur à l'accélérateur HIFIACC (registres LPC, mémoire `0x01069000`, §1.5). Le module a son propre lecteur MP4 (`hifi_alac_MovFile.h`), copie de celui de l'AAC. Le décodage de Rice reste en logiciel. Ni ce code ni celui de FFmpeg (LGPL, peu compatible avec une image statique) ne peuvent servir ici ; l'accélérateur, lui, reste une piste pour notre propre prédicteur.
+
+## 57. ALAC : profil et décodeur optimisé (0.77, 2026-10-25)
+
+Étapes validées par l'utilisateur : 1. profiler le décodeur d'Apple ; 2. écrire notre décodeur en C optimisé ; le HIFIACC selon les résultats.
+
+**Banc** (`re/alac/bench/`, local, comme ceux du MP3 et de l'AAC : Cortex-M3 sous QEMU) : paquets extraits du M4A par `mkstream.py`, sortie au format de l'anneau du cœur B, comparée à ffmpeg. Fichiers : E1 (16 bits 44,1 kHz stéréo, 20 s), E2 (24 bits 96 kHz, 5 s), E3 (16 bits mono, 3 s), encodés par ffmpeg depuis des FLAC de la bibliothèque (ordres de prédiction 4 à 6, surtout 5 et 6 ; l'encodeur d'Apple utilise plutôt 4 et 8).
+
+**Profil du décodeur d'Apple** (E1, 1 s) : **59 % dans le décodage de Rice adaptatif** (`dyn_decomp`), **35 % dans le prédicteur** (`unpc_block`), le reste dans la sortie. Le décodage de Rice compte les zéros de tête par une boucle sur 32 bits (`lead()`, deux fois par échantillon) et lit l'entrée octet par octet ; le prédicteur n'a de version déroulée que pour les ordres 4 et 8.
+
+**Notre décodeur** (`fw/hifi/alacdec.c`, dérivé de celui d'Apple, Apache-2.0, avis conservé) :
+- `clz` matériel au lieu de `lead()` ; lecture de l'entrée par mots (`ldr` non aligné, puis `rev`) ;
+- prédicteur déroulé par le compilateur pour tous les ordres de 1 à 8 (un seul modèle, `pred_fixed`), coefficients en 16 bits comme la référence (débordement compris) ;
+- sortie écrite directement au format de l'anneau (16 bits empaquetés, ou un mot par échantillon de 20 et 24 bits), sans les échantillons de 3 octets de la référence ;
+- même arithmétique, dans le même ordre : sortie **identique au bit près** à celle d'Apple sur E1, E2 et E3.
+- Un piège de compilation : avec `-ffreestanding` (implique `-fno-builtin`), `memcpy(&v, p, 4)` reste un appel de fonction (9,6 % du temps) ; `__builtin_memcpy` est mis en ligne en un `ldr`.
+
+| Instructions par seconde d'audio (millions) | Apple | nôtre -O2 | nôtre -O3 | -O3 face à Apple |
+|---|---|---|---|---|
+| E1, 16 bits 44,1 kHz stéréo | 31,0 | 17,8 | **15,4** | **−50 %** |
+| E2, 24 bits 96 kHz stéréo | 73,2 | 34,0 | **29,8** | **−59 %** |
+| E3, 16 bits mono | 16,0 | 9,1 | — | −43 % (-O2) |
+
+Profil de notre décodeur (-O2, E1) : prédicteur 63 %, Rice 30 % (5,7 M au lieu de 20,4 M : −72 %). Le prédicteur, inchangé dans son principe, devient la part dominante : c'est la partie que le HIFIACC pourrait prendre (étape suivante éventuelle), ou un assembleur Thumb-2 (le code produit par GCC déborde des registres : environ 180 accès à la pile dans `unpc_block`).
+
+**Firmware 0.77** : `hifi/codec_alac.c` (C) appelle `alacdec.c`, compilé en -O3 ; la bibliothèque d'Apple n'est plus compilée (`third_party/alac` reste comme source et pour sa licence). Image ALAC : 10 Ko de code. Image `work/NEWFW077.IMG`, CRC `0x54df0b8e`.
+
+Charge attendue sur l'appareil, au prorata des instructions (0.76 : 41 MHz en 16 bits stéréo, 108 MHz en 24/96) : environ 20 MHz (palier 50 MHz) et 45 MHz (palier 57 ou 67 MHz au lieu de 200).
+
+## 58. FLAC : profil de dr_flac (2026-10-25)
+
+Même démarche que pour l'ALAC (§57). **Banc** `re/flac/bench/` (local) : dr_flac v0.13.4 configuré et appelé comme dans `fw/hifi/codec_flac.c` (lecture par rappel depuis la mémoire, 1024 trames en s16 ou 512 en s32 par appel, conversion au format de l'anneau), sortie comparée à ffmpeg : **identique au bit près** sur tous les extraits. Extraits de 20 s tirés de la bibliothèque beets (recopiés tels quels par ffmpeg), plus deux réencodages :
+
+| Extrait | Débit | Instructions par seconde d'audio |
+|---|---|---|
+| F3 Martin Roscoe, piano (16 bits 44,1 kHz) | ~395 kb/s | 6,7 M |
+| F1 Pink Floyd (16 bits 44,1 kHz) | ~676 kb/s | 7,6 M |
+| F4 le même, réencodé en `-compression_level 8` | ~678 kb/s | 8,5 M |
+| F2 Motörhead (16 bits 44,1 kHz) | ~1 073 kb/s | 9,0 M |
+| F5 Pink Floyd rééchantillonné en 24 bits 96 kHz (6 s) | ~2 120 kb/s | 18,8 M |
+
+Pour comparaison : notre ALAC 16 bits fait 15,4 M (§57), le MP3 PacketVideo 14,7 M, l'AAC 13,5 M. Sur l'appareil, le FLAC 16 bits à ~1 050 kb/s coûte 15 MHz (§52) : par la même règle, le 24/96 coûterait environ 31 MHz, toujours au palier de 50 MHz.
+
+**Profil** (F2, 1 s) : 73 % dans `drflac__decode_samples_with_residual__rice__scalar`, qui fait à la fois le décodage de Rice et la prédiction ; le reste dans la conversion de sortie et la copie de l'entrée. dr_flac utilise déjà l'instruction `clz` sur ARM (pas le défaut du décodeur d'Apple). **Profil par ligne** de cette fonction (`re/flac/bench/lineprof.py`) :
+- **prédiction LPC : ~45 %** (dont ~8 % en arithmétique 64 bits : dr_flac la choisit quand bits + précision + log2(ordre) > 32, ce qui arrive pour le canal de différence stéréo, sur 17 bits) ;
+- **décodage de Rice : ~30 %** ;
+- **CRC-16 des trames : ~18 %** (`drflac__crc16`, octet par octet à chaque rechargement du cache de bits).
+
+**Pistes** (aucune n'est nécessaire : le FLAC reste au palier le plus bas, même en 24/96) :
+- le CRC : `DR_FLAC_NO_CRC` gagnerait environ 13 % du total, mais une trame abîmée ne serait plus détectée ni sautée (§46) : elle sortirait en bruit. Un CRC par table de 16 bits (deux octets par recherche) garderait la vérification pour moitié moins cher ;
+- la prédiction sur le **HIFIACC** : c'est le seul mode de l'accélérateur déjà connu et validé (§1.5, modèle exact avec le module FLAC d'origine). Il prendrait la part la plus lourde (~45 %), avec la lecture du canal de différence en 64 bits ;
+- une prédiction 32 bits déroulée par ordre, comme pour l'ALAC.
+
+## 59. Suréchantillonnage des fréquences basses (0.78, 2026-10-25)
+
+**Défaut trouvé en inventoriant la bibliothèque** : le pilote audio ne connaît que 44,1, 48, 88,2, 96, 176,4 et 192 kHz, et toute autre fréquence était remplacée sans prévenir par 44,1 kHz. 15 MP3 à 22,05 kHz de la bibliothèque (The Offspring « Americana », un titre des Yeah Yeah Yeahs et un du Chœur de l'Armée rouge) auraient été joués deux fois trop vite. Même chose pour tout MP3 MPEG-2 ou 2.5 (8 à 24 kHz) et tout fichier à 32 kHz.
+
+**Correction (choix de l'utilisateur : suréchantillonner dans le cœur B)**, dans le runtime (`fw/hifi/rt.c`), donc pour tous les codecs :
+- après `codec_open`, une fréquence que les DAC ne prennent pas est multipliée par le plus petit facteur entier L parmi 2, 3, 4 et 6 qui mène à 44,1, 48, 88,2 ou 96 kHz (22,05 → 44,1 ; 24 → 48 ; 16 → 48 ; 11,025 → 44,1 ; 12 → 48 ; 8 → 48 ; 32 → 96). Sinon, le fichier est refusé (« unreadable file ») au lieu d'être joué à la mauvaise vitesse ;
+- la fréquence, la longueur et le départ annoncés au cœur A sont multipliés par L ; `out_space()` est divisé par L, si bien que les codecs n'ont rien à changer ;
+- chaque trame écrite passe par un filtre polyphasé (sinus cardinal fenêtré par Kaiser, β = 8, 24 × L − 1 coefficients en Q14, généré par `tools/mkupsample.py` dans `hifi/upsample_tab.h`) : −0,1 dB jusqu'à 0,4 de la fréquence d'entrée, images atténuées de 70 à 77 dB au-delà de 0,6. Chaque phase somme à exactement 1 (pas d'ondulation du continu). Arithmétique 32 bits pour les sources 16 bits, 64 bits pour les 24 bits, avec saturation ;
+- le retard du filtre (un nombre entier de trames grâce à la longueur impaire) est retiré au début et vidé à la fin : la sortie a exactement L fois les trames de l'entrée, et l'enchaînement sans blanc est préservé ;
+- les codecs n'incrémentent plus `ctl->frames` eux-mêmes mais appellent `out_done()` ; en suréchantillonnage, le runtime compte les trames au fur et à mesure qu'il les écrit (sinon le compteur, en trames d'entrée pendant un appel du codec, faussait la position vue par le cœur A et la capture de l'émulateur).
+
+**Essais dans l'émulateur** (extraits tirés d'un MP3 à 22,05 kHz de la bibliothèque) :
+- MP3 22,05 kHz → 44,1 kHz, MP3 8 kHz → 48 kHz, WAV 32 kHz → 96 kHz, WAV mono 16 kHz → 48 kHz : bonnes fréquences, durées exactes, enchaînements avec changement de fréquence sans manque ;
+- WAV 32 kHz : sortie **identique au bit près** à un modèle Python du filtre, et à **71,9 dB** du rééchantillonneur soxr de ffmpeg (sans décalage) ; WAV 16 kHz : 37 dB face à soxr, l'écart venant du contenu proche de 8 kHz, que notre filtre atténue plus tôt ;
+- images de suréchantillonnage mesurées dans la sortie : −78 à −92 dB.
+
+Coût : 24 multiplications par échantillon de sortie et par canal, soit environ 2 millions par seconde à 44,1 kHz. Image `work/NEWFW078.IMG` (avec l'ALAC de la 0.77), CRC `0xcce80ba7`. Le fichier à 44,1 kHz de l'essai passe intact, et le total des trames comptées égale celui des trames écrites.
+
+## 60. Fréquences d'échantillonnage du firmware d'origine : image d'essai (2026-10-25)
+
+**Ce que contient le firmware d'origine** (`HIFIEC39.IMG`) :
+- trois tables de la PLL de l'ACODEC à partir de `0x48c8c` (fichier), entrées de 6 mots (quartz 24 000 kHz, sortie de la PLL en kHz, 4 paramètres), 6 entrées par famille :
+  - 44,1 kHz : 28 224 `3 18 25 3` (×2), 56 448 `6 36 25 3` (×2), `4 73 25 3`, vide ;
+  - 48 kHz : 30 720 `0 24 25 10` (×2), 61 440 `0 48 25 10`, 122 880 `0 48 25 9` (×2), vide ;
+  - 8 kHz : 20 480 `0 48 50 8` (×2), 40 960 `0 96 50 8`, 81 920 `0 96 25 8` (×2), vide ;
+- la séquence d'initialisation des CS43131 (paires registre, valeur, à partir de `0x48a44`), où `0x01000b` vaut 1 ;
+- la fonction résidente `0x0306185e(fréquence)`, qui écrit `0x01000b` dans les DAC : **0 pour 8, 16, 32, 64 et 128 kHz ; 1 pour 11,025, 22,05 et 44,1 ; 2 pour 12, 24 et 48 ; 3 pour 88,2 ; 4 pour 96 ; 5 pour 176,4 ; 6 pour 192**. Toute autre fréquence n'écrit rien.
+
+Le firmware d'origine prévoit donc 15 fréquences, de 8 à 192 kHz. Nos six (44,1 à 192 kHz) ont les mêmes paramètres ; elles ont été vérifiées sur l'appareil en 0.16 avec une note générée.
+
+**Image d'essai `NEWFWRT1`** (`make EXTRA=-DRATE_TEST` ; `EXTRA` vaut désormais aussi pour les images du cœur B ; CRC `0x7910dfca`) : neuf fréquences ajoutées au pilote (8, 11,025, 12, 16, 22,05, 24, 32, 64, 128 kHz), avec la PLL et l'indice d'origine, MCLK = PLL / 5 comme les autres, et un rapport MCLK/SCLK de 8 (8, 11,025, 12 kHz), 4, ou 2 (128 kHz) ; le cœur B les laisse passer sans suréchantillonner. La version normale, reconstruite sans l'option, garde le CRC de la 0.78.
+
+**Fichiers d'essai** (`work/rate_test/`, sur l'appareil dans `test_rates/`) : un WAV par fréquence, 44,1 kHz d'abord comme référence, puis de 8 à 192 kHz : 1 s de son pur à 1 kHz (−12 dBFS), 1 s de silence, puis 5 s de « One More Time » (Daft Punk, bibliothèque) rééchantillonné par soxr ; 16 bits jusqu'à 64 kHz, 24 bits au-delà. À l'écoute, la note et la musique doivent avoir la même hauteur et la même vitesse partout ; le journal donne les changements de fréquence, les erreurs I2C et les manques.
+
+**Résultat de `NEWFWRT1` sur l'appareil** (journal `work/hwlog_1025_rt1/`) :
+- **justes** (son pur et musique à la bonne hauteur et à la bonne vitesse) : 8, 12, 16, 24, 32, 44,1, 48, 88,2, 96, 176,4 et 192 kHz ;
+- **11,025 kHz** : aucun son ; l'anneau du DAC ne se vide plus (la piste suivante attend 26 s) : pas d'horloge I2S ;
+- **22,05 kHz** : pas de son pur, la musique n'arrive qu'après ~5 s ; vidage très lent ;
+- **64 kHz** : lecture trop lente (2,9 s d'audio jouées en 65 s) ;
+- **128 kHz** : lecture trop lente (7 s jouées en 23 s, au lieu de 6,75 s à 96 kHz) ;
+- aucune erreur I2C, aucun manque.
+
+Les quatre fréquences fautives sont exactement celles des deux entrées de PLL qu'aucune autre n'utilise : 28 224 kHz `3 18 25 3` (11,025, 22,05) et 81 920 kHz `0 96 25 8` (64, 128). Ces entrées des tables d'origine ne donnent pas la fréquence annoncée sur ce matériel. Toutes les autres PLL sont justes ; les indices des DAC (0, 1, 2) aussi.
+
+**`NEWFWRT2`** (CRC `0xa645fdab`) : les quatre fréquences reprennent des PLL éprouvées, seul le rapport MCLK/SCLK de l'I2S change : 11,025 kHz = 56,448 MHz, MCLK 1024 fs (rapport 16) ; 22,05 kHz = 56,448 MHz, 512 fs (8) ; 64 kHz = 40,96 MHz, 128 fs (2) ; 128 kHz = 122,88 MHz, 192 fs (3).
+
+**Résultat de `NEWFWRT2` sur l'appareil** (journal `work/hwlog_1025_rt2/`) : **les 15 fréquences sont justes à l'écoute** (son pur et musique à la bonne hauteur et à la bonne vitesse), aucune erreur I2C, aucun manque. De 24 à 192 kHz, chaque fréquence reste réglée 7,0 s, la durée exacte des fichiers.
+
+**Défaut du lecteur révélé par l'essai** : en dessous de 24 kHz, le changement de fréquence vers la piste suivante arrive trop tôt (après 3,0 s à 8 kHz, 4,7 s à 11,025, 5,0 s à 12, 6,0 s à 16, 6,8 s à 22,05 kHz), alors que le journal annonce l'attente de toute la fin de la piste (« waits for 6016 ms » à 8 kHz). L'attente du vidage de l'anneau avant un changement de fréquence (`drain_step`, et deux boucles de `player_chain_end`) abandonne au bout de **2 s fixes** ; or l'anneau de 192 Kio dure 1,1 s à 44,1 kHz mais 6,1 s à 8 kHz en 16 bits : la fin des pistes à basse fréquence était coupée (jusqu'à 4 s à 8 kHz). Le défaut n'existe pas en 0.78, où ces fréquences sont suréchantillonnées (l'anneau dure alors au plus 1,1 s), mais il faut le corriger avant de les jouer directement : délai = durée de l'anneau à la fréquence en cours, plus une marge.
+
+**0.79 (validée par l'utilisateur)** :
+- les 15 fréquences de `NEWFWRT2` passent dans la table normale du pilote (`audio.c`) ; le cœur B (`rt.c`) les laisse toutes passer : sortie sans rééchantillonnage de 8 à 192 kHz. Le suréchantillonneur de la 0.78 reste en secours pour les fréquences hors de cette liste (7,35 kHz, 37,8 kHz…) ;
+- le délai d'attente du vidage de l'anneau (`drain_step`, `player_chain_end`) devient la durée de l'anneau à la fréquence en cours plus 1 s (`drain_limit_us`) : 2,1 s à 44,1 kHz, 7,1 s à 8 kHz en 16 bits ;
+- l'option `RATE_TEST` disparaît ; image `work/NEWFW079.IMG`, CRC `0x2e494990`.
+
+**Essai sur l'appareil de la 0.79** (journal `work/hwlog_1025_079/`) : aucune faute, aucune erreur I2C, démarrage à 200 MHz (un redémarrage : sortie normale de l'écran de charge au débranchement).
+- `test_rates/` : **chaque fréquence dure 7,0 s**, de 8 à 192 kHz : plus aucune fin de piste coupée.
+- **ALAC avec notre décodeur (0.77)** : 16 bits stéréo **21 à 25 MHz** au palier de 50 MHz (41 MHz avec celui d'Apple en 0.76) ; mono 11 à 13 MHz ; **24 bits 96 kHz : 49 à 51 MHz**, aux paliers de 67 et 80 MHz (108 MHz et 200 MHz en permanence en 0.76). Le gain mesuré (−45 à −55 %) suit celui du banc QEMU (−50 et −59 %).
+- Fichiers abîmés : sans faute.
+- Le HIFIACC pour le prédicteur de l'ALAC n'est donc plus nécessaire : l'ALAC 16 bits est au palier le plus bas.

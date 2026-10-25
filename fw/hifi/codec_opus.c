@@ -126,7 +126,7 @@ int codec_run(void)
             out_word(w[i]);
         w += k;
         frames -= k;
-        ctl->frames += k;
+        out_done(k);
     }
     return 1;
 }

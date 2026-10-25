@@ -206,6 +206,6 @@ int codec_run(void)
             }
         }
     }
-    ctl->frames += n;
+    out_done(n);
     return 1;
 }

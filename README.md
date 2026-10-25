@@ -11,13 +11,38 @@ A from-scratch firmware for the main core of the SNOWSKY ECHO MINI digital audio
 by studying the official firmware V3.9.0; no code of it, of the Rockchip SDK, of ReChord or
 of RECHO is included.
 
-Status (version 0.76): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A), gapless, with
+Status (version 0.79): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A), gapless,
+at any sample rate from 8 to 192 kHz, with
 non-blocking sample-rate changes; folder browser with long names (FAT32 internal memory,
 FAT32 or exFAT microSD card); resume, ReplayGain (album / track / off), seek on the bar,
 play modes, real-time clock, USB mass storage of the internal memory, power saving in
 pause, low-battery warning and power off, charging screen. No equaliser.
 
 **New users: see [`MANUAL.md`](MANUAL.md)** for the keys on each screen and how to install.
+
+## Supported formats and core B load
+
+Our decoders run on the HiFi core (core B), whose clock follows the load in steps of 50, 57, 67,
+80, 100, 133 and 200 MHz (the step that keeps the load near 75 %). Measured on the device from
+the logs (versions 0.73 to 0.79), whole tracks, screen off:
+
+| Format | Material measured | Core B, mean (clock step) | Decoder |
+|---|---|---|---|
+| WAV, AIFF | 16 bits, 44.1 kHz | 1 MHz (50 MHz) | ours (`codec_pcm.c`) |
+| AIFF | 24 bits, 48 kHz | 8 MHz (50 MHz) | ours |
+| AIFF | 24 bits, 96 kHz | 16 MHz (50 MHz) | ours |
+| FLAC | 16 bits, 44.1 kHz (~1,050 kb/s) | 15 MHz (50 MHz) | dr_flac |
+| MP3 | 320 kb/s, 44.1 kHz | 39-41 MHz (57 MHz) | PacketVideo (AOSP) |
+| Ogg Vorbis | 160-280 kb/s, 44.1 kHz | 46-50 MHz (67 MHz) | Tremor (lowmem) |
+| Opus | 130-145 kb/s, 48 kHz | 50-55 MHz (67-80 MHz) | libopus 1.5.2 |
+| AAC-LC (M4A) | ~125 kb/s, 44.1 kHz (iTunes) | 25 MHz (50 MHz) | PacketVideo (AOSP) |
+| ALAC (M4A) | 16 bits, 44.1 kHz, mono | 11-13 MHz (50 MHz) | ours, derived from Apple's |
+| ALAC (M4A) | 16 bits, 44.1 kHz, stereo | 21-25 MHz (50 MHz) | ours, derived from Apple's |
+| ALAC (M4A) | 24 bits, 96 kHz, stereo | 49-51 MHz (67-80 MHz) | ours, derived from Apple's |
+
+The load rises for a moment at the start of a track and after a seek (the top step until the
+DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §60). Sample rates from 8 to
+192 kHz are played as they are (§60).
 
 ## Layout
 
