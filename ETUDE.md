@@ -3195,3 +3195,41 @@ Les 5 390 plantages trouvés en tout (dont 5 059 de la 0.80) passent tous sans e
 **Outils publiés** : `fw/tools/fuzz/` (`fuzz_host.c`, `build.sh` avec les cibles `ogg`, `vorbis`, `opus` et `vorbis-heap`, `mkseeds.sh` qui fabrique des graines de synthèse ou à partir d'un dossier de musique), et la page `docs/FUZZING.md`. Les graines et les fichiers trouvés restent hors du dépôt (extraits de musique).
 
 **À étudier plus tard** (feuille de route) : micro-mp3 (dérivé du même décodeur OpenCore que notre MP3) et micro-flac, de la même façon.
+
+## 63. Fuzzing de l'AAC, du MP3, du conteneur MP4 et des tags (0.82, 2026-10-26)
+
+**Cibles ajoutées au banc** (`fw/tools/fuzz/`, §62) : `mp3` (`codec_mp3.c` et pvmp3dec), `mp4` (`src/mp4.c`, cœur A : `mp4_open()`, puis `mp4_feed()` jusqu'au bout, puis une seconde ouverture avec un déplacement au milieu), `aac` (`mp4.c`, puis `codec_aac.c` et pvaacdec sur le flux HP4P qu'il fabrique, à travers le vrai anneau `HP_IN_BASE`), `aacpkt` (`codec_aac.c` seul, sur un flux HP4P muté directement, configuration AAC comprise), `tags` (`src/tags.c` pour tous les formats). Les décodeurs PacketVideo sont compilés en C++ comme dans le Makefile, mais sans `PV_ARM_GCC_V5` (opérations en C portable, pas d'assembleur). Les mutations des cibles MP4 visent la boîte `moov`, où qu'elle soit ; celles de `tags` aussi les 512 derniers octets (ID3v1, APEv2). Graines : `mkseeds.sh` étendu (MP3 de synthèse en MPEG-1, 2 et 2.5, CBR et VBR, avec et sans Xing, avec ID3v2 et ID3v1 ; M4A de 8 à 96 kHz, `moov` au début et à la fin) ; flux HP4P obtenus par `FUZZ_STREAM`.
+
+**Fidélité du banc** : sortie du PC contre l'image ARM dans l'émulateur. AAC : identique au bit près (fichier de synthèse et fichier iTunes). MP3 : 1 LSB au plus d'écart (les opérations ARM de pvmp3dec contre leurs versions C). Deux ajustements : `trans4m_freq_2_time_fxp.cpp` sans ASan (une boucle en pipeline lit l'élément précédant une table à son dernier tour, valeur jamais utilisée) ; les décalages de 32 bits ou plus non contrôlés dans les décodeurs PV (`ms_synt.cpp` en fait sur des fichiers valides ; sur ARM, décalage arithmétique : le signe, ce que veut le code).
+
+**Première série** (25 minutes par cible) :
+
+| Cible | Exécutions | Plantages | Boucles sans fin |
+|---|---|---|---|
+| `mp4` (deux) | 682 290 | 0 | 0 |
+| `tags` (deux) | 614 384 | 0 | 0 |
+| `aac` | 213 286 | 1 278 | 0 |
+| `aacpkt` | 150 129 | 3 690 | 0 |
+| `mp3` (deux) | 271 391 | 403 | 0 |
+
+Notre code du cœur A (`mp4.c`, `tags.c`) : rien. Les défauts sont tous dans les décodeurs PacketVideo.
+
+**Défauts et corrections** (écrites ici, marquées `ECHO MINI (ETUDE §63)`) :
+1. **AAC, TNS** (`get_tns.cpp`) : `top -= longueur` devenait négatif ; rangé dans l'entier non signé `tempInt`, −33 donnait 4 294 967 263, que la macro `SCALE_FACTOR_BAND_OFFSET` (qui ne protège que ≤ 0) laissait passer. Sur ARM 32 bits, la lecture retombe 68 octets avant la table : pas de faute, mais une borne de filtre arbitraire, utilisée ensuite par `apply_tns` pour écrire. Correction : `top` borné à 0 (bande de départ `max(top - longueur, 0)`, comme la norme et FAAD2).
+2. **AAC, impulsions** (`getics.cpp`, `pulse_nc.cpp`) : `pulse_start_sfb` (6 bits, jusqu'à 63) au-delà des bandes : lecture hors de la table des bandes puis écritures hors de `coef[]`. Correction, comme FAAD2 : refus si `pulse_start_sfb` dépasse le nombre de bandes, et arrêt de toute impulsion au-delà de la dernière bande.
+3. **AAC, quantification inverse** (`huffspec_fxp.cpp`) : `max > 8192` laissait passer 8 192 (index 1 025 d'une table de 1 025) ; et `max` ne comptait pas les valeurs laissées dans `quantSpec` par une trame interrompue (−12 185 lu avec `max` = 16). Correction : `max` recalculé sur les 1 024 coefficients (`LN2`) juste avant le contrôle, borné à 8 191 (environ 0,1 MHz du cœur B).
+4. **AAC, échappement** (`unpack_idx.cpp`) : le préfixe d'échappement n'avait pas de limite ; arrêté à N = 12 comme la norme (valeurs < 8 192) ; un flux valide se lit à l'identique.
+5. **MP3, régions de Huffman** (`pvmp3_huffman_parsing.cpp`) : `region0_count + region1_count + 2` jusqu'à 24 dans `l[23]` (lecture du champ voisin `s[]`, sans danger mémoire) ; index borné à 22, comme ffmpeg.
+6. **MP3, gain des sous-blocs** (`pvmp3_dequantize_sample.cpp`) : fenêtre calculée jusqu'à 4 dans `subblock_gain[3]` et `scalefac->s[3][…]` ; bornée à 2.
+
+Les défauts 1 et 2 écrivaient hors des tableaux sur l'appareil ; 3 et 4 lisaient hors d'une table ; 5 et 6 donnaient seulement des valeurs fausses sur des trames déjà corrompues.
+
+**Contrôles** : les 5 371 plantages rejoués sans erreur ; 34 M4A (toute la bibliothèque) et 16 MP3 tirés au hasard décodés avant et après les corrections : identiques au bit près.
+
+**Seconde série** (après ces corrections, 25 minutes par cible) : `aac` 247 062 exécutions et `mp3` deux fois (254 987), sans plantage ; `aacpkt` 242 424 exécutions, 72 plantages, deux causes plus profondes, que les précédentes masquaient :
+7. **Configuration AAC lue au-delà de son tampon** (`codec_aac.c`, notre code) : `cfg[64]` sur la pile ; un « program config element » (PCE) peut annoncer 255 octets de commentaire et des dizaines d'éléments, et le lecteur de bits de pvaacdec n'est pas borné (`get_prog_config.cpp`). Lectures seules, de valeurs arbitraires. Correction : un tampon statique de 64 + 1 024 octets remis à zéro à chaque ouverture (une configuration de plus de 64 octets reste refusée).
+8. **PNS et stéréo d'intensité** (`pns_intensity_right.cpp`) : pour le canal droit, les informations de fenêtres et un tableau de groupes d'une autre séquence de fenêtres (`{1}` d'une fenêtre longue contre 8 fenêtres courtes) : la boucle lisait des groupes au-delà du tableau, et ses pointeurs sortaient de la mémoire du décodeur (`mem` de `codec_aac.c`). Correction : arrêt dès qu'un groupe ne progresse pas ou dépasse `num_win` (dans un flux valide, ils croissent jusqu'à `num_win`).
+
+Après ces deux corrections : les 3 762 plantages `aacpkt` et les 1 278 `aac` rejoués sans erreur ; les 34 M4A toujours identiques au bit près.
+
+**Troisième série** (0.82 définitive) : `aacpkt` deux fois (507 574 exécutions) et `aac` (261 817), aucun plantage ni boucle sans fin. Dans l'émulateur, l'image ARM 0.82 (`work/NEWFW082.IMG`, CRC `0xbbf146bd`, construite à neuf) donne la même sortie que la 0.81 sur un MP3 et deux M4A (504 259 trames, identiques au bit près).

@@ -593,6 +593,11 @@ Int getics(
                 status = get_pulse_data(
                              pPulseInfo,
                              pInputStream);
+                /* ECHO MINI (ETUDE §63): pulse_start_sfb (6 bits) within the bands */
+                if (pPulseInfo->pulse_start_sfb > pFrameInfo->sfb_per_win[0])
+                {
+                    status = 1;
+                }
             }
             else
             {

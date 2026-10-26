@@ -474,6 +474,12 @@ void pns_intensity_right(
         pGroup[3] = 8
         -----------------------------------------------------------*/
         partition = *(pGroup++);
+        /* ECHO MINI (ETUDE §63): groups that do not progress or pass num_win (a group array
+         * of another window sequence) ran the pointers out of the decoder's memory */
+        if (partition <= window_start || partition > pFrameInfo->num_win)
+        {
+            return;
+        }
 
         band_start = 0;
 

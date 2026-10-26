@@ -269,6 +269,11 @@ void pulse_nc(
     for (index = pPulseInfo->number_pulse; index > 0; index--)
     {
         pCoef  += *pPulseOffset++;
+        /* ECHO MINI (ETUDE §63): no pulse past the last band (writes out of coef[]) */
+        if (pCoef >= coef + pLongFrameInfo->win_sfb_top[0][pLongFrameInfo->sfb_per_win[0] - 1])
+        {
+            break;
+        }
 
         temp = *pCoef;
 

@@ -10,4 +10,4 @@ __pycache__/
 # fuzzing: builds, seeds and findings (seeds may come from the user's music)
 fw/tools/fuzz/build/
 fw/tools/fuzz/seeds/
-fw/tools/fuzz/out/
+fw/tools/fuzz/out*/

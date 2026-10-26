@@ -167,9 +167,11 @@ int32 pvmp3_huffman_parsing(int32 is[SUBBANDS_NUMBER*FILTERBANK_BANDS],
     }
     else
     {          /* Find region boundary for long block case. */
+        /* ECHO MINI (ETUDE §63): indexes within l[23] (they read into s[]), as ffmpeg */
         i = grInfo->region0_count + 1;
-        region1Start = mp3_sfBandIndex[sfreq].l[i];
-        region2Start = mp3_sfBandIndex[sfreq].l[i + grInfo->region1_count + 1];
+        region1Start = mp3_sfBandIndex[sfreq].l[i < 22 ? i : 22];
+        i += grInfo->region1_count + 1;
+        region2Start = mp3_sfBandIndex[sfreq].l[i < 22 ? i : 22];
     }
 
     /* Read bigvalues area. */

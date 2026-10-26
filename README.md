@@ -56,7 +56,7 @@ DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §61). S
 | `fw/src/` | main-core firmware (C) |
 | `fw/hifi/` | HiFi-core runtime and codec glue |
 | `fw/tools/` | image builder, emulator (`emu_fw.py`, Unicorn), test disk and exFAT image builders, log reader |
-| `fw/tools/fuzz/` | fuzzing bench for the core B Ogg decoders (ASan, UBSan, coverage-guided): see `docs/FUZZING.md` |
+| `fw/tools/fuzz/` | fuzzing bench for the decoders and file readers (ASan, UBSan, coverage-guided): see `docs/FUZZING.md` |
 | `docs/` | `FUZZING.md` (the fuzzing bench and its findings), screenshots of the manual |
 | `fw/font/` | Fusion Pixel 12 px (SIL OFL 1.1) |
 | `third_party/` | libopus 1.5.2 (decoder-only variant), Tremor lowmem (patched), AOSP pvmp3dec and pvaacdec, Apple ALAC decoder, libmpcdec |

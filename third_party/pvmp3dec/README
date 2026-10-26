@@ -1,4 +1,4 @@
-PacketVideo MP3 decoder from AOSP, unmodified:
+PacketVideo MP3 decoder from AOSP, unmodified except two bounds checks marked "ECHO MINI" (ETUDE §63, found by fuzzing):
 https://android.googlesource.com/platform/frameworks/av/+/refs/heads/android11-release/media/libstagefright/codecs/mp3dec
 (src/, include/, NOTICE, MODULE_LICENSE_APACHE2, patent_disclaimer.txt), fetched 2026-10-19.
 Copyright (C) 1998-2009 PacketVideo, Apache License 2.0. MPEG-1/2 Layer III patents have expired.

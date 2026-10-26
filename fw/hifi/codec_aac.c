@@ -24,10 +24,13 @@ static uint32_t skip, left;             /* frames still to drop, to write (0xfff
 int codec_open(void)
 {
     struct hp_pkt_header h;
-    uint8_t cfg[64];
+    /* The configuration (64 bytes at most) and zeros after it: the decoder's bit reader is not
+     * bounded, and a program config element can read some 600 bytes (ETUDE §63) */
+    static uint8_t cfg[64 + 1024];
+    memset(cfg, 0, sizeof cfg);
     if (in_read_wait(&h, sizeof h) < sizeof h || h.magic != HP_PKT_MAGIC)
         return -HP_ERR_FORMAT;
-    if (h.config_len > sizeof cfg || in_read_wait(cfg, h.config_len) < h.config_len)
+    if (h.config_len > 64 || in_read_wait(cfg, h.config_len) < h.config_len)
         return -HP_ERR_FORMAT;
     if (PVMP4AudioDecoderGetMemRequirements() > sizeof mem || !h.rate || h.channels < 1 ||
         h.channels > 2)

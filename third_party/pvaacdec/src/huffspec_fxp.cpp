@@ -585,7 +585,22 @@ Int huffspec_fxp(
     though each one of them for re-quant and scaling, and pick the right qFormat to apply to
     all spectral coeffs.*/
 
-    if ((max < 0) || (max > 8192))    /* (8192>>ORDER) == 1024 is the inverseQuantTable size */
+    /* ECHO MINI (ETUDE §63): max over all the 1024 coefficients, as esc_iquant_scaling()
+     * indexes inverseQuantTable by each of them: values left by a frame that failed part way
+     * were not counted (out-of-bounds reads); and 8191 at most (was 8192: index 1025 of a
+     * 1025-entry table) */
+    {
+        Int k, a;
+        for (k = 0; k < LN2; k++)
+        {
+            a = quantSpec[k] < 0 ? -quantSpec[k] : quantSpec[k];
+            if (a > max)
+            {
+                max = a;
+            }
+        }
+    }
+    if ((max < 0) || (max > 8191))    /* (8192>>ORDER) == 1024 is the inverseQuantTable size */
     {
         return (-1);   /*  error condition */
     }

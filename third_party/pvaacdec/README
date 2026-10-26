@@ -1,4 +1,4 @@
 PacketVideo AAC decoder, from AOSP (platform/frameworks/base, tag android-4.0.4_r2.1,
-media/libstagefright/codecs/aacdec), unmodified; SoftAAC.cpp/.h (the Android wrapper) left out.
+media/libstagefright/codecs/aacdec), unmodified except six bounds checks marked "ECHO MINI" (ETUDE §63, found by fuzzing); SoftAAC.cpp/.h (the Android wrapper) left out.
 Apache License 2.0 (see NOTICE). Built for core B without AAC_PLUS (AAC-LC only): the SBR and
 parametric stereo files compile to nothing. ETUDE §54-55.

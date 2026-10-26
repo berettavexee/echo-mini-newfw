@@ -274,6 +274,10 @@ void pvmp3_dequantize_sample(int32 is[SUBBANDS_NUMBER*FILTERBANK_BANDS],
             {
                 int32 temp2 = fxp_mul32_Q32((ss - cb_begin) << 16, mp3_shortwindBandWidths[sfreq][cb_width]);
                 temp2 = (temp2 + 1) >> 15;
+                if (temp2 > 2)          /* ECHO MINI (ETUDE §63): one of the 3 windows */
+                {
+                    temp2 = 2;
+                }
 
                 global_gain  = (gr_info->global_gain);
                 global_gain -=  gr_info->subblock_gain[temp2] << 3;

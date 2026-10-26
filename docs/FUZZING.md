@@ -1,30 +1,39 @@
-# Fuzzing the core B Ogg decoders
+# Fuzzing the decoders and the file readers
 
 A music player reads files it did not make: interrupted copies, damaged cards, odd encoders,
 files built to crash a decoder. On this player a decoder fault stops core B (the HiFi core), and a
 wild write can corrupt what the other core reads. This page describes the fuzzing bench that tests
-our Ogg code against such input on the PC, what it found, and how to run it. The detailed study,
-in French, is `ETUDE.md` §62.
+our decoders and file readers against such input on the PC, what it found, and how to run it.
+The detailed study, in French, is `ETUDE.md` §62 (Ogg, Vorbis, Opus) and §63 (MP3, AAC, MP4,
+tags).
 
 The tools are in [`fw/tools/fuzz/`](../fw/tools/fuzz/):
 
 | File | Role |
 |---|---|
 | `fuzz_host.c` | The fuzzer and the stand-in for core B's runtime |
-| `build.sh` | Builds one target: `ogg`, `vorbis`, `opus` or `vorbis-heap` |
+| `build.sh` | Builds one target (see below) |
 | `mkseeds.sh` | Makes the seed files |
 
 ## What is tested
 
-The code that runs on core B, unchanged, built for the PC:
+The firmware's own code, unchanged, built for the PC:
 
-- `fw/hifi/oggpage.c`: our Ogg page and packet reader (target `ogg`);
-- `fw/hifi/codec_vorbis.c` with Tremor lowmem (`third_party/tremor-lowmem`), the Vorbis decoder
-  (target `vorbis`);
-- `fw/hifi/codec_opus.c` with libopus 1.5.2 in fixed point (target `opus`).
+| Target | Code | Input |
+|---|---|---|
+| `ogg` | `fw/hifi/oggpage.c`, our Ogg page and packet reader | an Ogg file |
+| `vorbis` | `fw/hifi/codec_vorbis.c` + Tremor lowmem | an Ogg Vorbis file |
+| `vorbis-heap` | the same with core B's allocator (`fw/hifi/heap.c`), no ASan | an Ogg Vorbis file |
+| `opus` | `fw/hifi/codec_opus.c` + libopus 1.5.2, fixed point | an Ogg Opus file |
+| `mp3` | `fw/hifi/codec_mp3.c` + pvmp3dec (AOSP) | an MP3 file |
+| `mp4` | `fw/src/mp4.c` (core A): the MP4 container, then the whole packet stream, then a seek | an M4A file |
+| `aac` | `mp4.c`, then `fw/hifi/codec_aac.c` + pvaacdec (AOSP) on the packet stream it makes | an M4A file |
+| `aacpkt` | `codec_aac.c` + pvaacdec alone | a packet stream (`hifi_proto.h`), configuration included |
+| `tags` | `fw/src/tags.c` (core A), for every format | any file |
 
-Each run opens the input as core B does (`codec_open()`), then decodes up to 400 blocks
-(`codec_run()`).
+A core B codec is opened as on the device (`codec_open()`), then decodes up to 400 blocks
+(`codec_run()`). Core A code reads the file through a stand-in for `fat_pread()`. The `aac`
+target goes through the real input ring at the address core B uses, as `player.c` does.
 
 ## How it works
 
@@ -42,9 +51,12 @@ Each run opens the input as core B does (`codec_open()`), then decodes up to 400
 - **One process per input**: each run is a `fork()` of the parent. The codecs' static state starts
   fresh every time, and a crash, a sanitizer report or a hang (5 s) only ends the child.
 - **Mutations**: bit flips, interesting bytes (0, 0x7f, 0x80, 0xff…), random bytes and words,
-  truncation, deleted and duplicated runs. Three positions out of four fall in the first 12 KiB,
-  where the identification, comment and setup headers are: the Vorbis setup header holds the
-  codebooks, the most complex code to parse.
+  truncation, deleted and duplicated runs. Three positions out of four fall in a "hot" region:
+  - the first 12 KiB for Ogg and MP3 (the Vorbis setup header and its codebooks, ID3v2, the
+    Xing/LAME frame);
+  - for MP4, the `moov` box wherever it is (it holds everything `mp4.c` reads; it may be at the
+    end of the file);
+  - for `tags`, also the last 512 bytes (ID3v1, APEv2).
 - **Faithful to the target**: `-funsigned-char` as on ARM (a `char` index that is negative on the
   PC is not on the device). The `vorbis-heap` target keeps core B's own allocator
   (`fw/hifi/heap.c`) in place of the C library's. ASan cannot see inside that allocator, but some
@@ -52,20 +64,23 @@ Each run opens the input as core B does (`codec_open()`), then decodes up to 400
 
 ## Running it
 
-Requirements: Linux, gcc with libasan and libubsan, GNU make, ffmpeg with libvorbis and libopus
-(for the seeds).
+Requirements: Linux, gcc and g++ with libasan and libubsan, GNU make, ffmpeg with libvorbis,
+libopus and libmp3lame (for the seeds).
 
 ```sh
 cd fw/tools/fuzz
 ./mkseeds.sh seeds                  # synthetic seeds; add a music folder: ./mkseeds.sh seeds ~/Music
-./build.sh vorbis                   # or ogg, opus, vorbis-heap
+./build.sh vorbis                   # or any target of the table above
 build/vorbis/fuzz seeds/vorbis out/vorbis 1500     # 25 minutes
+FUZZ_STREAM=s.hp4p build/mp4/fuzz -r seeds/m4a/syn1.m4a   # a packet stream, seed for aacpkt
 ```
 
 `mkseeds.sh` encodes a few seconds of tone and noise at several rates, channel counts and
-qualities. Given a music folder, it also takes up to 6 Vorbis and 5 Opus files from it. These are
-remuxed without re-encoding and without tags or cover art, so that the seed holds audio and not a
-cover picture. Every seed is cut to 40,000 bytes. Seeds and findings stay out of the repository
+qualities: Vorbis, Opus, MP3 (MPEG-1, 2 and 2.5, CBR and VBR, with and without the Xing frame,
+ID3v2 and ID3v1 tags) and M4A (8 to 96 kHz, the `moov` box at the start or at the end). Given a
+music folder, it also takes a few files of each format from it. These are remuxed without
+re-encoding and without cover art, so that the seed holds audio and not a cover picture. Ogg and
+MP3 seeds are cut to 40,000 bytes; M4A seeds are kept whole. Seeds and findings stay out of the repository
 (`.gitignore`): they may come from your own music.
 
 Progress is printed every 30 s:
@@ -86,7 +101,7 @@ FUZZ_NOFORK=1 gdb --args build/vorbis-heap/fuzz -r file.ogg
 `FUZZ_PCM` also serves another check: decoding whole files before and after a change, to make
 sure the output stays bit-exact.
 
-## Results (version 0.81, October 2026)
+## Results: Ogg, Vorbis and Opus (version 0.81, October 2026)
 
 Twenty-five minutes per run, on a 12-thread PC:
 
@@ -123,14 +138,66 @@ Each fix was checked three ways:
 - 26 whole tracks of a real library decode bit-exact before and after the fixes;
 - on the ARM image, in the emulator, a reference file decodes bit-exact against 0.80.
 
+## Results: MP3, AAC, MP4 and tags (version 0.82, October 2026)
+
+First runs, 25 minutes per target:
+
+| Target | Runs | Crashes | Hangs |
+|---|---|---|---|
+| `mp4` (core A) | 682,290 | 0 | 0 |
+| `tags` (core A) | 614,384 | 0 | 0 |
+| `aac` | 213,286 | 1,278 | 0 |
+| `aacpkt` | 150,129 | 3,690 | 0 |
+| `mp3` | 271,391 | 403 | 0 |
+
+Our core A readers (`mp4.c`, `tags.c`) showed nothing. Every defect was in the two PacketVideo
+decoders, or in how we fed them. Three rounds of fixes, all written here and marked
+`ECHO MINI (ETUDE §63)`, with FAAD2, ffmpeg and the standard as references:
+
+- **AAC, TNS** (`get_tns.cpp`): a negative start band went to an unsigned variable as a huge
+  index. On the 32-bit target it lands 68 bytes before the band table, and `apply_tns` then
+  writes with the wrong bounds. Now `max(top - length, 0)`, as the standard says.
+- **AAC, pulses** (`getics.cpp`, `pulse_nc.cpp`): `pulse_start_sfb` (6 bits) past the bands, then
+  writes past `coef[]`. Now refused, and no pulse goes past the last band.
+- **AAC, inverse quantisation** (`huffspec_fxp.cpp`): an off-by-one (8192 let through, index
+  1025 of a 1025-entry table), and a maximum that missed values left by a frame that failed part
+  way. The maximum is now taken over all 1,024 coefficients.
+- **AAC, escape codes** (`unpack_idx.cpp`): an unbounded escape prefix; now 12 bits at most, as
+  the standard says.
+- **AAC, configuration** (`codec_aac.c`, our code): the decoder's bit reader is not bounded, and
+  a program config element read past our 64-byte buffer on the stack. The buffer now has 1 KiB
+  of zeros after it.
+- **AAC, PNS and intensity stereo** (`pns_intensity_right.cpp`): a window group array of another
+  window sequence ran the pointers out of the decoder's memory. Now the loop stops on a group
+  that does not progress.
+- **MP3, Huffman regions** (`pvmp3_huffman_parsing.cpp`): region indexes up to 24 in a
+  23-entry array (they read the next field). Now bounded to 22, as ffmpeg does.
+- **MP3, sub-block gain** (`pvmp3_dequantize_sample.cpp`): a window index up to 4 for 3 windows.
+  Now bounded to 2.
+
+The TNS and pulse defects wrote out of bounds on the device. The quantisation, escape,
+configuration and PNS defects read out of bounds. The two MP3 ones only gave wrong values on
+already corrupt frames.
+
+Final runs on 0.82: `aac` 261,817 runs, `aacpkt` 507,574, `mp3` 254,987, all without a crash or a
+hang. All 5,443 saved crashes replay clean. The 34 M4A files of a real library and 16 MP3 files
+decode bit-exact before and after the fixes. On the ARM image, in the emulator, an MP3 and two
+M4A files decode bit-exact against 0.81.
+
 ## Limits
 
-- The PC build is 64-bit and uses the C versions of the ARM assembly macros. Pointer-size and
-  assembly-only faults are not covered: the device and the emulator remain the reference.
+- The PC build is 64-bit and uses the C versions of the ARM assembly macros and routines (Tremor,
+  libopus, the MP3 decoder's DCTs and polyphase window). Pointer-size and assembly-only faults are
+  not covered: the device and the emulator remain the reference. Against the emulator, the PC
+  output is bit-exact for AAC and within 1 LSB for MP3.
+- In the PacketVideo decoders, shifts of 32 bits or more are not checked: they happen on valid
+  files (`ms_synt.cpp`), and on ARM they are arithmetic (the sign), which is what the code means.
+  `trans4m_freq_2_time_fxp.cpp` is built without ASan: its pipelined loops read one element
+  before a table on their last pass, a value never used.
 - Coverage guidance is simple (no comparison tracing, no dictionaries): checksums or magic values
   deep in a stream are reached slowly. The Ogg page CRC is not checked by our reader, which helps.
-- Only the Ogg codecs have a target so far. MP3, FLAC, AAC, ALAC and Musepack would need their
-  own small entry in `build.sh` and `fuzz_host.c`.
+- FLAC, ALAC, Musepack, WAV and AIFF have no decoder target yet (their tags are covered by
+  `tags`). Each would need a small entry in `build.sh` and `fuzz_host.c`.
 
 ## A lesson for the firmware build
 

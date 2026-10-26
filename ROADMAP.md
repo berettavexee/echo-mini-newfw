@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-26, version 0.81.
+Last update: 2026-10-26, version 0.82.
 
 ## Done, validated on the device
 
@@ -116,6 +116,10 @@ Last update: 2026-10-26, version 0.81.
   `docs/FUZZING.md`): Ogg and Opus without a crash; Vorbis from 5,059 crashes in 25 minutes
   (0.80) to none in 433,945 runs. Output bit-exact with 0.80 on 26 whole tracks and in the
   emulator (§62).
+- 0.82: the fuzzing bench extended to MP3, AAC, the MP4 container and the tags (§63): our core A
+  readers (`mp4.c`, `tags.c`) clean; eight defects fixed in the PacketVideo decoders and in how
+  we feed pvaacdec, two of them out-of-bounds writes (AAC TNS and pulses). Final runs without a
+  crash; output bit-exact on the library's 34 M4A files and 16 MP3 files, and in the emulator.
 
 ## To do
 

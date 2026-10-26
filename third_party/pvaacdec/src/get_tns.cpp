@@ -458,6 +458,13 @@ void get_tns(
 
                 top -= get9_n_lessbits(num_start_band_bits,
                                        pInputStream);
+                /* ECHO MINI (ETUDE §63): the start band is max(top - length, 0), as in the
+                 * standard; a negative top went to the unsigned tempInt as a huge band index,
+                 * then out-of-bounds writes in apply_tns */
+                if (top < 0)
+                {
+                    top = 0;
+                }
 
                 tempInt = MINIMUM(top, tns_bands);
 

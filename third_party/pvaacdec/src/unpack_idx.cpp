@@ -588,7 +588,7 @@ void unpack_idx_esc(
             esc_seq = get1bits(pInputStream);
 
         }
-        while (esc_seq != 0);
+        while (esc_seq != 0 && N < 12);  /* ECHO MINI (ETUDE §63): N <= 12 (values < 8192) */
 
         esc_seq  = getbits(N, pInputStream);
 
@@ -626,7 +626,7 @@ void unpack_idx_esc(
             esc_seq = get1bits(pInputStream);
 
         }
-        while (esc_seq != 0);
+        while (esc_seq != 0 && N < 12);  /* ECHO MINI (ETUDE §63): N <= 12 (values < 8192) */
 
         esc_seq  = getbits(N, pInputStream);
 
