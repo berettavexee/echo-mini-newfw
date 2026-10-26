@@ -209,7 +209,7 @@ the next one.
 | AIFF | `.aif`, `.aiff`, `.aifc` | PCM, 8 to 32 bits (AIFF-C: uncompressed only); ID3v2 tags (ReplayGain too), else NAME / AUTH |
 | FLAC | `.flac` | |
 | MP3 | `.mp3` | ID3v2 tags, ReplayGain from ID3v2 |
-| Ogg Vorbis | `.ogg` | |
+| Ogg Vorbis | `.ogg` | not played: floor 0 (encoders before 2001) and blocks over 4096 samples (no current encoder makes them) |
 | Opus | `.opus` | R128 gain tags |
 | AAC | `.m4a`, `.m4b`, `.mp4` | AAC-LC, mono or stereo; iTunes tags and ReplayGain; gapless |
 | ALAC | `.m4a`, `.m4b`, `.mp4` | Apple Lossless, 16, 20 or 24 bits, mono or stereo; iTunes tags and ReplayGain |

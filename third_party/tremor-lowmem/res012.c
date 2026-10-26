@@ -74,6 +74,20 @@ int res_unpack(vorbis_info_residue *info,
 
   if(oggpack_eop(opb))goto errout;
 
+  /* ECHO MINI (ETUDE §62), as libvorbis: the phrasebook can code every partition word, and the
+     words decoded are checked against partitions^dim (else an index past stagemasks) */
+  {
+    int entries=ci->book_param[info->groupbook].entries;
+    int dim=ci->book_param[info->groupbook].dim;
+    int partvals=1;
+    if(dim<1 || info->partitions<1)goto errout;
+    while(dim-->0){
+      partvals*=info->partitions;
+      if(partvals>entries)goto errout;
+    }
+    info->partvals=partvals;
+  }
+
   return 0;
  errout:
   res_clear_info(info);
@@ -127,7 +141,7 @@ int res_inverse(vorbis_dsp_state *vd,vorbis_info_residue *info,
 	      
 	      for(j=0;j<ch;j++){
 		int temp=vorbis_book_decode(phrasebook,&vd->opb);
-		if(temp==-1)goto eopbreak;
+		if(temp==-1 || temp>=info->partvals)goto eopbreak;
 		
 		/* this can be done quickly in assembly due to the quotient
 		   always being at most six bits */
@@ -191,7 +205,7 @@ int res_inverse(vorbis_dsp_state *vd,vorbis_info_residue *info,
 	    
 	    /* fetch the partition word */
 	    temp=vorbis_book_decode(phrasebook,&vd->opb);
-	    if(temp==-1)goto eopbreak;
+	    if(temp==-1 || temp>=info->partvals)goto eopbreak;
 	    
 	    /* this can be done quickly in assembly due to the quotient
 	       always being at most six bits */

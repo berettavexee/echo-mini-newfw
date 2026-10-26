@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-26, version 0.80.
+Last update: 2026-10-26, version 0.81.
 
 ## Done, validated on the device
 
@@ -108,6 +108,14 @@ Last update: 2026-10-26, version 0.80.
   (§61). Bit-exact with the bench in the emulator. On the device: 28-29 MHz mean on core B (45.7 MHz at
   most), seek 0.05-0.15 s in SV7, 0.06 s in SV8; damaged files handled as in the emulator. Also:
   a wrong "queued behind" log value after a slow refusal is fixed.
+- 0.81: Vorbis hardened from micro-vorbis' list of Tremor lowmem defects and libvorbis' checks
+  (written here, not copied): the 18 floor 0 files of the library (libvorbis 2000 betas) made a
+  core B fault when refused, now refused cleanly; checks in the codebook, floor 1 and residue
+  setup and decoding against malformed streams; core B's malloc no longer wraps on huge sizes;
+  blocks over 4096 samples refused. A fuzzing bench for the core B Ogg code (`fw/tools/fuzz/`,
+  `docs/FUZZING.md`): Ogg and Opus without a crash; Vorbis from 5,059 crashes in 25 minutes
+  (0.80) to none in 433,945 runs. Output bit-exact with 0.80 on 26 whole tracks and in the
+  emulator (§62).
 
 ## To do
 
@@ -119,6 +127,8 @@ New formats, in this order (agreed 2026-10-24):
 
 Other items:
 
+- Study esphome-libs' micro-mp3 (a fork of the OpenCore MP3 decoder, as our pvmp3dec) and
+  micro-flac (Apache-2.0): their lists of fixes and hardening, as done for micro-vorbis (§62).
 - Actions on the plug events (to be proposed and agreed first):
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
@@ -221,6 +231,8 @@ Other items:
 - Floating-point WAV and AIFF-C (core B has no FPU), and compressed AIFF-C (u-law, A-law) are not
   played.
 - Files of 4 GiB or more are not listed.
+- Ogg Vorbis with floor 0 (libvorbis betas of 2000) or with blocks over 4096 samples (no current
+  encoder makes them; Tremor lowmem decodes them wrongly) is refused (§62).
 
 ## Not planned
 

@@ -91,8 +91,10 @@ vorbis_info_floor *floor1_info_unpack (vorbis_info *vi,oggpack_buffer *opb){
   vorbis_info_floor1 *info=(vorbis_info_floor1 *)_ogg_calloc(1,sizeof(*info));
   /* read partitions */
   info->partitions=oggpack_read(opb,5); /* only 0 to 31 legal */
+  if(info->partitions<0)goto err_out;   /* ECHO MINI (ETUDE §62): the end of the packet */
   info->partitionclass=
-    (char *)_ogg_malloc(info->partitions*sizeof(*info->partitionclass));
+    (char *)_ogg_malloc(info->partitions*sizeof(*info->partitionclass)+1);
+  if(!info->partitionclass)goto err_out;
   for(j=0;j<info->partitions;j++){
     info->partitionclass[j]=oggpack_read(opb,4); /* only 0 to 15 legal */
     if(maxclass<info->partitionclass[j])maxclass=info->partitionclass[j];
@@ -149,6 +151,11 @@ vorbis_info_floor *floor1_info_unpack (vorbis_info *vi,oggpack_buffer *opb){
   /* also store a sorted position index */
   for(j=0;j<info->posts;j++)info->forward_index[j]=j;
   vorbis_mergesort(info->forward_index,info->postlist,info->posts);
+  /* ECHO MINI (ETUDE §62): no repeated x in the post list (libvorbis rejects them too); they
+     would make zero-length segments, a division by zero in render_line() */
+  for(j=1;j<info->posts;j++)
+    if(info->postlist[(int)info->forward_index[j-1]]==
+       info->postlist[(int)info->forward_index[j]])goto err_out;
   
   /* discover our neighbors for decode where we don't use fit flags
      (that would push the neighbors outward) */
@@ -197,7 +204,12 @@ static int render_point(int x0,int x1,int y0,int y1,int x){
 }
 
 static void render_line(int n,int x0,int x1,int y0,int y1,ogg_int32_t *d){
-  int dy=y1-y0;
+  int dy;
+  /* ECHO MINI (ETUDE §62): ends within FLOOR_fromdB_LOOKUP (256 values; mult 3 allows up to 258):
+     the points between stay within them */
+  if(y0<0)y0=0; else if(y0>255)y0=255;
+  if(y1<0)y1=0; else if(y1>255)y1=255;
+  dy=y1-y0;
   int adx=x1-x0;
   int ady=abs(dy);
   int base=dy/adx;

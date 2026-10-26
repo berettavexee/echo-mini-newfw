@@ -188,6 +188,9 @@ static int _vorbis_unpack_info(vorbis_info *vi,oggpack_buffer *opb){
   if(ci->blocksizes[0]<64)goto err_out; 
   if(ci->blocksizes[1]<ci->blocksizes[0])goto err_out;
   if(ci->blocksizes[1]>8192)goto err_out;
+  /* ECHO MINI (ETUDE §62): blocks of 8192 samples are not supported (no encoder of today makes
+     them, none in the library; lowmem decodes them wrongly) */
+  if(ci->blocksizes[1]>4096)goto err_out;
   
   if(oggpack_read(opb,1)!=1)goto err_out; /* EOP check */
 
@@ -233,6 +236,7 @@ static int _vorbis_unpack_books(vorbis_info *vi,oggpack_buffer *opb){
   /* codebooks */
   ci->books=oggpack_read(opb,8)+1;
   ci->book_param=(codebook *)_ogg_calloc(ci->books,sizeof(*ci->book_param));
+  if(!ci->book_param)goto err_out;
   for(i=0;i<ci->books;i++)
     if(vorbis_book_unpack(opb,ci->book_param+i))goto err_out;
 
@@ -243,8 +247,12 @@ static int _vorbis_unpack_books(vorbis_info *vi,oggpack_buffer *opb){
 
   /* floor backend settings */
   ci->floors=oggpack_read(opb,6)+1;
-  ci->floor_param=_ogg_malloc(sizeof(*ci->floor_param)*ci->floors);
-  ci->floor_type=_ogg_malloc(sizeof(*ci->floor_type)*ci->floors);
+  /* ECHO MINI (ETUDE §62): zeroed (calloc) so that vorbis_info_clear(), after an error part way
+     through, frees only what was unpacked (a refused floor 0 freed garbage pointers: a core B
+     fault on 2000-era files) */
+  ci->floor_param=_ogg_calloc(ci->floors,sizeof(*ci->floor_param));
+  ci->floor_type=_ogg_calloc(ci->floors,sizeof(*ci->floor_type));
+  if(!ci->floor_param || !ci->floor_type)goto err_out;
   for(i=0;i<ci->floors;i++){
     ci->floor_type[i]=oggpack_read(opb,16);
     if(ci->floor_type[i]<0 || ci->floor_type[i]>=VI_FLOORB)goto err_out;
@@ -262,13 +270,15 @@ static int _vorbis_unpack_books(vorbis_info *vi,oggpack_buffer *opb){
 
   /* residue backend settings */
   ci->residues=oggpack_read(opb,6)+1;
-  ci->residue_param=_ogg_malloc(sizeof(*ci->residue_param)*ci->residues);
+  ci->residue_param=_ogg_calloc(ci->residues,sizeof(*ci->residue_param));
+  if(!ci->residue_param)goto err_out;
   for(i=0;i<ci->residues;i++)
     if(res_unpack(ci->residue_param+i,vi,opb))goto err_out;
 
   /* map backend settings */
   ci->maps=oggpack_read(opb,6)+1;
-  ci->map_param=_ogg_malloc(sizeof(*ci->map_param)*ci->maps);
+  ci->map_param=_ogg_calloc(ci->maps,sizeof(*ci->map_param));
+  if(!ci->map_param)goto err_out;
   for(i=0;i<ci->maps;i++){
     if(oggpack_read(opb,16)!=0)goto err_out;
     if(mapping_info_unpack(ci->map_param+i,vi,opb))goto err_out;
@@ -277,7 +287,8 @@ static int _vorbis_unpack_books(vorbis_info *vi,oggpack_buffer *opb){
   /* mode settings */
   ci->modes=oggpack_read(opb,6)+1;
   ci->mode_param=
-    (vorbis_info_mode *)_ogg_malloc(ci->modes*sizeof(*ci->mode_param));
+    (vorbis_info_mode *)_ogg_calloc(ci->modes,sizeof(*ci->mode_param));
+  if(!ci->mode_param)goto err_out;
   for(i=0;i<ci->modes;i++){
     ci->mode_param[i].blockflag=oggpack_read(opb,1);
     if(oggpack_read(opb,16))goto err_out;

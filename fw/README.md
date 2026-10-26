@@ -71,6 +71,13 @@ not part of this repository. `tools/exfat_add.py` fills an exFAT image made by `
 `tools/readlog.py` decodes `NEWFWLOG.TXT`. `tools/mkupsample.py` generates the upsampler's filters
 (`hifi/upsample_tab.h`).
 
+`tools/fuzz/` fuzzes the core B Ogg code (`hifi/oggpage.c`, Vorbis, Opus) on the PC with ASan,
+UBSan and coverage guidance: `mkseeds.sh`, `build.sh ogg|vorbis|opus|vorbis-heap`, then
+`build/<target>/fuzz SEEDS OUT SECONDS`. See `../docs/FUZZING.md`.
+
+The Makefile does not track the headers of the third-party decoders: after changing one (for
+instance `third_party/tremor-lowmem/codec_internal.h`), rebuild from clean (`rm -rf build`).
+
 ## On the device
 
 Install `build/HIFIEC70.IMG` (renamed, e.g. `NEWFW061.IMG`) from the main menu ("Install a

@@ -120,13 +120,16 @@ static int _determine_leaf_words(int nodeb, int leafwidth){
 
 /* given a list of word lengths, number of used entries, and byte
    width of a leaf, generate the decode table */
-static int _make_words(char *l,long n,ogg_uint32_t *r,long quantvals,
+/* ECHO MINI (ETUDE §62): rn is the size of r in words; a lengthlist whose tree would grow past
+   it, or that leaves the tree underpopulated (one used entry excepted), is rejected */
+static int _make_words(char *l,long n,ogg_uint32_t *r,long rn,long quantvals,
 		       codebook *b, oggpack_buffer *opb,int maptype){
   long i,j,count=0;
   long top=0;
   ogg_uint32_t marker[33];
 
   if(n<2){
+    if(rn<1)return -1;
     r[0]=0x80000000;
   }else{
     memset(marker,0,sizeof(marker));
@@ -141,6 +144,7 @@ static int _make_words(char *l,long n,ogg_uint32_t *r,long quantvals,
 	/* chase the tree as far as it's already populated, fill in past */
 	for(j=0;j<length-1;j++){
 	  int bit=(entry>>(length-j-1))&1;
+	  if(chase*2+1>=rn)return -1;
 	  if(chase>=top){ 
 	    top++;
 	    r[chase*2]=top;
@@ -152,6 +156,7 @@ static int _make_words(char *l,long n,ogg_uint32_t *r,long quantvals,
 	}
 	{	
 	  int bit=(entry>>(length-j-1))&1;
+	  if(chase*2+1>=rn)return -1;
 	  if(chase>=top){ 
 	    top++;
 	    r[chase*2+1]=0;
@@ -181,10 +186,18 @@ static int _make_words(char *l,long n,ogg_uint32_t *r,long quantvals,
 	    break;
       }
     }
+    if(count!=1)
+      for(i=1;i<33;i++)
+	if(marker[i] & (0xffffffffUL>>(32-i)))
+	  return -1; /* underpopulated tree */
   }
   
   return 0;
 }
+
+#ifndef ECHO_MAX_DIM
+#define ECHO_MAX_DIM 32
+#endif
 
 #ifdef ECHO_HEAP_ALLOCA
 /* ECHO MINI: the HiFi core has an 8 KB stack; the header-time scratch buffers (up to
@@ -211,18 +224,23 @@ static int _make_decode_table(codebook *s,char *lengthlist,long quantvals,
 
   if(s->dec_nodeb==4){
     s->dec_table=_ogg_malloc((s->used_entries*2+1)*sizeof(*work));
+    if(!s->dec_table)return 1;
     /* +1 (rather than -2) is to accommodate 0 and 1 sized books,
        which are specialcased to nodeb==4 */
     if(_make_words(lengthlist,s->entries,
-		   s->dec_table,quantvals,s,opb,maptype))return 1;
+		   s->dec_table,s->used_entries*2+1,quantvals,s,opb,maptype))return 1;
     
     return 0;
   }
 
+  if(s->used_entries<2)return 1;
   work=SCRATCH_ALLOC((s->used_entries*2-2)*sizeof(*work));
-  if(_make_words(lengthlist,s->entries,work,quantvals,s,opb,maptype))return 1;
+  if(!work)return 1;
+  if(_make_words(lengthlist,s->entries,work,s->used_entries*2-2,quantvals,s,opb,maptype))
+    return 1;
   s->dec_table=_ogg_malloc((s->used_entries*(s->dec_leafw+1)-2)*
 			   s->dec_nodeb);
+  if(!s->dec_table)return 1;
   
   if(s->dec_leafw==1){
     switch(s->dec_nodeb){
@@ -322,15 +340,19 @@ static int _make_decode_table(codebook *s,char *lengthlist,long quantvals,
 long _book_maptype1_quantvals(codebook *b){
   /* get us a starting hint, we'll polish it below */
   int bits=_ilog(b->entries);
-  int vals=b->entries>>((bits-1)*(b->dim-1)/b->dim);
+  int vals;
+  if(b->dim<1 || b->entries<1)return -1;
+  vals=b->entries>>((bits-1)*(b->dim-1)/b->dim);
+  if(vals<1)vals=1;
 
   while(1){
     long acc=1;
     long acc1=1;
     int i;
+    /* ECHO MINI: saturated at entries+1 (a long overflow could loop forever) */
     for(i=0;i<b->dim;i++){
-      acc*=vals;
-      acc1*=vals+1;
+      acc=acc>b->entries/vals?b->entries+1:acc*vals;
+      acc1=acc1>b->entries/(vals+1)?b->entries+1:acc1*(vals+1);
     }
     if(acc<=b->entries && acc1>b->entries){
       return(vals);
@@ -368,12 +390,17 @@ int vorbis_book_unpack(oggpack_buffer *opb,codebook *s){
   s->dim=oggpack_read(opb,16);
   s->entries=oggpack_read(opb,24);
   if(s->entries==-1)goto _eofout;
+  /* ECHO MINI (ETUDE §62): dim in [1, ECHO_MAX_DIM] (real encoders: 8 at most; the decode
+     vectors are on core B's 8 KiB stack), and libvorbis' bound on dim and entries */
+  if(s->dim<1 || s->dim>ECHO_MAX_DIM)goto _eofout;
+  if(_ilog(s->dim)+_ilog(s->entries)>24)goto _eofout;
 
   /* codeword ordering.... length ordered or unordered? */
   switch((int)oggpack_read(opb,1)){
   case 0:
     /* unordered */
-    lengthlist=(char *)SCRATCH_ALLOC(sizeof(*lengthlist)*s->entries);
+    lengthlist=(char *)SCRATCH_ALLOC(sizeof(*lengthlist)*s->entries+1);
+    if(!lengthlist)goto _errout;
 
     /* allocated but unused entries? */
     if(oggpack_read(opb,1)){
@@ -407,11 +434,15 @@ int vorbis_book_unpack(oggpack_buffer *opb,codebook *s){
       long length=oggpack_read(opb,5)+1;
 
       s->used_entries=s->entries;
-      lengthlist=(char *)SCRATCH_ALLOC(sizeof(*lengthlist)*s->entries);
+      lengthlist=(char *)SCRATCH_ALLOC(sizeof(*lengthlist)*s->entries+1);
+      if(!lengthlist)goto _errout;
       
       for(i=0;i<s->entries;){
 	long num=oggpack_read(opb,_ilog(s->entries-i));
 	if(num==-1)goto _eofout;
+	/* ECHO MINI: codeword lengths of 32 bits at most (marker[33] in _make_words), and no
+	   more codewords of a length than it has room for */
+	if(length>32 || (length<32 && num>(1L<<length)) || num>s->entries-i)goto _errout;
 	for(j=0;j<num && i<s->entries;j++,i++)
 	  lengthlist[i]=length;
 	s->dec_maxlength=length;
@@ -456,6 +487,7 @@ int vorbis_book_unpack(oggpack_buffer *opb,codebook *s){
 
     /* mapping type 1; implicit values by lattice  position */
     quantvals=_book_maptype1_quantvals(s);
+    if(quantvals<1)goto _errout;
     
     /* dec_type choices here are 1,2; 3 doesn't make sense */
     {
@@ -470,6 +502,7 @@ int vorbis_book_unpack(oggpack_buffer *opb,codebook *s){
 
 	/* need quantized values before  */
 	s->q_val=SCRATCH_ALLOC(sizeof(ogg_uint16_t)*quantvals);
+	if(!s->q_val)goto _errout;
 	for(i=0;i<quantvals;i++)
 	  ((ogg_uint16_t *)s->q_val)[i]=oggpack_read(opb,s->q_bits);
 	
@@ -495,12 +528,15 @@ int vorbis_book_unpack(oggpack_buffer *opb,codebook *s){
 	/* use dec_type 2: packed vector of column offsets */
 
 	/* need quantized values before */
+	if(_ilog(quantvals-1)*s->dim>32)goto _errout; /* decpack's shifts */
 	if(s->q_bits<=8){
 	  s->q_val=_ogg_malloc(quantvals);
+	  if(!s->q_val)goto _errout;
 	  for(i=0;i<quantvals;i++)
 	    ((unsigned char *)s->q_val)[i]=oggpack_read(opb,s->q_bits);
 	}else{
 	  s->q_val=_ogg_malloc(quantvals*2);
+	  if(!s->q_val)goto _errout;
 	  for(i=0;i<quantvals;i++)
 	    ((ogg_uint16_t *)s->q_val)[i]=oggpack_read(opb,s->q_bits);
 	}
@@ -543,6 +579,7 @@ int vorbis_book_unpack(oggpack_buffer *opb,codebook *s){
       /* get the vals & pack them */
       s->q_pack=(s->q_bits+7)/8*s->dim;
       s->q_val=_ogg_malloc(s->q_pack*s->used_entries);
+      if(!s->q_val)goto _errout;
 
       if(s->q_bits<=8){
 	for(i=0;i<s->used_entries*s->dim;i++)
@@ -670,6 +707,10 @@ int decode_map(codebook *s, oggpack_buffer *b, ogg_int32_t *v, int point){
   ogg_uint32_t entry = decode_packed_entry_number(s,b);
   int i;
   if(oggpack_eop(b))return(-1);
+  /* ECHO MINI (ETUDE §62): a walk off the tree (damaged data) returns -1 without reaching the end
+     of the packet; and an index past the values of a dec_type 3 book */
+  if(entry==(ogg_uint32_t)-1)return(-1);
+  if(s->dec_type==3 && entry>=(ogg_uint32_t)s->used_entries)return(-1);
 
   /* according to decode type */
   switch(s->dec_type){
@@ -715,6 +756,7 @@ int decode_map(codebook *s, oggpack_buffer *b, ogg_int32_t *v, int point){
   {
     int shiftM=point-s->q_delp;
     ogg_int32_t add=point-s->q_minp;
+    if(shiftM>=32 || shiftM<=-32 || add>=32 || add<=-32)return(-1); /* ECHO MINI */
     if(add>0)
       add= s->q_min >> add;
     else

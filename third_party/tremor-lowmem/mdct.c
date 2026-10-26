@@ -368,7 +368,7 @@ STIN void mdct_step8(DATA_TYPE *x, int n, int step){
 	v1  = t1-q1;
 	r0  =  x[6];
 	r1  = -x[7];	
-	XPROD31( r0, r1, v0, v1, x+5, x+6 );
+	XPROD31( r0, r1, v0, v1, x+6, x+7 );	/* (was x+5, x+6: ETUDE §62) */
 
 	x+=8;
       }while(x<iX);

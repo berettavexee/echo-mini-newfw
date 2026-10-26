@@ -122,6 +122,7 @@ typedef struct vorbis_info_residue{
   char          partitions;       /* possible codebooks for a partition */
   unsigned char groupbook;        /* huffbook for partitioning */
   char          stages;
+  int           partvals;         /* ECHO MINI: partitions^dim of the groupbook */
 } vorbis_info_residue;
 
 extern void res_clear_info(vorbis_info_residue *info);

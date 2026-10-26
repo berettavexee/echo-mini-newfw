@@ -3145,3 +3145,53 @@ Les quatre fréquences fautives sont exactement celles des deux entrées de PLL 
 Image `work/NEWFW080.IMG`, CRC `0xfe8387af`.
 
 **Nuit d'autonomie (2026-10-26, `work/hwlog_1026_night079/`)** : l'image en place était la 0.80 avant la correction du journal (CRC `0x541df300`), et non la 0.79 prévue. 7,9 h de lecture continue depuis la carte SD (1000mods, Daft Punk… : 46 MP3, 38 Vorbis, 11 FLAC), écran éteint, 92 pistes sans aucune erreur ni sous-remplissage ; cœur B 40 MHz en moyenne. Batterie de 4 179 à 3 637 mV. Sur la même plage de tension que la nuit du 24 octobre (0.61, MP3 320 kb/s, cœur B 57 MHz en moyenne) : 4 100 → 3 750 mV en 4,82 h contre 4,62 h (72,7 contre 75,8 mV/h), 4 072 → 3 710 mV en 5,28 h contre 4,88 h (68,5 contre 74,1 mV/h) : 4 à 8 % de mieux, avec un mélange de formats plus lourd en moyenne. La fin de la courbe (sous 3,64 V, jusqu'au seuil d'arrêt de 3,3 V) reste à mesurer : l'autonomie totale n'est donc qu'estimée, autour de 10 h.
+
+## 62. microVorbis : défauts de Tremor lowmem, protections, banc de fuzzing (0.81, 2026-10-26)
+
+**Source** : [micro-vorbis](https://github.com/esphome-libs/micro-vorbis) et [micro-ogg-demuxer](https://github.com/esphome-libs/micro-ogg-demuxer) (esphome-libs, Apache-2.0 ; Tremor fork BSD). Leur code vise l'ESP32 (Xtensa, PSRAM) et ne fait rien gagner au Cortex-M3 ; leur liste de modifications (`src/tremor/CHANGES.md`) recense des défauts de lowmem. Rien n'est recopié : les corrections ci-dessous sont écrites ici d'après cette liste et d'après libvorbis.
+
+**Blocs de 8192 échantillons** : `mdct_step8`, cas 0, écrivait en `x+5, x+6` au lieu de `x+6, x+7` (corrigé). Ce cas ne sert qu'aux blocs de 8192, que Tremor accepte seulement à 64 kHz et plus. libvorbis 1.3.7 n'en produit à aucune fréquence ni qualité ; les 964 Vorbis de la bibliothèque sont tous en 256/2048. Un fichier construit avec un libvorbis modifié (96 kHz, 256/8192) reste faux même corrigé (12,5 dB contre ffmpeg, 0,6 dB avant) : lowmem a d'autres défauts à cette taille. **Décision de l'utilisateur : ces blocs ne sont pas pris en charge**, refusés à l'ouverture (`info.c`, `blocksizes[1] > 4096`), comme le floor 0.
+
+**Floor 0 : faute du cœur B** : la bibliothèque contient 18 fichiers en libVorbis 20000508 (bêta de 2000, floor 0 ; Les Vieilles Salopes, « Aime-moi tendre, aime-moi vrai »). Leur refus (`ECHO_NO_FLOOR0`) passait par `vorbis_info_clear()`, qui libérait les entrées de `floor_param` jamais remplies : de la mémoire non initialisée de `heap.c`. Dans l'émulateur, lecture hors mémoire du cœur B ; sur le PC avec `heap.c`, faute dans `floor1_free_info` (pointeur `0x30002f002e002d`). Correction : les tableaux de la configuration (`floor_param`, `floor_type`, `residue_param`, `map_param`, `mode_param`) en `calloc`, et l'échec d'allocation contrôlé. En 0.81, ces fichiers sont refusés proprement (« Cannot play »).
+
+**Protections du dictionnaire** (`codebook.c`), contre les en-têtes de configuration malformés :
+- `dim` entre 1 et 32 (les vecteurs du décodage sont sur la pile de 8 Kio du cœur B ; les encodeurs réels : 8 au plus), et la borne de libvorbis `ilog(dim) + ilog(entries) <= 24` ;
+- `_make_words` borné à la taille de son tableau, refus des arbres incomplets (sauf un seul mot) ;
+- longueurs de mots de 32 bits au plus en mode ordonné (sinon `marker[33]` déborde), et pas plus de mots qu'une longueur n'en permet ;
+- `_book_maptype1_quantvals` sans débordement (produits saturés) ni boucle sans fin ;
+- décalages de 32 bits ou plus refusés (`decpack` à la configuration, `decode_map` au décodage) ;
+- index du type 3 borné ; un parcours sorti de l'arbre (`-1`) est une erreur de paquet ;
+- toutes les allocations contrôlées.
+
+Et dans `floor1.c` : une abscisse en double dans la liste des points est refusée (comme libvorbis : sinon division par zéro dans `render_line`).
+
+**Banc de fuzzing** (`re/fuzz/`, local) : `fuzz_host.c` exécute sur le PC nos vrais `oggpage.c`, `codec_vorbis.c` (Tremor) et `codec_opus.c` (libopus), avec ASan et UBSan (hors décalages de valeurs signées et débordements volontaires de Tremor), sur un bouchon du runtime du cœur B. Guidé par la couverture comme AFL, avec gcc seul (`-fsanitize-coverage=trace-pc`, table partagée de 64 Kio) ; chaque entrée dans un processus enfant (statiques neuves, plantages et boucles sans fin détectés) ; mutations surtout dans les 12 premiers Kio (les en-têtes). Graines : six Vorbis et cinq Opus de la bibliothèque réemballés sans tags (`ffmpeg -c copy`, 6 s, 40 Ko), deux mono et le début d'un fichier floor 0. Résultats en 25 minutes par banc :
+
+| Banc | Exécutions | Plantages | Boucles sans fin |
+|---|---|---|---|
+| pages Ogg seules | 402 498 | 0 | 0 |
+| Opus | 80 498 | 0 | 0 |
+| Vorbis 0.80 (sans protections) | 54 721 | 5 059 | 4 |
+| Vorbis protégé | 221 161 | 325 | 0 |
+
+Sur 400 plantages tirés de la version 0.80 : débordements de tas dans `_make_words` (356), libération d'un pointeur non initialisé après un en-tête refusé (28), décalages de 32 bits ou plus (4), `marker[33]` (1), divisions par zéro (residue, floor 1). Les 325 de la version protégée avaient tous la même cause, la division par zéro du floor 1, corrigée ensuite ; les 4 boucles sans fin ne se reproduisent plus. Sur Cortex-M3, une division par zéro donne 0 (sans `DIV_0_TRP`) : sur l'appareil, ce cas aurait donné un son faux plutôt qu'une faute.
+
+**Seconde campagne** (version protégée, deux fois 25 minutes, graines enrichies de 60 anciens plantages) : deux nouveaux cas.
+- `floor1_info_unpack` : un en-tête qui finit trop tôt donne `partitions = -1`, puis `malloc(-1)`. Refusé désormais. Et dans notre `heap.c`, `malloc(0xffffffff)` débordait dans son calcul de taille (`n + 7`) et rendait un bloc de 8 octets : toute demande plus grande que le tas est maintenant refusée.
+- Une lecture avant le tableau des résidus : un artefact du banc. `submap.residue` est un `char`, signé sur le PC, non signé sur ARM, où le contrôle `>= ci->residues` rejette bien 255. Le banc est maintenant compilé en `-funsigned-char`, comme l'ARM.
+
+**Troisième campagne** (deux Vorbis, Opus et Ogg, 25 minutes chacun, en `char` non signé) : Ogg (361 680 exécutions) et Opus (77 138) toujours sans plantage ; deux défauts de plus dans le décodage de l'audio Vorbis :
+- `render_line` lisait hors de `FLOOR_fromdB_LOOKUP` (256 valeurs) : avec `mult = 3`, la plage permise va jusqu'à 86 × 3 = 258. Les deux extrémités de chaque segment sont bornées à 0-255 (les points entre elles le sont alors aussi ; rien ne change pour un fichier valide) ;
+- `res_inverse` : un mot de partition décodé au-delà de `partitions^dim` indexait `stagemasks` hors du tableau. Comme libvorbis : à l'ouverture, le dictionnaire des partitions doit pouvoir coder tous les mots (`partitions^dim <= entries`, sinon refus) ; au décodage, un mot `>= partvals` termine le paquet.
+
+Les 5 390 plantages trouvés en tout (dont 5 059 de la 0.80) passent tous sans erreur sur la 0.81.
+
+**Sortie inchangée** : 26 morceaux complets de la bibliothèque décodés sur le PC avant et après les protections : identiques au bit près. Dans l'émulateur, l'image ARM 0.81 donne la même sortie que la 0.80 sur un fichier Vorbis (441 000 trames, identiques au bit près).
+
+**Quatrième campagne** (0.81 définitive, deux fois 25 minutes) : 433 945 exécutions, aucun plantage ni boucle sans fin.
+
+**Image ARM bloquée, faute de dépendances** : une image construite par étapes restait bloquée à l'ouverture de tout fichier Vorbis dans l'émulateur (le cœur A abandonne au bout de 3 s), alors que le PC décodait bien. Deux variantes (sans le contrôle des résidus, sans le changement de `heap.c`) échouaient de même. Cause : le champ `partvals` ajouté à `vorbis_info_residue` (`codec_internal.h`) ; le Makefile ne fait pas dépendre les objets de Tremor de leurs en-têtes : seul `res012.o` avait été recompilé, `info.o` et `mapping0.o` gardaient l'ancienne taille de la structure. Après `rm -rf build/tremor`, l'image passe : floor 0 et blocs de 8192 refusés proprement, fichier ordinaire identique au bit près à la 0.80. Image `work/NEWFW081.IMG`, CRC `0x8deb4265`. Correction proposée (à valider) : des dépendances générées (`-MMD -MP`) pour tous les objets du Makefile.
+
+**Outils publiés** : `fw/tools/fuzz/` (`fuzz_host.c`, `build.sh` avec les cibles `ogg`, `vorbis`, `opus` et `vorbis-heap`, `mkseeds.sh` qui fabrique des graines de synthèse ou à partir d'un dossier de musique), et la page `docs/FUZZING.md`. Les graines et les fichiers trouvés restent hors du dépôt (extraits de musique).
+
+**À étudier plus tard** (feuille de route) : micro-mp3 (dérivé du même décodeur OpenCore que notre MP3) et micro-flac, de la même façon.

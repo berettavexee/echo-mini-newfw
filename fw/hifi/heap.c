@@ -43,6 +43,8 @@ const uint8_t *heap_base(void)
 
 void *malloc(size_t n)
 {
+    if (n > HEAP_SIZE)
+        return 0;                       /* (n + 7 would wrap: a huge request got a tiny block) */
     uint32_t need = (uint32_t)((n + 7) & ~(size_t)7) + sizeof(blk_t);
     uint8_t *p = heap + heap_floor;
     blk_t *b;
