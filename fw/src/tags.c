@@ -651,6 +651,55 @@ static void mp4(struct tags *t)
     }
 }
 
+/* APEv2 (0.80, ETUDE §61: Musepack; also WavPack, APE): a footer "APETAGEX" in the last 32
+ * bytes (or before an ID3v1 tag), the items before it: value length, flags, key, value (UTF-8).
+ * Title, Artist, Album, Track ("3/12"), REPLAYGAIN_* */
+static void apev2(struct tags *t)
+{
+    uint32_t sz = rd.f->size;
+    const uint8_t *p;
+    rd.lim = 0xffffffffu;                       /* at the end of the file */
+    for (int pass = 0; pass < 2; pass++) {
+        uint32_t end = sz - (pass ? 128 : 0);   /* the footer, or before ID3v1 */
+        if (end < 32 || rd_at(end - 32, 32, &p) || __builtin_memcmp(p, "APETAGEX", 8))
+            continue;
+        uint32_t size = le32(p + 12), n = le32(p + 16);
+        if (size < 32 || size > end || size > sizeof rd.buf - 512)
+            return;
+        uint32_t pos = end - size, stop = end - 32;
+        for (uint32_t i = 0; i < n && pos + 8 < stop; i++) {
+            if (rd_at(pos, stop - pos, &p))
+                return;
+            uint32_t vlen = le32(p), k = 8;
+            while (pos + k < stop && p[k])
+                k++;                            /* the key, up to its 0 */
+            if (pos + k + 1 + vlen > stop)
+                return;
+            const uint8_t *key = p + 8, *v = p + k + 1;
+            uint32_t klen = k - 8;
+            char kk[32];
+            int ok = rg_key(key, klen, kk, sizeof kk);
+            if (ok && !__builtin_memcmp(kk, "TITLE", 6))
+                set_text(t->title, sizeof t->title, v, vlen, 3);
+            else if (ok && !__builtin_memcmp(kk, "ARTIST", 7))
+                set_text(t->artist, sizeof t->artist, v, vlen, 3);
+            else if (ok && !__builtin_memcmp(kk, "ALBUM", 6))
+                set_text(t->album, sizeof t->album, v, vlen, 3);
+            else if (ok && !__builtin_memcmp(kk, "TRACK", 6)) {
+                char tv[8];
+                set_text(tv, sizeof tv, v, vlen, 3);
+                t->track = num(tv);
+            } else if (ok) {
+                char val[32];
+                set_text(val, sizeof val, v, vlen, 3);
+                rg_field(t, kk, val);
+            }
+            pos += k + 1 + vlen;
+        }
+        return;
+    }
+}
+
 void tags_read(const struct fat_file *f, uint32_t codec, struct tags *t)
 {
     t->title[0] = t->artist[0] = t->album[0] = 0;
@@ -677,4 +726,6 @@ void tags_read(const struct fat_file *f, uint32_t codec, struct tags *t)
         aiff(t);
     else if (codec == HP_CODEC_AAC || codec == HP_CODEC_ALAC)
         mp4(t);
+    else if (codec == HP_CODEC_MPC)
+        apev2(t);
 }

@@ -35,6 +35,13 @@ static void feed(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
     uint32_t wr = c->in_wr, rd = c->in_rd;
+    if (c->rewind_seq != c->rewind_ack) {       /* core B wants an earlier offset (it waits) */
+        wr = rd = c->rewind_pos;
+        c->in_rd = rd;
+        c->in_wr = wr;
+        c->rewind_ack = c->rewind_seq;
+        fed_since_ring++;
+    }
     if (mp4_on) {
         uint32_t room = HP_IN_SIZE - (wr - rd), nr;
         if (mp4_done() || room < 4096)
@@ -607,6 +614,8 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     }
     if (!ps.kept)
         tail.on = 0;                            /* the DACs started again: nothing of it left */
+    if (tail.on && (int32_t)(tail.end - audio.rd) <= 0)
+        tail.on = 0;                            /* played out meanwhile (a slow refusal before) */
     if (dac_switch)
         ;                                       /* published after the switch */
     else if (tail.on)

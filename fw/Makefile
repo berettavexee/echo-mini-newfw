@@ -149,9 +149,26 @@ build/hifi_alac.elf: hifi/rt.c hifi/codec_alac.c hifi/rt.h hifi/upsample_tab.h h
 	  $(HLDFLAGS) -Wl,-Map=build/hifi_alac.map -o $@
 	$(CROSS)size $@
 
-build/codecs.bin: build/hifi_pcm.elf build/hifi_flac.elf build/hifi_mp3.elf build/hifi_vorbis.elf build/hifi_opus.elf build/hifi_aac.elf build/hifi_alac.elf tools/mkpack.py
+# Musepack: libmpcdec (third_party/libmpcdec, unmodified, BSD), fixed point; -fcommon: its headers
+# declare tables without extern (ETUDE §61); mpc_reader.c (stdio) left out
+MPC_DIR ?= ../third_party/libmpcdec
+MPC_SRCS := huffman mpc_bits_reader mpc_decoder mpc_demux requant streaminfo synth_filter
+MPC_OBJS := $(patsubst %,build/mpc/%.o,$(MPC_SRCS))
+MPC_FLAGS = -mcpu=cortex-m3 -mthumb -O2 -g -ffreestanding -nostdlib -ffunction-sections \
+            -fdata-sections -w -fcommon -DMPC_FIXED_POINT -I$(MPC_DIR)/include -I$(MPC_DIR)
+
+build/mpc/%.o: $(MPC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(MPC_FLAGS) -c $< -o $@
+
+build/hifi_mpc.elf: hifi/rt.c hifi/codec_mpc.c hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h $(MPC_OBJS)
+	$(CC) $(HCFLAGS) -fcommon -DMPC_FIXED_POINT -I$(MPC_DIR)/include hifi/rt.c hifi/codec_mpc.c \
+	  $(MPC_OBJS) $(HLDFLAGS) -Wl,-Map=build/hifi_mpc.map -o $@
+	$(CROSS)size $@
+
+build/codecs.bin: build/hifi_pcm.elf build/hifi_flac.elf build/hifi_mp3.elf build/hifi_vorbis.elf build/hifi_opus.elf build/hifi_aac.elf build/hifi_alac.elf build/hifi_mpc.elf tools/mkpack.py
 	python3 tools/mkpack.py $@ 1:build/hifi_pcm.elf 2:build/hifi_flac.elf 3:build/hifi_mp3.elf \
-	  4:build/hifi_vorbis.elf 5:build/hifi_opus.elf 7:build/hifi_aac.elf 8:build/hifi_alac.elf
+	  4:build/hifi_vorbis.elf 5:build/hifi_opus.elf 7:build/hifi_aac.elf 8:build/hifi_alac.elf 9:build/hifi_mpc.elf
 
 $(OUT): build/fw.elf build/codecs.bin build/font.bin tools/mkimg.py
 	python3 tools/mkimg.py build/fw.elf $@ --pack build/codecs.bin --font build/font.bin

@@ -32,7 +32,7 @@ into the code. Any copy of the image must ship with that license.
 | `mp4.c` | MP4 audio (M4A): boxes, sample tables read through small windows, gapless info (iTunSMPB, edit list), seek; the frames sent to core B as a packet stream |
 | `audio.c` | the two CS43131 DACs, I2S1, DMAC1 ring in SYSRAM, volume |
 | `hifi.c` | core B power, loading of our codec images, start |
-| `tags.c` | ID3v2/ID3v1, Vorbis comments, RIFF INFO, AIFF chunks, MP4 `ilst` (iTunes), ReplayGain |
+| `tags.c` | ID3v2/ID3v1, Vorbis comments, RIFF INFO, AIFF chunks, MP4 `ilst` (iTunes), APEv2, ReplayGain |
 | `fat.c` | FAT32 and exFAT, read only (internal memory and card) |
 | `mshc.c`, `emmc.c`, `sd.c` | SD/MMC host controller, eMMC, microSD card |
 | `usb.c`, `msc.c` | USB device and mass storage |
@@ -55,6 +55,7 @@ any rate the DACs do not take (they take 8 to 192 kHz: ETUDE §59-§60) before t
 | `codec_opus.c` | Opus | libopus 1.5.2 (BSD) |
 | `codec_aac.c` | AAC-LC (from M4A, read by `src/mp4.c`) | PacketVideo `aacdec` (AOSP, Apache-2.0), without AAC+ |
 | `codec_alac.c` | ALAC (from M4A, read by `src/mp4.c`) | ours (`alacdec.c`), derived from Apple's reference decoder (Apache-2.0) |
+| `codec_mpc.c` | Musepack SV7, SV8 | libmpcdec r475 (BSD), fixed point |
 
 ## Test in emulation
 

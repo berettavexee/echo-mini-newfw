@@ -114,10 +114,21 @@ uint32_t in_read_wait(void *dst, uint32_t n)
 
 /* Forward only. Within what core A has written: consumed here; beyond: in_rd is set past in_wr,
  * which tells core A to go on reading from there (its write position follows). */
+/* Backwards: core A is asked to feed again from pos (the ring emptied), then waited for */
+static int in_rewind(uint32_t pos)
+{
+    uint32_t seq = ctl->rewind_seq + 1;
+    ctl->rewind_pos = pos;
+    ctl->rewind_seq = seq;                      /* core A polls it with the ring */
+    while (ctl->rewind_ack != seq)
+        rt_wait();
+    return 0;
+}
+
 int in_seek(uint32_t pos)
 {
     if ((int32_t)(pos - ctl->in_rd) < 0)
-        return -1;
+        return in_rewind(pos);
     if (ctl->in_end != 0xffffffffu && pos > ctl->in_end)
         return -1;
     if ((int32_t)(pos - ctl->in_wr) <= 0)

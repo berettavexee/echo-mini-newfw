@@ -1,0 +1,6 @@
+libmpcdec, the Musepack decoder library, from the Musepack source release r475
+(https://files.musepack.net/source/musepack_src_r475.tar.gz), the decoder files (libmpcdec/ and
+include/mpc/) only, unmodified. BSD 3-clause licence (see COPYING). Built for core B with
+MPC_FIXED_POINT (no FPU) and -fcommon (the headers declare tables without extern); the few C
+library functions it uses outside decoding (pow, log10, sprintf, the SV8 CRC32 of common/crc32.c)
+are provided by fw/hifi/codec_mpc.c. ETUDE §61.

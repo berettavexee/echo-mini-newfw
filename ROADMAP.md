@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-25, version 0.79.
+Last update: 2026-10-26, version 0.80.
 
 ## Done, validated on the device
 
@@ -70,7 +70,7 @@ Last update: 2026-10-25, version 0.79.
 - 0.73: core B's RAMs without the wait state at every level (50-200 MHz, as the stock firmware
   below 300 MHz), never switched; about 22 % less load; a core B fault also logs the clock (§52).
   Checked on the device: no fault, MP3BENCH 38.9 MHz mean at 57 MHz (49.7 before), FLAC about
-  15 MHz at 50 MHz, Opus 52 MHz; the overnight battery measurement is still to do.
+  15 MHz at 50 MHz, Opus 52 MHz; overnight battery measurement done on 0.80 (see below).
 - 0.74: AIFF and AIFF-C (`.aif`, `.aiff`, `.aifc`; uncompressed "NONE"/"twos" big-endian and
   "sowt" little-endian, 8 to 32 bits, mono or stereo) in one core B image with WAV
   (`hifi/codec_pcm.c`); tags from an ID3v2 chunk or NAME/AUTH, also after the samples; WAV
@@ -102,6 +102,12 @@ Last update: 2026-10-25, version 0.79.
   Low rates now play as they are (the upsampler stays for unusual rates); the drain before a rate
   change waits for the ring's real duration (a fixed 2 s cut the end of low-rate tracks) (§60).
   Validated on the device: every rate plays its whole file.
+- 0.80: Musepack SV7 and SV8 (`.mpc`, `.mp+`, `.mpp`) with libmpcdec (BSD) in fixed point on
+  core B (11.8 M instructions per second of audio on the QEMU bench, less than MP3); APEv2 tags
+  and ReplayGain; exact seek; the input protocol can now go back (SV8's seek table at the end)
+  (§61). Bit-exact with the bench in the emulator. On the device: 28-29 MHz mean on core B (45.7 MHz at
+  most), seek 0.05-0.15 s in SV7, 0.06 s in SV8; damaged files handled as in the emulator. Also:
+  a wrong "queued behind" log value after a slow refusal is fixed.
 
 ## To do
 
@@ -113,7 +119,6 @@ New formats, in this order (agreed 2026-10-24):
 
 Other items:
 
-- Overnight battery measurement on 0.73 (no RAM wait state), against the 70 mV/h of 0.61.
 - Actions on the plug events (to be proposed and agreed first):
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
@@ -169,7 +174,10 @@ Other items:
     known yet.
 - Battery percentage: the curve is a generic Li-ion one, to be measured on the device. Overnight
   test (0.61, 2026-10-24): 6 h of MP3 320 kbps from the card, screen off, 4,184 to 3,710 mV (about
-  70 mV/h after the first hour); about 9-10 h of playback estimated, a full discharge still to do.
+  70 mV/h after the first hour). Overnight test (0.80, 2026-10-26): 7.9 h from the card (MP3,
+  Vorbis, FLAC), screen off, no error, 4,179 to 3,637 mV; over the same voltage range 4 to 8 %
+  slower than 0.61 (68.5 against 74.1 mV/h from 4,072 to 3,710 mV). About 10 h of playback
+  estimated; a full discharge, down to the 3.3 V cut-off, still to do.
 - Backlight: always at full brightness, no PWM setting yet.
 
 ## Ideas, not decided
@@ -179,7 +187,8 @@ Other items:
   - APE (Monkey's Audio, SDK now BSD): the higher compression levels may be too heavy for
     core B;
   - WavPack (BSD reference decoder).
-  WMA, Musepack, TTA and MP2 are not considered (rare, or no permissive decoder).
+  WMA, TTA and MP2 are not considered (rare, or no permissive decoder). Musepack was listed here
+  wrongly: libmpcdec is BSD; done in 0.80.
 - Tracker modules (Amiga and PC), a distant prospect:
   - MOD, then S3M, with a small permissive player (micromod, BSD); IT (libxmp-lite, MIT) only
     with samples read from the card through a cache;

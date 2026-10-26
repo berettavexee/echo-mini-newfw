@@ -3118,3 +3118,30 @@ Les quatre fréquences fautives sont exactement celles des deux entrées de PLL 
 - **ALAC avec notre décodeur (0.77)** : 16 bits stéréo **21 à 25 MHz** au palier de 50 MHz (41 MHz avec celui d'Apple en 0.76) ; mono 11 à 13 MHz ; **24 bits 96 kHz : 49 à 51 MHz**, aux paliers de 67 et 80 MHz (108 MHz et 200 MHz en permanence en 0.76). Le gain mesuré (−45 à −55 %) suit celui du banc QEMU (−50 et −59 %).
 - Fichiers abîmés : sans faute.
 - Le HIFIACC pour le prédicteur de l'ALAC n'est donc plus nécessaire : l'ALAC 16 bits est au palier le plus bas.
+
+## 61. Musepack (0.80, 2026-10-25)
+
+**Inventaire** : la bibliothèque beets contient 183 fichiers Musepack (13 albums), tous en SV7, 44,1 kHz stéréo ; aucun autre format non lu. La feuille de route classait le Musepack « non envisagé, faute de décodeur permissif » : c'était faux, la bibliothèque de référence **libmpcdec** est sous licence BSD 3-clause et a un mode virgule fixe.
+
+**Banc QEMU** (`re/mpc/bench/`, local) : libmpcdec r475 en `MPC_FIXED_POINT`, deux extraits SV7 de la bibliothèque (~205 et ~182 kb/s) : **11,8 M instructions par seconde d'audio** (moins que le MP3 : 14,7 M), 109 Kio de tas (dont 64 Kio de tampon du démultiplexeur) ; écart avec ffmpeg 2 LSB au plus (62,6 et 79,1 dB) ; 481 échantillons de décalage avec ffmpeg, le retard du décodeur que libmpcdec retire. Profil : filtre de synthèse 68 %, lecture du flux 6 %. Deux ajustements de compilation sans toucher aux sources : `-fcommon` (les en-têtes déclarent des tables sans `extern` ; sur ARM la vraie définition l'emporte bien sur la commune), et des remplaçants pour ce que la bibliothèque prend à la bibliothèque C hors décodage (`pow`, `log10`, `sprintf`, `abs`, le CRC32 du SV8).
+
+**Intégration** (conception validée par l'utilisateur) :
+- `third_party/libmpcdec` (r475, non modifié, sans `mpc_reader.c` qui utilise stdio) ; image `HP_CODEC_MPC` (9), `fw/hifi/codec_mpc.c` : 41 Ko de code. Le lecteur de libmpcdec lit l'anneau d'entrée ; sortie 16 bits empaquetée ; déplacement par `mpc_demux_seek_sample` à l'ouverture (SV7 : relecture des en-têtes de trame depuis le début ; SV8 : la table de recherche) ;
+- **retour en arrière dans le protocole** (`rewind_pos`, `rewind_seq`, `rewind_ack` de `hp_ctl`) : le SV8 lit sa table de recherche en fin de fichier (`SO` → `ST`) puis revient au début ; `in_seek()` vers une position antérieure le demande au cœur A, qui vide l'anneau et reprend sa lecture à cette position ;
+- tags **APEv2** (`tags.c`) : pied « APETAGEX » dans les 32 derniers octets (ou avant un ID3v1), éléments Title, Artist, Album, Track, `REPLAYGAIN_*` ;
+- extensions `mpc`, `mp+`, `mpp` ; « MPC » à l'écran.
+
+**Essais dans l'émulateur** :
+- SV7 (extrait de 1,5 Mo) : sortie **identique au bit près** au banc (883 103 trames) ; lecture jusqu'à la coupure du fichier ;
+- fichier complet (The White Stripes, « Hypnotize ») : tags APEv2 et ReplayGain d'album lus (11 ms) ; déplacement de 5,8 à 33,6 s exact à l'échantillon ; ouverture du déplacement 540 ms en SV7 (590 Ko relus pour parcourir les en-têtes) ;
+- le même converti en **SV8** par `mpc2sv8` (outil des sources Musepack, compilé sur le PC) : table de recherche en fin de fichier, retour en arrière à l'ouverture, sortie identique au SV7 ; déplacement par la table : ouverture en 112 ms.
+- fichiers abîmés (variantes de `damage.py` d'un SV7 de 108 s, avec un déplacement vers la zone abîmée) : en-tête détruit, zéros, aléatoire → refusés ; tronqué → arrêt à la coupure ; zéros ou aléatoire ajoutés → lu jusqu'à la vraie fin ; **milieu abîmé → la piste s'arrête au dommage** (une trame SV7 n'a pas de synchronisation, seulement la longueur de la suivante : libmpcdec ne peut pas reprendre ; l'erreur est traitée comme la fin de la piste) ;
+- déplacement en SV7 : ~0,7 s de blanc vers 50 s et ~1,6 s vers 100 s dans l'émulateur (relecture des en-têtes depuis le début) ; une table de positions tenue par le cœur A pendant la lecture l'éviterait (à faire si la gêne se confirme).
+
+**Sur l'appareil** (`work/hwlog_1026_080/`) : charge du cœur B 28,4 à 29,1 MHz en moyenne sur un morceau entier, 45,7 MHz au plus, au palier de 50 MHz ; tags APEv2 et ReplayGain d'album lus ; SV8 enchaîné sans blanc, même longueur exacte que le SV7 ; les variantes abîmées se comportent comme dans l'émulateur. Déplacement en SV7 : 0,05 à 0,15 s d'ouverture même vers 100 s (1,6 s dans l'émulateur, dont la carte est lente) : pas besoin de table de positions ; SV8 : 0,06 s.
+
+**Journal « queued behind » faux** (vu en 0.75 : « 24346666 ms ») : après un refus lent (un fichier de zéros parcouru sur 3 Mio, 2,6 s), la fin de la piste précédente était déjà jouée, mais `tail.on` restait levé et `tail.end - audio.rd` négatif s'affichait en non signé. La fin de piste est désormais abandonnée si elle est dépassée à l'ouverture suivante ; reproduit sur la 0.79 dans l'émulateur (A.WAV, deux MP3 refusés, D.WAV), disparu en 0.80.
+
+Image `work/NEWFW080.IMG`, CRC `0xfe8387af`.
+
+**Nuit d'autonomie (2026-10-26, `work/hwlog_1026_night079/`)** : l'image en place était la 0.80 avant la correction du journal (CRC `0x541df300`), et non la 0.79 prévue. 7,9 h de lecture continue depuis la carte SD (1000mods, Daft Punk… : 46 MP3, 38 Vorbis, 11 FLAC), écran éteint, 92 pistes sans aucune erreur ni sous-remplissage ; cœur B 40 MHz en moyenne. Batterie de 4 179 à 3 637 mV. Sur la même plage de tension que la nuit du 24 octobre (0.61, MP3 320 kb/s, cœur B 57 MHz en moyenne) : 4 100 → 3 750 mV en 4,82 h contre 4,62 h (72,7 contre 75,8 mV/h), 4 072 → 3 710 mV en 5,28 h contre 4,88 h (68,5 contre 74,1 mV/h) : 4 à 8 % de mieux, avec un mélange de formats plus lourd en moyenne. La fin de la courbe (sous 3,64 V, jusqu'au seuil d'arrêt de 3,3 V) reste à mesurer : l'autonomie totale n'est donc qu'estimée, autour de 10 h.

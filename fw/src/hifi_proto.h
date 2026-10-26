@@ -79,6 +79,10 @@ struct hp_ctl {
     uint32_t seek_offset;               /* A, Ogg: page to jump to (granule <= target - 1 s), 0: B
                                            guesses in proportion to the stream */
     uint32_t start_frame;               /* B: position of the first frame written (a seek) */
+    /* B asks A to read the input again from an earlier offset (0.80, ETUDE §61: Musepack SV8
+     * reads its seek table at the end of the file, then comes back): B sets rewind_pos and
+     * increments rewind_seq; A empties the ring, feeds from rewind_pos and sets rewind_ack */
+    uint32_t rewind_pos, rewind_seq, rewind_ack;
 };
 
 #define HP_CTL ((volatile struct hp_ctl *)HP_CTL_ADDR)
@@ -91,7 +95,7 @@ struct hp_ctl {
  * it, which reads both containers (hifi/codec_pcm.c). HP_CODEC_AAC and HP_CODEC_ALAC: in MP4, fed
  * by core A as a packet stream (below); the browser gives AAC to every M4A, the container says. */
 enum hp_codec { HP_CODEC_WAV = 1, HP_CODEC_FLAC, HP_CODEC_MP3, HP_CODEC_VORBIS, HP_CODEC_OPUS,
-                HP_CODEC_AIFF, HP_CODEC_AAC, HP_CODEC_ALAC };
+                HP_CODEC_AIFF, HP_CODEC_AAC, HP_CODEC_ALAC, HP_CODEC_MPC };
 
 /* Packet stream (MP4 audio, ETUDE §55): core A reads the container and its tables and writes
  * into the input ring this header, the decoder configuration (AAC: the AudioSpecificConfig),
