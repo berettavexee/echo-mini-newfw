@@ -83,7 +83,28 @@ struct hp_ctl {
      * reads its seek table at the end of the file, then comes back): B sets rewind_pos and
      * increments rewind_seq; A empties the ring, feeds from rewind_pos and sets rewind_ack */
     uint32_t rewind_pos, rewind_seq, rewind_ack;
+    uint32_t hacc_sub, hacc_soft;       /* FLAC: LPC subframes on HIFIACC, in software after a
+                                           timeout (ETUDE §67) */
+#ifdef ECHO_HWTEST
+    /* Test build only (ETUDE §66): HIFIACC's LPC against dr_flac, per track, written by core B
+     * and logged by core A at the end of the track */
+    struct {
+        uint32_t magic;                 /* HWT_MAGIC once the test ran */
+        uint32_t sub, exact, diff, timeout, skipped;    /* LPC subframes */
+        uint32_t wide, wide_diff;       /* those needing more than 32 bits in the products */
+        uint32_t max_order, max_shift, max_n;
+        uint32_t hw_ticks, sw_ticks;    /* TIMER1 (24 MHz), summed over the compared subframes */
+        uint32_t f_order, f_shift, f_prec, f_bps, f_n, f_idx;   /* the first difference */
+        int32_t f_sw, f_hw;
+        uint32_t diff_orders;           /* bit k: a difference at order k + 1 */
+        uint32_t split, max_seg;        /* blocks over HWT_SEG run in two passes (HW4) */
+        uint16_t ok_o[32], diff_o[32];  /* per order */
+        int32_t o1_x[6], o1_sw[6], o1_hw[6];    /* the first order-1 difference: input, outputs */
+        int32_t o1_coef, o1_shift;
+    } hwt;
+#endif
 };
+#define HWT_MAGIC 0x48575431u           /* "HWT1" */
 
 #define HP_CTL ((volatile struct hp_ctl *)HP_CTL_ADDR)
 

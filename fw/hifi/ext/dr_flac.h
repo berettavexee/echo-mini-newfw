@@ -4836,6 +4836,14 @@ Reads and decodes the residual for the sub-frame the decoder is currently sittin
 when the decoder is sitting at the very start of the RESIDUAL block. The first <order> residuals will be ignored. The
 <blockSize> and <order> parameters are used to determine how many residual values need to be decoded.
 */
+/* ECHO MINI (ETUDE §67): with echo_residual_only set, the partitions keep the subframe's order
+ * but the Rice decoders get order 0: residuals only, the prediction is HIFIACC's */
+#ifdef ECHO_HIFIACC
+static int echo_residual_only;
+#define ECHO_PRED_ORDER(o) (echo_residual_only ? 0 : (o))
+#else
+#define ECHO_PRED_ORDER(o) (o)
+#endif
 static drflac_bool32 drflac__decode_samples_with_residual(drflac_bs* bs, drflac_uint32 bitsPerSample, drflac_uint32 blockSize, drflac_uint32 lpcOrder, drflac_int32 lpcShift, drflac_uint32 lpcPrecision, const drflac_int32* coefficients, drflac_int32* pDecodedSamples)
 {
     drflac_uint8 residualMethod;
@@ -4896,7 +4904,7 @@ static drflac_bool32 drflac__decode_samples_with_residual(drflac_bs* bs, drflac_
         }
 
         if (riceParam != 0xFF) {
-            if (!drflac__decode_samples_with_residual__rice(bs, bitsPerSample, samplesInPartition, riceParam, lpcOrder, lpcShift, lpcPrecision, coefficients, pDecodedSamples)) {
+            if (!drflac__decode_samples_with_residual__rice(bs, bitsPerSample, samplesInPartition, riceParam, ECHO_PRED_ORDER(lpcOrder), lpcShift, lpcPrecision, coefficients, pDecodedSamples)) {
                 return DRFLAC_FALSE;
             }
         } else {
@@ -4905,7 +4913,7 @@ static drflac_bool32 drflac__decode_samples_with_residual(drflac_bs* bs, drflac_
                 return DRFLAC_FALSE;
             }
 
-            if (!drflac__decode_samples_with_residual__unencoded(bs, bitsPerSample, samplesInPartition, unencodedBitsPerSample, lpcOrder, lpcShift, lpcPrecision, coefficients, pDecodedSamples)) {
+            if (!drflac__decode_samples_with_residual__unencoded(bs, bitsPerSample, samplesInPartition, unencodedBitsPerSample, ECHO_PRED_ORDER(lpcOrder), lpcShift, lpcPrecision, coefficients, pDecodedSamples)) {
                 return DRFLAC_FALSE;
             }
         }
@@ -5129,9 +5137,53 @@ static drflac_bool32 drflac__decode_samples__lpc(drflac_bs* bs, drflac_uint32 bl
         }
     }
 
+#ifdef ECHO_HIFIACC
+    if (lpcOrder >= 3) {    /* ECHO MINI (ETUDE §67): orders 3 to 32 on HIFIACC (1 and 2 are wrong there) */
+        int echo_hacc_block(drflac_int32 *, drflac_uint32, drflac_uint32, drflac_int32, const drflac_int32 *);
+        echo_residual_only = 1;
+        i = drflac__decode_samples_with_residual(bs, bitsPerSample, blockSize, lpcOrder, lpcShift, lpcPrecision, coefficients, pDecodedSamples);
+        echo_residual_only = 0;
+        if (!i) {
+            return DRFLAC_FALSE;
+        }
+        if (!echo_hacc_block(pDecodedSamples, blockSize, lpcOrder, lpcShift, coefficients)) {
+            /* timeout: the prediction in software, in place over the residuals */
+            drflac_uint32 k;
+            if (drflac__use_64_bit_prediction(bitsPerSample, lpcOrder, lpcPrecision))
+                for (k = lpcOrder; k < blockSize; ++k)
+                    pDecodedSamples[k] += drflac__calculate_prediction_64(lpcOrder, lpcShift, coefficients, pDecodedSamples + k);
+            else
+                for (k = lpcOrder; k < blockSize; ++k)
+                    pDecodedSamples[k] += drflac__calculate_prediction_32(lpcOrder, lpcShift, coefficients, pDecodedSamples + k);
+        }
+        return DRFLAC_TRUE;
+    }
+#endif
     if (!drflac__decode_samples_with_residual(bs, bitsPerSample, blockSize, lpcOrder, lpcShift, lpcPrecision, coefficients, pDecodedSamples)) {
         return DRFLAC_FALSE;
     }
+#ifdef ECHO_HWTEST
+    {   /* ECHO MINI test build only (ETUDE §66): the same subframe on HIFIACC */
+        void echo_lpc_hook(const drflac_int32 *, drflac_uint32, drflac_uint32, drflac_uint32,
+                           drflac_int32, drflac_uint32, const drflac_int32 *, drflac_uint32);
+        /* the time of dr_flac's own prediction over the subframe (its 32/64-bit choice) */
+        static drflac_uint32 every;
+        volatile drflac_int32 sink = 0;
+        drflac_uint32 k, t0 = ~*(volatile drflac_uint32 *)0x400e0028u, dt;
+        if (++every & 3)                        /* one subframe in four: less load (HW5) */
+            ;
+        else if (drflac__use_64_bit_prediction(bitsPerSample, lpcOrder, lpcPrecision))
+            for (k = lpcOrder; k < blockSize; ++k)
+                sink += drflac__calculate_prediction_64(lpcOrder, lpcShift, coefficients, pDecodedSamples + k);
+        else
+            for (k = lpcOrder; k < blockSize; ++k)
+                sink += drflac__calculate_prediction_32(lpcOrder, lpcShift, coefficients, pDecodedSamples + k);
+        (void)sink;
+        dt = (every & 3) ? 0 : ~*(volatile drflac_uint32 *)0x400e0028u - t0;
+        echo_lpc_hook(pDecodedSamples, blockSize, bitsPerSample, lpcOrder, lpcShift, lpcPrecision,
+                      coefficients, dt);
+    }
+#endif
 
     return DRFLAC_TRUE;
 }

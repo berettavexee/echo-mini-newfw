@@ -68,7 +68,7 @@ From top to bottom:
    - the play mode, unless it is "in order";
    - the clock;
    - the battery. "CHG" means charging and "USB" means charged, with the cable in. The
-     battery turns red under 3.4 V.
+     battery turns red under 3.425 V.
 2. **The title**, or the file name when the file has no title tag.
 3. **The artist and the album**, or the folder when the file has no album tag. They scroll when
    too long.
@@ -194,7 +194,7 @@ hand.
 | Message | Meaning |
 |---|---|
 | **Cannot play:** name, reason | nothing in the queue could be played: an empty file, a damaged file (no audio data), an unreadable format, or a read error. Shown 3 s, then the browser |
-| **Low battery** / plug the USB cable | under 3.4 V. With music, three beeps, then one every 5 min |
+| **Low battery** / plug the USB cable | under 3.425 V (about 45 minutes of playback left). With music, three beeps, then one every 5 min |
 | **Battery empty** | under 3.3 V for 30 s. Two low beeps, a pause, then the player powers off; the position is saved. Under 3.35 V the player does not start |
 | **SD card (not readable)** | the card could not be read; take it out and insert it again |
 

@@ -57,7 +57,7 @@ DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §61). S
 | `fw/hifi/` | HiFi-core runtime and codec glue |
 | `fw/tools/` | image builder, emulator (`emu_fw.py`, Unicorn), test disk and exFAT image builders, log reader |
 | `fw/tools/fuzz/` | fuzzing bench for the decoders and file readers (ASan, UBSan, coverage-guided): see `docs/FUZZING.md` |
-| `docs/` | `FUZZING.md` (the fuzzing bench and its findings), screenshots of the manual |
+| `docs/` | `FUZZING.md` (the fuzzing bench and its findings), `HIFIACC.md` (the RKNanoD audio accelerator: registers, sequence, pitfalls), screenshots of the manual |
 | `fw/font/` | Fusion Pixel 12 px (SIL OFL 1.1) |
 | `third_party/` | libopus 1.5.2 (decoder-only variant), Tremor lowmem (patched), AOSP pvmp3dec and pvaacdec, Apple ALAC decoder, libmpcdec |
 | `tools/` | reverse-engineering helpers used for the study (they expect the stock image and `re/rknanofw.py` next to this tree) |

@@ -3250,3 +3250,47 @@ Non repris : l'arrondi au plus proche des multiplications (change la sortie, con
 **Contrôles** : les 403 plantages MP3 du §63 rejoués sans erreur ; 60 MP3 de la bibliothèque identiques au bit près avant et après ; image ARM 0.83 (`work/images/NEWFW083.IMG`, CRC `0xe734f314`) identique à la 0.82 dans l'émulateur (un MP3, deux M4A) ; deux campagnes `mp3` de 25 minutes (117 345 et 124 527 exécutions) sans plantage ni boucle sans fin.
 
 **micro-flac** : une réécriture à partir de l'implémentation simple de Nayuki, pas un dérivé de dr_flac : rien à transposer. Ses optimisations (LPC en 32 ou 64 bits selon le risque de dépassement, boucles déroulées par ordre) existent déjà dans dr_flac ; un CRC facultatif est déconseillé (notre resynchronisation des fichiers abîmés s'appuie dessus). Suite logique : une cible de fuzzing `flac` (dr_flac n'a jamais été fuzzé ici), puis `alac` et `mpc`.
+
+**Sur l'appareil (0.83, `work/hwlog/1027_083/`)** : l'album en floor 0 (`test_floor0/`, 18 pistes) refusé proprement à chaque essai : 45 ouvertures refusées, « Cannot play », **aucune faute du cœur B** (en 0.80, une faute à chaque refus). Lecture normale de 43 pistes (Vorbis, MP3, FLAC, Musepack) depuis la mémoire interne et la carte, sans faute ni coupure ; charge du cœur B habituelle (Vorbis 45-55 MHz, MP3 15-23 MHz). Pas encore essayés sur l'appareil : des M4A et les fichiers abîmés MP3/M4A.
+
+## 65. Jauge de batterie recalée sur la décharge mesurée (0.84, 2026-10-27)
+
+La courbe Li-ion générique de `battery_pct()` (`board.c`) sous-estimait fortement la charge restante : 20 % affichés à 3 700 mV, alors qu'il restait 59 % du temps de lecture (environ 9 h). Nouvelle table, tirée de la décharge complète du §64 (part du temps restant jusqu'à l'arrêt, en lecture, cœur B vers 40 MHz) : 3 300 → 0, 3 400 → 3, 3 450 → 8, 3 500 → 13, 3 550 → 22, 3 600 → 36, 3 650 → 50, 3 700 → 59, 3 750 → 65, 3 800 → 70, 3 900 → 79, 4 000 → 89, 4 100 → 96, 4 160 → 100 %. Réserves : entre 3 600 et 3 700 mV, la mesure est un peu faussée par 9 minutes sur l'USB à 7,9 h ; c'est une courbe en charge (en pause, la tension remonte et la jauge est un peu optimiste). Une seconde décharge sans interruption la confirmerait.
+
+**Alerte de batterie faible** à 3 425 mV (au lieu de 3 400) : environ 45 minutes de lecture avant l'arrêt à 3 300 mV (24 minutes auparavant). Le réarmement reste à 3 500 mV.
+
+L'affichage en rouge de la batterie suit le même seuil (`playscreen.c`). Image `work/images/NEWFW084.IMG`, CRC `0xf1ccb555`.
+
+## 66. HIFIACC contre dr_flac : banc de comparaison sur l'appareil (2026-10-27)
+
+**But** : savoir si le filtre LPC de HIFIACC (§1.5) donne exactement les échantillons de dr_flac, à quelle vitesse, et dans quel domaine, avant de l'intégrer au FLAC (puis à l'ALAC). Seul l'appareil peut répondre : dans l'émulateur, HIFIACC est notre propre modèle.
+
+**Ce qu'est HIFIACC** (TRM chapitre 26) : un bloc conçu par Rockchip (« a design of fixed point accelerator »), dans le domaine PD_HIGH avec le cœur B ; aucune trace publique ailleurs. Fonctions : FFT/IFFT 64 à 1 024 points ; MAC 32 × 32 bits à résultat 64 bits, 1 à 1 024 termes ; FIR FLAC (coefficients fixes) et ALAC (coefficients variables), ordre « 1 à 32 » ; décodeur APE (versions 3970/3990) ; FIFO de 32 mots de 32 bits, par DMA ou directement par le processeur ; 192 kHz / 24 bits annoncés à 300 MHz. Le TRM ne donne pas les registres (d'où §1.5), mais il a aussi des chapitres SYNTH (27) et Imdct36 (28), avec leurs cartes mémoire : la base des accélérateurs MP3.
+
+**Banc** (`make EXTRA=-DECHO_HWTEST`, jamais livré) : `fw/hifi/hwtest_lpc.c`, appelé par dr_flac après chaque sous-trame LPC (accroche sous `ECHO_HWTEST` dans `dr_flac.h`). Il reconstruit l'entrée de HIFIACC (amorce, puis résidus exacts en 64 bits), écrit les coefficients en ordre inverse, met les prises inutilisées à zéro, lance HIFIACC et le DMAC2 (canal 1 vers `+0x40`, canal 0 depuis `+0xa0`, listes chaînées par blocs de 2 048 mots), attend la fin (5 ms au plus), compare au résultat de dr_flac, et mesure les deux temps (TIMER1), celui de dr_flac avec ses propres fonctions de prédiction (`drflac__calculate_prediction_32/64`). Compteurs par ordre dans `hp_ctl.hwt`, relevés par le cœur A en fin de piste (`hwt:` dans le journal). La sortie reste celle de dr_flac. Jeu d'essai `work/testsets/test_hifiacc/` (ordres 4 à 32, précision 5 à 15 bits, 16 et 24 bits, mono, blocs de 1 152 à 8 192).
+
+**Mises au point** :
+- HW1 : sans liste chaînée (bloc ≤ 2 048), le canal ne lit pas la LLI et garde les adresses de la sous-trame précédente : écritures hors de nos tampons, cœur B qui ne répond plus jusqu'au redémarrage. Les registres du canal reçoivent désormais le premier bloc.
+- HW2 : avec une chaîne, le registre LLP doit pointer sur la **première** LLI (la HW2 sautait le premier morceau).
+- HW4 : blocs au-delà de 8 191 (champ de taille de 13 bits) en deux passes, la seconde avec pour amorce les dernières sorties de la première : exact.
+
+**Résultats (HW3 à HW5, `work/hwlog/1027_hw3` à `1027_hw5`)** :
+- ordres **3 à 32** : toujours **identiques au bit près** (3 884 sous-trames en HW5 : ordres 3, 4-8, 12, 16, 24, 32), en 16 et 24 bits, mono et stéréo, y compris les produits au-delà de 32 bits (le MAC est sur 64 bits), les blocs de 8 191 et les passes enchaînées ;
+- ordres **1 et 2** : **toujours faux** (134 et 1 différences, aucune exacte). À l'ordre 1, la sortie s'emballe d'un facteur voisin de 3 × coefficient (comme si le filtre avait au moins trois prises). La remise à zéro des prises inutilisées n'y change rien. **Le module FLAC d'origine (78) fait de même : à `0x42e8`, il calcule les ordres 1 et 2 en logiciel** (`cmp r5,#1 / cmpne r5,#2 / beq` vers `0x3034`). Il ne manque aucune initialisation : sa séquence est la nôtre (taille et `0xa0000000`, ordre et décalage, coefficients inversés, lancement, DMA, attente du bit 15 de `+0x08`). Ces ordres n'apparaissent qu'au début des pistes (introductions quasi silencieuses), pas après un saut ;
+- **vitesse** (prédiction de dr_flac contre HIFIACC, DMA compris, mêmes sous-trames) : environ **6 fois plus rapide** en 16 bits à l'ordre 8, **15 à 16 fois** aux ordres élevés et en 24 bits (où dr_flac calcule en 64 bits) ;
+- aucun dépassement de délai depuis HW3. Les saccades de la HW4 (cœur B à 197 MHz sur `w24_o32`) venaient du triple calcul du banc, pas de HIFIACC.
+
+**Domaine fiable** : ordres 3 à 32, toute précision de coefficient, 16 à 24 bits, blocs jusqu'à 8 191 (au-delà, en passes). Ordres 1 et 2 : logiciel.
+
+Images : `work/images/NEWFWHW1.IMG` à `NEWFWHW5.IMG`.
+
+## 67. FLAC sur HIFIACC (0.85, 2026-10-27)
+
+Intégration simple, d'après le §66 : `fw/hifi/hifiacc.c` (pilote, partagé en esprit avec le banc), inclus par `codec_flac.c` sous `ECHO_HIFIACC` (défini pour l'image FLAC dans le Makefile).
+- Dans dr_flac (`drflac__decode_samples__lpc`), pour une sous-trame d'ordre 3 à 32 : décodage des **résidus seuls** (indicateur `echo_residual_only` : les partitions gardent l'ordre réel, les décodeurs de Rice reçoivent l'ordre 0), puis la prédiction **sur place** par HIFIACC (la sortie suit l'entrée dans la FIFO), en passes au-delà de 8 191 échantillons. Ordres 1 et 2 : dr_flac, comme le module d'origine.
+- Dépassement de délai (5 ms) : prédiction logicielle sur place sur les résidus ; après 3 dépassements, logiciel pour le reste de la piste. Compteurs `hacc_sub` et `hacc_soft` de `hp_ctl`, journalisés en fin de piste (« hifiacc: … »).
+- Le module FLAC n'a plus que 4,8 Ko de données (les tampons du banc sont réservés à `ECHO_HWTEST`).
+
+Documentation pour d'autres développeurs : `docs/HIFIACC.md`. Image `work/images/NEWFW085.IMG`, CRC `0x2a006a84`.
+
+**0.85 sur l'appareil** (`work/hwlog/1027_085/`) : 2 919 sous-trames sur HIFIACC, aucune erreur ; charge du cœur B sur l'album de 1000mods vers 11 MHz contre 15,5 en 0.80 (environ −28 %, mesure gênée par des écoutes courtes avec sauts). Seul défaut : 3 dépassements de délai sur `w24_o32.flac` (blocs de 8 192 à l'ordre 32), puis le logiciel pour la fin de la piste : HIFIACC tourne à la fréquence du cœur B, environ un produit par cycle, soit à peu près 5 ms pour 8 191 échantillons à l'ordre 32 à 50 MHz. **0.86** : délai porté à 30 ms. Image `work/images/NEWFW086.IMG`, CRC `0xd1462b2`.

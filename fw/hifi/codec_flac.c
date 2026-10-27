@@ -8,6 +8,35 @@
 #include <stddef.h>
 #include <string.h>
 #include "rt.h"
+#ifdef ECHO_HWTEST
+#undef ECHO_HIFIACC                             /* the bench compares; it does not use */
+#define REG(a) (*(volatile uint32_t *)(a))
+#include "hwtest_lpc.c"
+#endif
+#ifdef ECHO_HIFIACC
+#define REG(a) (*(volatile uint32_t *)(a))
+#include "hifiacc.c"
+
+/* Called by dr_flac for an LPC subframe of order 3 to 32 holding its warm-up samples and its
+ * residuals: the prediction on HIFIACC, in place. 0 (software then) after a timeout, and for
+ * the rest of the track after 3 of them. */
+static uint32_t hacc_timeouts;
+int echo_hacc_block(int *y, unsigned n, unsigned order, int shift, const int *qlp)
+{
+    if (hacc_timeouts >= 3) {
+        ctl->hacc_soft++;
+        return 0;
+    }
+    if (!hacc_lpc((const int32_t *)y, (int32_t *)y, n, order, (uint32_t)shift,
+                  (const int32_t *)qlp)) {
+        hacc_timeouts++;
+        ctl->hacc_soft++;
+        return 0;
+    }
+    ctl->hacc_sub++;
+    return 1;
+}
+#endif
 
 #define DR_FLAC_IMPLEMENTATION
 #define DR_FLAC_NO_STDIO
@@ -81,6 +110,10 @@ static void seek(void)
 
 int codec_open(void)
 {
+#ifdef ECHO_HIFIACC
+    ctl->hacc_sub = ctl->hacc_soft = 0;
+    hacc_timeouts = 0;
+#endif
     rt_heap_reset();
     flac = drflac_open(on_read, on_seek, on_tell, 0, 0);
     if (!flac)

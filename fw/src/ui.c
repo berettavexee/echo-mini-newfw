@@ -50,7 +50,7 @@ static void power_service(uint32_t key_ms)
  * Under BAT_WARN_MV: a warning (banner; with music, three beeps, then one every 5 min), again
  * only once above BAT_REARM_MV. Under BAT_OFF_MV for BAT_OFF_MS: two low beeps, a pause, the
  * resume state saved, power off. Called from the loop only, never inside a write. */
-#define BAT_WARN_MV   3400u
+#define BAT_WARN_MV   3425u           /* about 45 min left (ETUDE §65) */
 #define BAT_REARM_MV  3500u
 #define BAT_OFF_MV    3300u
 #ifndef BAT_OFF_MS                              /* shorter in the emulator tests */

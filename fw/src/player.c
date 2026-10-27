@@ -743,6 +743,37 @@ void player_close(int stopped)
                audio.ring_size / 1024, audio.ring_ur, audio.ring_lost, audio.i2s_ur,
                audio.min_fill, ps.full ? " (since full)" : " (never full)");
     gov_report(own_file.name);
+    if (c->hacc_sub || c->hacc_soft)
+        log_printf("hifiacc: %s: %u LPC subframes on HIFIACC, %u in software after a timeout",
+                   own_file.name, c->hacc_sub, c->hacc_soft);
+#ifdef ECHO_HWTEST
+    if (c->hwt.magic == HWT_MAGIC) {            /* test build: HIFIACC against dr_flac (§66) */
+        log_printf("hwt: %s: %u LPC subframes: %u exact, %u differ, %u timeouts, %u skipped; "
+                   "wide %u (%u differ); max order %u shift %u n %u; hw %u us, sw %u us; "
+                   "orders differing %x", own_file.name, c->hwt.sub, c->hwt.exact, c->hwt.diff,
+                   c->hwt.timeout, c->hwt.skipped, c->hwt.wide, c->hwt.wide_diff,
+                   c->hwt.max_order, c->hwt.max_shift, c->hwt.max_n, c->hwt.hw_ticks / 24,
+                   c->hwt.sw_ticks / 24, c->hwt.diff_orders);
+        if (c->hwt.diff)
+            log_printf("hwt: first difference: order %u shift %u precision %u bps %u n %u at %u: "
+                       "sw %d hw %d", c->hwt.f_order, c->hwt.f_shift, c->hwt.f_prec,
+                       c->hwt.f_bps, c->hwt.f_n, c->hwt.f_idx, c->hwt.f_sw, c->hwt.f_hw);
+        log_printf("hwt: split %u (longest pass %u)", c->hwt.split, c->hwt.max_seg);
+        for (int o = 0; o < 32; o++)
+            if (c->hwt.ok_o[o] || c->hwt.diff_o[o])
+                log_printf("hwt: order %d: %u exact, %u differ", o + 1, c->hwt.ok_o[o],
+                           c->hwt.diff_o[o]);
+        if (c->hwt.o1_shift)
+            log_printf("hwt: order 1: coef %d shift %d; x %d %d %d %d %d %d; sw %d %d %d %d %d %d; "
+                       "hw %d %d %d %d %d %d", c->hwt.o1_coef, c->hwt.o1_shift,
+                       c->hwt.o1_x[0], c->hwt.o1_x[1], c->hwt.o1_x[2], c->hwt.o1_x[3],
+                       c->hwt.o1_x[4], c->hwt.o1_x[5], c->hwt.o1_sw[0], c->hwt.o1_sw[1],
+                       c->hwt.o1_sw[2], c->hwt.o1_sw[3], c->hwt.o1_sw[4], c->hwt.o1_sw[5],
+                       c->hwt.o1_hw[0], c->hwt.o1_hw[1], c->hwt.o1_hw[2], c->hwt.o1_hw[3],
+                       c->hwt.o1_hw[4], c->hwt.o1_hw[5]);
+        c->hwt.magic = 0;
+    }
+#endif
     command(HP_CMD_STOP);
     hifi_stop();
     if (stopped || player.error || !(ps.flags & PLAY_CHAIN))

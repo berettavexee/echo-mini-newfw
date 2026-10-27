@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-27, version 0.83.
+Last update: 2026-10-27, version 0.86.
 
 ## Done, validated on the device
 
@@ -124,6 +124,14 @@ Last update: 2026-10-27, version 0.83.
   the count1 region, the overlap history cleared on a muted frame (clicks on damaged files),
   MPEG-2.5 8 kHz band limits, an empty short region, saturated gain shifts. Output bit-exact on
   60 library MP3 files and in the emulator; two MP3 fuzzing runs clean.
+- 0.84: the battery gauge from the measured discharge (it showed 20 % with some 9 h left) and the
+  low-battery warning at 3,425 mV, about 45 minutes before the cut-off (§65).
+- 0.85: FLAC on HIFIACC, the RKNanoD's accelerator: the LPC prediction of orders 3 to 32 in
+  hardware (6 to 16 times faster than dr_flac on the device), orders 1 and 2 in software as in the
+  stock firmware, a software fallback on timeout (§66-67, `docs/HIFIACC.md`).
+  On the device: no error, about 28 % less core B load on a FLAC album.
+- 0.86: the HIFIACC timeout at 30 ms (it runs at core B's clock: 5 ms timed out at 50 MHz on
+  8,192-sample blocks at order 32).
 
 ## To do
 
@@ -136,6 +144,12 @@ New formats, in this order (agreed 2026-10-24):
 Other items:
 
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64).
+- Document every HIFIACC function (`docs/HIFIACC.md`; LPC for FLAC done, §66): map the
+  registers of the ALAC filter (variable coefficients, memory at `0x01069000`, used by the stock
+  ALAC module 79), the APE decoder (module 80), the FFT/IFFT and the 64-bit MAC (TRM chapter 26),
+  from the stock modules, each checked on the device with a comparison bench as for FLAC; and the
+  emulator models to match. Then the MP3 accelerators SYNTH and Imdct36 (TRM chapters 27-28,
+  module 73).
 - Actions on the plug events (to be proposed and agreed first):
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
@@ -228,6 +242,10 @@ Other items:
   decoder's ARMv5TE variant uses DSP instructions the M3 lacks), then hand-written Thumb-2 for
   the hot functions of the QEMU profile (fft_rx4_long 25 %, trans4m_freq_2_time_fxp_2 14 %,
   inv_long_complex_rot 9 %, §54); no reference assembly exists in AOSP for this decoder.
+- AAC in ADTS (`.aac`), a distant prospect: pvaacdec already reads ADTS headers; an ADTS mode in
+  codec_aac.c reading the file directly (frames found by their headers, as codec_mp3.c does),
+  the `.aac` extension, ID3v2 tags, a length estimated from the bitrate, an approximate seek, no
+  gapless (ADTS has no encoder delay), a fuzzing target. None in the library.
 - Optional codecs built on Helix MP3 and Helix AAC (RealNetworks, RPSL/RCSL licence), a distant
   prospect: about 22 % (MP3) and 12 % (AAC) fewer instructions and 1 to 2 LSB of error instead of
   5 to 7 on the QEMU bench (ETUDE §19.9, §54); PacketVideo stays the default for its licence.

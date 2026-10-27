@@ -331,14 +331,17 @@ unsigned battery_mv(void)
     return adc_read(0) * 5000 / 1024;
 }
 
-/* Charge in %, a generic Li-ion curve on the voltage (to be measured on the device) */
+/* Charge in %, from the voltage: the curve measured on the device during playback (ETUDE §65:
+ * a full discharge, 15.8 h, the share of the time left at each voltage) */
+#define BAT_POINTS 14
 unsigned battery_pct(unsigned v)
 {
-    static const uint16_t mv[] = { 3300, 3600, 3700, 3780, 3850, 3920, 4000, 4080, 4160 };
-    static const uint8_t pc[] = { 0, 8, 20, 35, 50, 65, 80, 92, 100 };
-    if (v >= mv[8])
+    static const uint16_t mv[BAT_POINTS] = { 3300, 3400, 3450, 3500, 3550, 3600, 3650, 3700, 3750,
+                                             3800, 3900, 4000, 4100, 4160 };
+    static const uint8_t pc[BAT_POINTS] = { 0, 3, 8, 13, 22, 36, 50, 59, 65, 70, 79, 89, 96, 100 };
+    if (v >= mv[BAT_POINTS - 1])
         return 100;
-    for (int i = 1; i < 9; i++)
+    for (int i = 1; i < BAT_POINTS; i++)
         if (v < mv[i])
             return v <= mv[i - 1] ? pc[i - 1] :
                    pc[i - 1] + (v - mv[i - 1]) * (pc[i] - pc[i - 1]) / (mv[i] - mv[i - 1]);

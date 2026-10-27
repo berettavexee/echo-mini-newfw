@@ -41,9 +41,9 @@ build/hifi_pcm.elf: hifi/rt.c hifi/codec_pcm.c hifi/rt.h hifi/upsample_tab.h hif
 	$(CC) $(HCFLAGS) hifi/rt.c hifi/codec_pcm.c $(HLDFLAGS) -Wl,-Map=build/hifi_pcm.map -o $@
 	$(CROSS)size $@
 
-build/hifi_flac.elf: hifi/rt.c hifi/codec_flac.c hifi/ext/dr_flac.h hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h
+build/hifi_flac.elf: hifi/rt.c hifi/codec_flac.c hifi/hifiacc.c hifi/ext/dr_flac.h hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h
 	@mkdir -p build
-	$(CC) $(HCFLAGS) -Wno-unused-function hifi/rt.c hifi/codec_flac.c $(HLDFLAGS) -Wl,-Map=build/hifi_flac.map -o $@
+	$(CC) $(HCFLAGS) -DECHO_HIFIACC -Wno-unused-function hifi/rt.c hifi/codec_flac.c $(HLDFLAGS) -Wl,-Map=build/hifi_flac.map -o $@
 	$(CROSS)size $@
 
 # Opus: libopus 1.5.2, the variant validated on the device (third_party/opus: official release +
