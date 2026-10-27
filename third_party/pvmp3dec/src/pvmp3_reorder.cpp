@@ -135,7 +135,9 @@ void pvmp3_reorder(int32 xr[SUBBANDS_NUMBER*FILTERBANK_BANDS],
         {
             /* REORDERING FOR REST SWITCHED SHORT */
             sfb = 3;  /* no reorder for low 2 subbands */
-            src_line = 36;
+            /* ECHO MINI (ETUDE §64, from micro-mp3's list): the start of the short region,
+             * 36 except for MPEG-2.5 at 8 kHz (72) */
+            src_line = mp3_sfBandIndex[sfreq].s[3] * 3;
         }
         else
         {  /* pure short */
@@ -143,6 +145,10 @@ void pvmp3_reorder(int32 xr[SUBBANDS_NUMBER*FILTERBANK_BANDS],
             src_line = 0;
         }
         int16 ct = src_line;
+        if (*used_freq_lines <= src_line)
+        {
+            return;     /* ECHO MINI (ETUDE §64): no short lines (else a stale tail is read) */
+        }
 
         for (; sfb < 13; sfb++)
         {

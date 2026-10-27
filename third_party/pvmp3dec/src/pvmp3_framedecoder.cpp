@@ -347,6 +347,14 @@ ERROR_CODE pvmp3_framedecoder(tPVMP3DecoderExternal *pExt,
                       0,
                       480*sizeof(pChVars[RIGHT]->circ_buffer[0]));
 
+            /* ECHO MINI (ETUDE §64, from micro-mp3's list): and the IMDCT overlap-add
+             * history, else the muted frame plays the last frame's tail and the next one
+             * overlaps it (a loud click on damaged files) */
+            pv_memset((void*)pChVars[ LEFT]->overlap, 0,
+                      SUBBANDS_NUMBER*FILTERBANK_BANDS*sizeof(pChVars[ LEFT]->overlap[0]));
+            pv_memset((void*)pChVars[RIGHT]->overlap, 0,
+                      SUBBANDS_NUMBER*FILTERBANK_BANDS*sizeof(pChVars[RIGHT]->overlap[0]));
+
             pChVars[ LEFT]->used_freq_lines = 575;
             pChVars[RIGHT]->used_freq_lines = 575;
 

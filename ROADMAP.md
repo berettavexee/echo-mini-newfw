@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-26, version 0.82.
+Last update: 2026-10-27, version 0.83.
 
 ## Done, validated on the device
 
@@ -120,6 +120,10 @@ Last update: 2026-10-26, version 0.82.
   readers (`mp4.c`, `tags.c`) clean; eight defects fixed in the PacketVideo decoders and in how
   we feed pvaacdec, two of them out-of-bounds writes (AAC TNS and pulses). Final runs without a
   crash; output bit-exact on the library's 34 M4A files and 16 MP3 files, and in the emulator.
+- 0.83: five pvmp3dec fixes from micro-mp3's list (§64): an out-of-bounds write at the end of
+  the count1 region, the overlap history cleared on a muted frame (clicks on damaged files),
+  MPEG-2.5 8 kHz band limits, an empty short region, saturated gain shifts. Output bit-exact on
+  60 library MP3 files and in the emulator; two MP3 fuzzing runs clean.
 
 ## To do
 
@@ -131,8 +135,7 @@ New formats, in this order (agreed 2026-10-24):
 
 Other items:
 
-- Study esphome-libs' micro-mp3 (a fork of the OpenCore MP3 decoder, as our pvmp3dec) and
-  micro-flac (Apache-2.0): their lists of fixes and hardening, as done for micro-vorbis (§62).
+- Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64).
 - Actions on the plug events (to be proposed and agreed first):
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
@@ -191,7 +194,9 @@ Other items:
   70 mV/h after the first hour). Overnight test (0.80, 2026-10-26): 7.9 h from the card (MP3,
   Vorbis, FLAC), screen off, no error, 4,179 to 3,637 mV; over the same voltage range 4 to 8 %
   slower than 0.61 (68.5 against 74.1 mV/h from 4,072 to 3,710 mV). About 10 h of playback
-  estimated; a full discharge, down to the 3.3 V cut-off, still to do.
+  estimated. Full discharge (same session, 0.80): 15.8 h to the automatic power off (15.5 h of
+  playback from the card, MP3, Vorbis, FLAC), the low-battery warning at 3,399 mV 24 minutes before
+  the 3,281 mV cut-off, no error (§61).
 - Backlight: always at full brightness, no PWM setting yet.
 
 ## Ideas, not decided

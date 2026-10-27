@@ -3233,3 +3233,20 @@ Les défauts 1 et 2 écrivaient hors des tableaux sur l'appareil ; 3 et 4 lisaie
 Après ces deux corrections : les 3 762 plantages `aacpkt` et les 1 278 `aac` rejoués sans erreur ; les 34 M4A toujours identiques au bit près.
 
 **Troisième série** (0.82 définitive) : `aacpkt` deux fois (507 574 exécutions) et `aac` (261 817), aucun plantage ni boucle sans fin. Dans l'émulateur, l'image ARM 0.82 (`work/NEWFW082.IMG`, CRC `0xbbf146bd`, construite à neuf) donne la même sortie que la 0.81 sur un MP3 et deux M4A (504 259 trames, identiques au bit près).
+
+**Décharge complète (fin de l'essai d'autonomie, 0.80, `work/hwlog_1027_endurance/`)** : la même session que la nuit du 26 (démarrage à 4 179 mV, 9 minutes sur l'USB à 7,9 h), poursuivie jusqu'à l'arrêt automatique : **15,8 h**, dont 15,5 h de lecture (180 pistes depuis la carte : 89 MP3, 76 Vorbis, 22 FLAC ; cœur B 40 MHz en moyenne), sans erreur ni trou. Après l'USB : 3 600 mV à 10,2 h, 3 500 mV à 13,7 h, alerte « battery: low (3399 mV) » à 15,38 h, arrêt « battery empty » à 3 281 mV à 15,79 h (24,5 minutes après l'alerte) ; la relance suivante est refusée (« battery empty at start », 3 347 mV). Autonomie en lecture de l'ordre de 15 h, écran éteint.
+
+## 64. Corrections de pvmp3dec d'après micro-mp3 ; micro-flac (0.83, 2026-10-27)
+
+**micro-mp3** (esphome-libs, Apache-2.0, dérivé du même décodeur OpenCore) : sa liste de modifications (`src/opencore-mp3dec/CHANGES.md`), vérifiée point par point dans notre pvmp3dec d'Android 11. Déjà réglés : la taille de `Scratch_mem` (198) et `bitrate_index == 15` (Android 11), les régions de Huffman et la fenêtre des sous-blocs (§63). Corrigés ici, écrits d'après la liste et marqués `ECHO MINI (ETUDE §64)` :
+1. **Fin de la zone « count1 »** (`pvmp3_huffman_parsing.cpp`) : depuis l'index 574, le dernier groupe de quatre écrivait `is[576..577]`, au-delà de `work_buf_int32[576]`, dans `circ_buffer[]` (l'historique du filtre polyphasé), puis les remettait à zéro. Un groupe n'est décodé que s'il tient (`i <= 572`). Écriture interne à la structure : invisible pour ASan, d'où son absence au §63.
+2. **Trame rendue muette** (`pvmp3_framedecoder.cpp`, réservoir vide ou CRC faux) : `overlap[]` est vidé aussi ; sinon la trame muette jouait la fin de la précédente et la suivante s'y superposait (un claquement sur les fichiers abîmés).
+3. **MPEG-2.5 à 8 kHz** : la limite des blocs mixtes, le début du réordonnancement et la borne d'intensité MPEG-2 ne sont plus fixées à 36 mais tirées de la table des bandes (72 à cette fréquence).
+4. **Bloc mixte sans région courte** (`pvmp3_reorder.cpp`) : retour immédiat, au lieu de réinjecter des valeurs de la trame précédente.
+5. **Gain global élevé** (`pvmp3_dequantize_sample.cpp`) : les trois décalages à gauche sont saturés (`sat_shift_left`) ; un `global_gain` légal proche de 255 débordait.
+
+Non repris : l'arrondi au plus proche des multiplications (change la sortie, contredit nos opérations ARM, comme l'arrondi Vorbis écarté), la réduction du tampon du réservoir (6 Ko non nécessaires), l'égaliseur (inutilisé), le seuil de 32 octets des trames (voix à 8 kb/s, à reprendre avec le contrôle des informations latérales de micro-mp3), `pvmp3_header_sync()` (chemin non emprunté par `codec_mp3.c`).
+
+**Contrôles** : les 403 plantages MP3 du §63 rejoués sans erreur ; 60 MP3 de la bibliothèque identiques au bit près avant et après ; image ARM 0.83 (`work/images/NEWFW083.IMG`, CRC `0xe734f314`) identique à la 0.82 dans l'émulateur (un MP3, deux M4A) ; deux campagnes `mp3` de 25 minutes (117 345 et 124 527 exécutions) sans plantage ni boucle sans fin.
+
+**micro-flac** : une réécriture à partir de l'implémentation simple de Nayuki, pas un dérivé de dr_flac : rien à transposer. Ses optimisations (LPC en 32 ou 64 bits selon le risque de dépassement, boucles déroulées par ordre) existent déjà dans dr_flac ; un CRC facultatif est déconseillé (notre resynchronisation des fichiers abîmés s'appuie dessus). Suite logique : une cible de fuzzing `flac` (dr_flac n'a jamais été fuzzé ici), puis `alac` et `mpc`.

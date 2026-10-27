@@ -288,7 +288,7 @@ void pvmp3_mpeg2_stereo_proc(int32 xr[SUBBANDS_NUMBER*FILTERBANK_BANDS],
                 }   /* now sb is the number of highest line with value != 0      */
                 /* can be between -1 (all lines zero) and 575 (no line zero) */
 
-                if (sb < 36)    /*  was (sb <= 36)  */
+                if (sb < mp3_sfBandIndex[sfreq].l[6])    /* ECHO MINI (ETUDE §64): was 36 (72 for MPEG-2.5 8 kHz) */
                 {
                     /*
                      *  mixed blocks processing: intensity bound inside long blocks

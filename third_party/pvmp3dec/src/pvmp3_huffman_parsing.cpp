@@ -291,18 +291,14 @@ int32 pvmp3_huffman_parsing(int32 is[SUBBANDS_NUMBER*FILTERBANK_BANDS],
         i += 4;
     }
 
+    /* ECHO MINI (ETUDE §64, from micro-mp3's list): a quad only when its four lines fit (the
+     * largest is[572..575]); i == 574 wrote is[576..577], past work_buf_int32[] into circ_buffer[],
+     * then zeroed them there */
     if ((pMainData->usedBits < grBits) &&
-            (i < FILTERBANK_BANDS*SUBBANDS_NUMBER))
+            (i <= FILTERBANK_BANDS*SUBBANDS_NUMBER - 4))
     {
         pvmp3_huffman_quad_decoding(h, &is[i], pMainData);
         i += 4;
-
-        if ((i - 2) >= FILTERBANK_BANDS*SUBBANDS_NUMBER)
-        {
-            i -= 2;
-            is[i] = 0;
-            is[(i+1)] = 0;
-        }
     }
 
     if (pMainData->usedBits > grBits)

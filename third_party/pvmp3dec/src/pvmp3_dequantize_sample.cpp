@@ -97,6 +97,19 @@ Input
 #include "mp3_mem_funcs.h"
 #include "pvmp3_tables.h"
 
+/* ECHO MINI (ETUDE §64, from micro-mp3's list): x << s saturated to the int32 range; a legal
+ * global_gain near 255 overflowed the plain shift (a loud glitch instead of clipping) */
+static inline int32 sat_shift_left(int32 x, int32 s)
+{
+    if (s >= 31)
+        return x > 0 ? 0x7fffffff : x < 0 ? (int32)0x80000000 : 0;
+    if (x > (0x7fffffff >> s))
+        return 0x7fffffff;
+    if (x < -(0x7fffffff >> s) - 1)
+        return (int32)0x80000000;
+    return (int32)((uint32)x << s);
+}
+
 /*----------------------------------------------------------------------------
 ; MACROS
 ; Define module specific macros here
@@ -250,7 +263,7 @@ void pvmp3_dequantize_sample(int32 is[SUBBANDS_NUMBER*FILTERBANK_BANDS],
                         cb_begin = mp3_sfBandIndex[sfreq].s[cb] * 3;
                     }
 
-                    if (ss < 2*FILTERBANK_BANDS)
+                    if (ss < mp3_sfBandIndex[sfreq].l[mixstart])    /* ECHO MINI (ETUDE §64): was 2*FILTERBANK_BANDS, 72 lines for MPEG-2.5 8 kHz */
                     {   /*  1st 2 subbands of switched blocks */
                         global_gain  = (gr_info->global_gain);
                         global_gain -= (1 + gr_info->scalefac_scale) *
@@ -270,7 +283,7 @@ void pvmp3_dequantize_sample(int32 is[SUBBANDS_NUMBER*FILTERBANK_BANDS],
             }   /*  end-if ( ss == next_cb_boundary) */
 
             /* Do long/short dependent scaling operations. */
-            if ((gr_info->mixed_block_flag == 0) || (gr_info->mixed_block_flag && (ss >= 2*FILTERBANK_BANDS)))
+            if ((gr_info->mixed_block_flag == 0) || (gr_info->mixed_block_flag && (ss >= mp3_sfBandIndex[sfreq].l[mixstart])))
             {
                 int32 temp2 = fxp_mul32_Q32((ss - cb_begin) << 16, mp3_shortwindBandWidths[sfreq][cb_width]);
                 temp2 = (temp2 + 1) >> 15;
@@ -315,7 +328,7 @@ void pvmp3_dequantize_sample(int32 is[SUBBANDS_NUMBER*FILTERBANK_BANDS],
             }
             else
             {
-                is[ss] = (tmp << global_gain);
+                is[ss] = sat_shift_left(tmp, global_gain);
             }
 
         }  /*   for (ss=0 ; ss < used_freq_lines ; ss++)   */
@@ -382,14 +395,14 @@ void pvmp3_dequantize_sample(int32 is[SUBBANDS_NUMBER*FILTERBANK_BANDS],
                         if (tmp)
                         {
                             tmp = fxp_mul32_Q30((tmp << 16), power_1_third(pv_abs(tmp)));
-                            is[ss] = fxp_mul32_Q30(tmp, two_raise_one_fourth) << global_gain;
+                            is[ss] = sat_shift_left(fxp_mul32_Q30(tmp, two_raise_one_fourth), global_gain);
                         }
 
                         tmp =  is[ss+1];
                         if (tmp)
                         {
                             tmp = fxp_mul32_Q30((tmp << 16), power_1_third(pv_abs(tmp)));
-                            is[ss+1] = fxp_mul32_Q30(tmp, two_raise_one_fourth) << global_gain;
+                            is[ss+1] = sat_shift_left(fxp_mul32_Q30(tmp, two_raise_one_fourth), global_gain);
                         }
                     }
                 }
@@ -434,7 +447,7 @@ void pvmp3_dequantize_sample(int32 is[SUBBANDS_NUMBER*FILTERBANK_BANDS],
                         if (tmp)
                         {
                             tmp = fxp_mul32_Q30((tmp << 16), power_1_third(pv_abs(tmp)));
-                            is[ss] = fxp_mul32_Q30(tmp, two_raise_one_fourth) << global_gain;
+                            is[ss] = sat_shift_left(fxp_mul32_Q30(tmp, two_raise_one_fourth), global_gain);
                         }
                     }
                 }
