@@ -4,16 +4,13 @@
  * scale is not known: each track tries another input shift (hws.trial), and the log gives the
  * amplitude ratio, the sign and the errors in direct and reversed order. Included by
  * codec_mp3.c; called from pvmp3_framedecoder.cpp after pvmp3_poly_phase_synthesis(). */
-#define SYN         0x60050000u
-#define SYN_HIST    0x60051000u
-#define SYN_NOW()   (~REG(0x400e0028u))          /* TIMER1, 24 MHz */
+#include "accel.h"
 
 /* SYNTH: input x << 4 (HS2: 2 LSB at most against pvmp3dec, ETUDE §69). IMDCT36 (HS3): per
  * track, +0x800 = 3 or 1 and an input shift of 4 bits left or none */
 static const uint8_t im_modes[4] = { 3, 1, 3, 1 };
 static const int8_t im_shifts[4] = { -4, -4, 0, 0 };
 #include "hwtest_imdct_tab.h"
-#define IMD         0x60010000u
 static int syn_ready;
 static uint32_t syn_phase[2];
 
@@ -21,7 +18,7 @@ static void syn_reset(void)
 {
     volatile __typeof__(ctl->hws) *h = &ctl->hws;
     uint32_t trial = h->trial;                  /* kept by core A, which moves it on */
-    memset((void *)h, 0, sizeof *h);
+    memset((void *)(uintptr_t)h, 0, sizeof *h);
     h->magic = HWT_MAGIC;
     h->trial = trial;
     h->shift = -4;
@@ -47,15 +44,15 @@ void echo_synth_play(const int32_t *work, int16_t *out, int nch, int ch)
     if (!syn_ready)
         syn_reset();
     volatile __typeof__(ctl->hws) *h = &ctl->hws;
-    uint32_t t0 = SYN_NOW();
+    uint32_t t0 = TIMER1_NOW();
     for (int s = 0; s < 18; s++) {
         REG(SYN + 0x804) = (uint32_t)ch | (15 - syn_phase[ch]) << 1;
         for (int sb = 0; sb < 32; sb++)
             REG(SYN + 4 * sb) = (uint32_t)work[sb * 18 + s] << 4;
         syn_phase[ch] = (syn_phase[ch] + 1) & 15;
-        uint32_t t1 = SYN_NOW();
+        uint32_t t1 = TIMER1_NOW();
         int polled = 0;
-        while (SYN_NOW() - t1 < 200 * 24u)
+        while (TIMER1_NOW() - t1 < 200 * 24u)
             if (REG(SYN + 0x80c) != 0) {
                 polled = 1;
                 break;
@@ -68,7 +65,7 @@ void echo_synth_play(const int32_t *work, int16_t *out, int nch, int ch)
         for (int k = 0; k < 32; k++)
             o[k * nch] = (int16_t)REG(SYN + 4 * k);
     }
-    h->p_hw_ticks += SYN_NOW() - t0;
+    h->p_hw_ticks += TIMER1_NOW() - t0;
 }
 
 /* The comparison of a granule's output with the software's (both channels interleaved) */
@@ -88,7 +85,7 @@ void echo_synth_cmp(const int16_t *hw, const int16_t *sw, int n)
 
 uint32_t echo_now(void)
 {
-    return SYN_NOW();
+    return TIMER1_NOW();
 }
 
 /* One IMDCT of 36 points on IMDCT36 against the exact one; x: the 18 inputs pvmp3_mdct_18 got;
@@ -99,12 +96,12 @@ void echo_imdct_hook(const int32_t *x, uint32_t sw)
         syn_reset();
     volatile __typeof__(ctl->hws) *h = &ctl->hws;
     int32_t sh = h->im_shift;
-    uint32_t t0 = SYN_NOW();
+    uint32_t t0 = TIMER1_NOW();
     for (int k = 0; k < 18; k++)
         REG(IMD + 4 * k) = sh >= 0 ? (uint32_t)(x[k] >> sh) : (uint32_t)x[k] << -sh;
-    uint32_t t1 = SYN_NOW(), st = 0;
+    uint32_t t1 = TIMER1_NOW(), st = 0;
     int polled = 0;
-    while (SYN_NOW() - t1 < 200 * 24u)
+    while (TIMER1_NOW() - t1 < 200 * 24u)
         if ((st = REG(IMD + 0x80c)) != 0) {
             polled = 1;
             break;
@@ -113,7 +110,7 @@ void echo_imdct_hook(const int32_t *x, uint32_t sw)
     for (int i = 0; i < 36; i++)
         hw[i] = (int32_t)REG(IMD + 0x48 + 4 * i);
     REG(IMD + 0x80c) = 0;                       /* acknowledge, as module 73 */
-    h->im_hw_ticks += SYN_NOW() - t0;
+    h->im_hw_ticks += TIMER1_NOW() - t0;
     h->im_sw_ticks += sw;
     h->im_polled += polled;
     h->im_timeouts += !polled;
@@ -146,7 +143,7 @@ void echo_synth_hook(const int32_t *work, const int16_t *out, int nch, int ch, u
         syn_reset();
     volatile __typeof__(ctl->hws) *h = &ctl->hws;
     int32_t sh = h->shift;
-    uint32_t tsyn = SYN_NOW();
+    uint32_t tsyn = TIMER1_NOW();
     for (int s = 0; s < 18; s++) {
         int32_t x[32];
         for (int sb = 0; sb < 32; sb++)
@@ -157,9 +154,9 @@ void echo_synth_hook(const int32_t *work, const int16_t *out, int nch, int ch, u
             REG(SYN + 4 * sb) = (uint32_t)x[sb];
         syn_phase[ch] = (syn_phase[ch] + 1) & 15;
         /* done: module 73 learns it by interrupt; here, +0x80c nonzero or 200 us */
-        uint32_t t0 = SYN_NOW(), st = 0;
+        uint32_t t0 = TIMER1_NOW(), st = 0;
         int polled = 0;
-        while (SYN_NOW() - t0 < 200 * 24u)
+        while (TIMER1_NOW() - t0 < 200 * 24u)
             if ((st = REG(SYN + 0x80c)) != 0) {
                 polled = 1;
                 break;
@@ -172,8 +169,8 @@ void echo_synth_hook(const int32_t *work, const int16_t *out, int nch, int ch, u
         for (int k = 0; k < 32; k++)
             hw[k] = (int16_t)REG(SYN + 4 * k);
         for (int k = 0; k < 32; k++) {
-            int32_t sw = out[(s * 32 + k) * nch];
-            int32_t d = hw[k] - sw, r = hw[31 - k] - sw;
+            int32_t ref = out[(s * 32 + k) * nch];
+            int32_t d = hw[k] - ref, r = hw[31 - k] - ref;
             uint32_t a = d < 0 ? -d : d, ra = r < 0 ? -r : r;
             h->exact += a == 0;
             h->within1 += a <= 1;
@@ -182,12 +179,12 @@ void echo_synth_hook(const int32_t *work, const int16_t *out, int nch, int ch, u
             h->r_within4 += ra <= 4;
             if (a > h->max_err)
                 h->max_err = a;
-            h->sum_sw += sw < 0 ? -sw : sw;
+            h->sum_sw += ref < 0 ? -ref : ref;
             h->sum_hw += hw[k] < 0 ? -hw[k] : hw[k];
-            h->dot += (int64_t)sw * hw[k];
+            h->dot += (int64_t)ref * hw[k];
         }
         if (s == 17) {
-            h->syn_hw_ticks += SYN_NOW() - tsyn;    /* (the comparisons included: an upper bound) */
+            h->syn_hw_ticks += TIMER1_NOW() - tsyn;    /* (the comparisons included: an upper bound) */
             h->syn_sw_ticks += sw;
             h->syn_timed++;
         }

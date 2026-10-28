@@ -6,6 +6,10 @@
 #include "../src/hifi_proto.h"
 
 #define ctl HP_CTL
+#define REG(a) (*(volatile uint32_t *)(a))
+/* TIMER1: 64-bit, 24 MHz, counting down from 2^64 - 1, shared with core A; TIMER1_NOW() counts up */
+#define TIMER1_CUR0 0x400e0028u
+#define TIMER1_NOW() (~REG(TIMER1_CUR0))
 
 /* Implemented by each codec. Both may also block in rt_wait() (input or output). */
 extern const uint32_t codec_id;

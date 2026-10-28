@@ -9,7 +9,6 @@ level 0x03056ace) and the delays (0x03065cac ms, 0x03065cd0, 0x030575c8 us), whi
 once. Reads of the VOP status register return 0 (idle). Only block hooks plus an MMIO
 mapping are used (Unicorn 2.1 mis-executes Thumb IT blocks with code or memory-write hooks).
 """
-import struct
 import sys
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_BLOCK
 from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_SP,

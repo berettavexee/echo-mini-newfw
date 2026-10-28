@@ -8,13 +8,12 @@
 #include <stddef.h>
 #include <string.h>
 #include "rt.h"
+#include "hooks.h"
 #ifdef ECHO_HWTEST
 #undef ECHO_HIFIACC                             /* the bench compares; it does not use */
-#define REG(a) (*(volatile uint32_t *)(a))
 #include "hwtest_lpc.c"
 #endif
 #ifdef ECHO_HIFIACC
-#define REG(a) (*(volatile uint32_t *)(a))
 #include "hifiacc.c"
 
 /* Called by dr_flac for an LPC subframe of order 3 to 32 holding its warm-up samples and its
@@ -27,7 +26,7 @@ int echo_hacc_block(int *y, unsigned n, unsigned order, int shift, const int *ql
         ctl->hacc_soft++;
         return 0;
     }
-    if (!hacc_lpc((const int32_t *)y, (int32_t *)y, n, order, (uint32_t)shift,
+    if (!hacc_lpc((int32_t *)y, (int32_t *)y, n, order, (uint32_t)shift,
                   (const int32_t *)qlp)) {
         hacc_timeouts++;
         ctl->hacc_soft++;
@@ -49,7 +48,10 @@ int echo_hacc_block(int *y, unsigned n, unsigned order, int shift, const int *ql
 #define DRFLAC_REALLOC(p, sz) flac_realloc(p, sz)
 #define DRFLAC_FREE(p) ((void)(p))
 static void *flac_realloc(void *p, size_t n);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"     /* third-party code */
 #include "ext/dr_flac.h"
+#pragma GCC diagnostic pop
 
 const uint32_t codec_id = HP_CODEC_FLAC;
 

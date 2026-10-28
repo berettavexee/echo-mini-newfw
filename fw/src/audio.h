@@ -38,7 +38,6 @@ void audio_pause(int on);       /* the DMA waits in place; the volume is kept */
 void audio_flush(void);         /* drops what is queued (a skip) */
 extern int audio_paused;
 void audio_volume(uint8_t vol, int ramp);   /* both DACs, both channels */
-uint32_t audio_dma_pos(void);   /* byte offset of the DMA in the ring */
 void audio_update(void);        /* read position and underrun counters only */
 uint32_t audio_free(void);      /* bytes that can be written now (whole 32-bit words) */
 void audio_write(const void *src, uint32_t n);

@@ -1,5 +1,5 @@
 #!/bin/sh
-# build.sh ogg|vorbis|opus|vorbis-heap|mp3|mp4|aac|aacpkt|tags [TREMOR_DIR]
+# build.sh ogg|vorbis|opus|vorbis-heap|mp3|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]
 # Host builds of the core B Ogg code for fuzz_host.c (docs/FUZZING.md). ogg, vorbis and opus:
 # ASan + UBSan (signed shifts and Tremor's deliberate overflows left out), trace-pc coverage on
 # the code under test only. vorbis-heap: core B's own hifi/heap.c in place of libc malloc, no
@@ -18,10 +18,10 @@ TREM_SRC=""
 for f in bitwise codebook dsp floor1 floor_lookup info mapping0 mdct misc res012; do TREM_SRC="$TREM_SRC $TREM/$f.c"; done
 case $T in
 ogg)    DEF=-DT_OGG; INC=""; SRC="$FW/hifi/oggpage.c";;
-vorbis) DEF="-DT_VORBIS -DECHO_NO_FLOOR0 -DECHO_HEAP_ALLOCA"; INC="-I$TREM"
+vorbis) DEF="-DT_VORBIS -DECHO_NO_HWFFT -DECHO_NO_FLOOR0 -DECHO_HEAP_ALLOCA"; INC="-I$TREM"
         SRC="$FW/hifi/oggpage.c $FW/hifi/codec_vorbis.c $TREM_SRC";;
 vorbis-heap)
-        DEF="-DT_VORBIS -DREAL_HEAP -DECHO_NO_FLOOR0 -DECHO_HEAP_ALLOCA"; INC="-I$TREM"; SAN=""
+        DEF="-DT_VORBIS -DECHO_NO_HWFFT -DREAL_HEAP -DECHO_NO_FLOOR0 -DECHO_HEAP_ALLOCA"; INC="-I$TREM"; SAN=""
         REN="-Dmalloc=hmalloc -Dfree=hfree -Dcalloc=hcalloc -Drealloc=hrealloc"
         SRC="$FW/hifi/oggpage.c $FW/hifi/codec_vorbis.c $FW/hifi/heap.c $TREM_SRC";;
 opus)   OD=$TP/opus
@@ -38,6 +38,7 @@ MK
 )"; done;;
 mp4)    DEF=-DT_MP4; INC="-I$FW/src"; SRC="$FW/src/mp4.c";;
 tags)   DEF=-DT_TAGS; INC="-I$FW/src"; SRC="$FW/src/tags.c";;
+fat)    DEF=-DT_FAT; INC="-I$FW/src"; SRC="$FW/src/fat.c";;
 aac|aacpkt)
         PA=$TP/pvaacdec/src
         DEF="-DT_$(echo $T | tr a-z A-Z) -DOSCL_IMPORT_REF= -DOSCL_EXPORT_REF="; INC="-I$FW/src -I$PA"
@@ -46,7 +47,7 @@ aac|aacpkt)
 mp3)    PM=$TP/pvmp3dec
         DEF=-DT_MP3; INC="-I$PM/include -I$PM/src"
         SRC="$FW/hifi/codec_mp3.c $(ls $PM/src/*.cpp)";;
-*) echo "usage: build.sh ogg|vorbis|opus|vorbis-heap|mp3|mp4|aac|aacpkt|tags [TREMOR_DIR]"; exit 1;;
+*) echo "usage: build.sh ogg|vorbis|opus|vorbis-heap|mp3|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]"; exit 1;;
 esac
 OBJS=""
 # the PacketVideo decoders are C++ (no exceptions, no RTTI), as in the firmware Makefile, but

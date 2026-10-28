@@ -47,7 +47,6 @@ int player_service(void);
 #define PLAYER_ENOAUDIO (-50)
 void player_close(int stopped);
 int player_is_open(void);
-extern int player_clock;        /* core B clock: 0 automatic, else a fixed divider of the PLL */
 
 #endif
 

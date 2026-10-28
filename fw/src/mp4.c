@@ -7,6 +7,7 @@
  * file, cost one read. Only the first audio track is played: AAC-LC (0.75) or ALAC (0.76).
  * Gapless: the encoder delay and padding from iTunSMPB (iTunes), else from the edit list. */
 #include "mp4.h"
+#include "bytes.h"
 #include "hifi_proto.h"
 #include "log.h"
 
@@ -15,8 +16,6 @@ void *memcpy(void *d, const void *s, unsigned n);
 static const struct fat_file *file;
 static struct fat_cursor box_cur;
 
-static uint32_t be16(const uint8_t *p) { return p[0] << 8 | p[1]; }
-static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
 #define FOURCC(a, b, c, d) ((uint32_t)(a) << 24 | (b) << 16 | (c) << 8 | (d))
 
 /* Small reads of the boxes, through a one-sector cache (the walk reads 8-byte headers one

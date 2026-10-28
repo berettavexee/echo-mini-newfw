@@ -13,6 +13,7 @@
 #include "probe.h"
 #endif
 #include "board.h"
+#include "bytes.h"
 #include "emmc.h"
 #include "usb.h"
 #include "version.h"
@@ -26,19 +27,6 @@ static uint32_t cbw_buf[16];
 #define data SHARED_USB                         /* CHUNK_SECTORS * 512 bytes, shared.h */
 static int armed;
 static uint8_t sense_key, sense_asc;
-
-static uint32_t be32(const uint8_t *p)
-{
-    return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
-}
-
-static void put_be32(uint8_t *p, uint32_t v)
-{
-    p[0] = (uint8_t)(v >> 24);
-    p[1] = (uint8_t)(v >> 16);
-    p[2] = (uint8_t)(v >> 8);
-    p[3] = (uint8_t)v;
-}
 
 static void sense(uint8_t key, uint8_t asc)
 {

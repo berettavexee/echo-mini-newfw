@@ -8,7 +8,7 @@ SPEC: a list of entries {"path": "Dir/Sub/name.ext", "dir": true} or {"path": ..
 or {"path": ..., "data": "hex"}, optional "fragmented": true (clusters spread, FAT chain) and
 "hidden": true. Files are contiguous with the "no FAT chain" flag unless fragmented.
 """
-import json, struct, sys, time
+import json, struct, sys
 
 
 class Vol:

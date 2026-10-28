@@ -1,0 +1,29 @@
+#!/bin/sh
+# Git pre-commit hook of this repository: guards of the publication rules, then make check.
+# Install (once, from the repository root): ln -s ../../fw/tools/pre-commit .git/hooks/pre-commit
+#  - nothing from loader/, flash/, work/, fwbase/ (local folders, never published);
+#  - no Rockchip SDK text (a local reference only): its copyright lines;
+#  - make check (fw/tools/check.sh) when the firmware or the tools change.
+# Bypass for a stated reason only: git commit --no-verify
+fail() { echo "pre-commit: $*" >&2; exit 1; }
+
+FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$FILES" ] && exit 0
+
+echo "$FILES" | grep -E '^(loader|flash|work|fwbase)/' && fail "local folder staged (above)"
+
+# Added lines only, in every file but this one (its pattern would match itself)
+if git diff --cached -U0 --diff-filter=ACMR -- . ':!fw/tools/pre-commit' | grep '^+' |
+    grep -iE 'fuzhou|copyright[^a-z]{0,20}(\(c\)[^a-z]{0,20})?rock-?chips?|2014 - 2014 \+ 5'; then
+    fail "Rockchip SDK text staged (above): the SDK is a local reference only"
+fi
+
+if echo "$FILES" | grep -qE '^(fw/|tools/)'; then
+    mkdir -p fw/build
+    make -s -C fw check > fw/build/pre-commit.log 2>&1 || {
+        tail -30 fw/build/pre-commit.log >&2
+        fail "make check failed (full log: fw/build/pre-commit.log)"
+    }
+    echo "pre-commit: make check ok"
+fi
+exit 0

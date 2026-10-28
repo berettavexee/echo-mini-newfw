@@ -5,12 +5,7 @@
  * PCM samples back from the same SRAM; the phase moves on by 1 (mod 16) per slot. The history
  * (SRAM1, 0x60051000) is cleared at the start and whenever pvmp3dec clears its own. Within 2 LSB
  * of pvmp3dec, about 42 % less core B load (ETUDE §70). Included by codec_mp3.c. */
-#ifndef REG
-#define REG(a) (*(volatile uint32_t *)(a))
-#endif
-#define SYN         0x60050000u
-#define SYN_HIST    0x60051000u
-#define SYN_NOW()   (~REG(0x400e0028u))          /* TIMER1, 24 MHz */
+#include "accel.h"
 
 static int syn_on, syn_timeouts;
 static uint32_t syn_phase[2];
@@ -40,9 +35,9 @@ int echo_synth_granule(const int32_t *work, int16_t *out, int nch, int ch)
         for (int sb = 0; sb < 32; sb++)
             REG(SYN + 4 * sb) = (uint32_t)work[sb * 18 + s] << 4;
         syn_phase[ch] = (syn_phase[ch] + 1) & 15;
-        uint32_t t0 = SYN_NOW();
+        uint32_t t0 = TIMER1_NOW();
         int done = 0;
-        while (SYN_NOW() - t0 < 200 * 24u)      /* a slot takes a few microseconds */
+        while (TIMER1_NOW() - t0 < 200 * 24u)      /* a slot takes a few microseconds */
             if (REG(SYN + 0x80c) != 0) {
                 done = 1;
                 break;

@@ -4,6 +4,7 @@
 #include "player.h"
 #include "audio.h"
 #include "board.h"
+#include "bytes.h"
 #include "hifi.h"
 #include "log.h"
 #include "mp4.h"
@@ -129,11 +130,15 @@ static void own_service(void)
     }
 }
 
+/* Read buffer of the three Ogg scans below (they run one after the other): 8 KiB, and a page
+ * header across the end of the previous read */
+static uint8_t ogg_buf[8192 + 27];
+
 /* Ogg: granule position of the last page (the stream length), from the end of the file;
  * 0 when none is found in the last 64 KiB */
 static uint64_t ogg_end_granule(const struct fat_file *f)
 {
-    static uint8_t buf[8192 + 27];
+    uint8_t *buf = ogg_buf;
     struct fat_cursor c = { 0, 0 };
     uint32_t end = f->size;
     for (int k = 0; k < 8 && end > 27; k++) {
@@ -147,8 +152,7 @@ static uint64_t ogg_end_granule(const struct fat_file *f)
             const uint8_t *h = buf + i;
             if (h[0] != 'O' || h[1] != 'g' || h[2] != 'g' || h[3] != 'S' || h[4])
                 continue;
-            uint32_t lo = h[6] | h[7] << 8 | h[8] << 16 | (uint32_t)h[9] << 24;
-            uint32_t hi = h[10] | h[11] << 8 | h[12] << 16 | (uint32_t)h[13] << 24;
+            uint32_t lo = le32(h + 6), hi = le32(h + 10);
             if (lo != 0xffffffffu || hi != 0xffffffffu)
                 return lo | (uint64_t)hi << 32;
         }
@@ -161,9 +165,9 @@ static uint64_t ogg_end_granule(const struct fat_file *f)
  * header), 0 when unknown */
 static uint32_t ogg_rate(const struct fat_file *f)
 {
-    static uint8_t b[512];
+    uint8_t *b = ogg_buf;
     struct fat_cursor c = { 0, 0 };
-    uint32_t n = f->size < sizeof b ? f->size : sizeof b;
+    uint32_t n = f->size < 512 ? f->size : 512;
     if (fat_pread(f, &c, 0, b, n) != (int)n || n < 27 || b[0] != 'O' || b[3] != 'S' ||
         27u + b[26] + 16 > n)
         return 0;
@@ -171,7 +175,7 @@ static uint32_t ogg_rate(const struct fat_file *f)
     if (!__builtin_memcmp(p, "OpusHead", 8))
         return 48000;
     if (p[0] == 1 && !__builtin_memcmp(p + 1, "vorbis", 6))
-        return p[12] | p[13] << 8 | p[14] << 16 | (uint32_t)p[15] << 24;
+        return le32(p + 12);
     return 0;
 }
 
@@ -185,7 +189,7 @@ static uint32_t ogg_rate(const struct fat_file *f)
 static uint32_t ogg_page_before(const struct fat_file *f, uint64_t target, uint64_t end,
                                 uint32_t start, uint32_t *reads)
 {
-    static uint8_t b[8192 + 27];
+    uint8_t *b = ogg_buf;
     struct fat_cursor c = { 0, 0 };
     uint32_t lo = start < f->size ? start : 0, hi = f->size, best = 0;
     uint64_t glo = 0, ghi = end;
@@ -212,8 +216,7 @@ static uint32_t ogg_page_before(const struct fat_file *f, uint64_t target, uint6
                 const uint8_t *h = b + i;
                 if (h[0] != 'O' || h[1] != 'g' || h[2] != 'g' || h[3] != 'S' || h[4] || h[5] > 7)
                     continue;
-                uint32_t lo32 = h[6] | h[7] << 8 | h[8] << 16 | (uint32_t)h[9] << 24;
-                uint32_t hi32 = h[10] | h[11] << 8 | h[12] << 16 | (uint32_t)h[13] << 24;
+                uint32_t lo32 = le32(h + 6), hi32 = le32(h + 10);
                 if (lo32 == 0xffffffffu && hi32 == 0xffffffffu)
                     continue;                   /* no packet ends on this page */
                 uint32_t page = at - keep + i;
@@ -310,7 +313,7 @@ void player_drop_tail(void)
  * every peak: Opus switched 29 times in 2 min between 133 and 200 MHz, ETUDE §24). */
 static const uint8_t gov_div[] = { 8, 7, 6, 5, 4, 3, 2 };   /* 50 57 67 80 100 133 200 MHz */
 #define GOV_LEVELS ((int)sizeof gov_div)
-int player_clock;                               /* 0: automatic, else a fixed divider */
+static int player_clock;                               /* 0: automatic, else a fixed divider */
 static struct {
     int level, boost, low, hot;
     uint32_t t0, t_last, idle_last;

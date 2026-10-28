@@ -3,16 +3,7 @@
 #define TEXT_H
 
 #include <stdint.h>
-
-static inline uint16_t le16(const uint8_t *p)
-{
-    return (uint16_t)(p[0] | p[1] << 8);
-}
-
-static inline uint32_t le32(const uint8_t *p)
-{
-    return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
-}
+#include "bytes.h"
 
 /* Code point c in UTF-8 at d[*o], when it fits in max - 1 bytes (room for the final 0): 1, and
  * *o moves past it; else 0 */

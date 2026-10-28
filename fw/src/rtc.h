@@ -18,8 +18,6 @@ void rtc_service(void);                 /* from the idle loop: read again every 
  * (still given), -1 without a clock */
 int rtc_get(struct rtc_tm *t);
 int rtc_set(const struct rtc_tm *t);    /* 0, or < 0 */
-uint32_t rtc_seconds(const struct rtc_tm *t);       /* since 2000-01-01 00:00:00 */
-void rtc_from_seconds(uint32_t s, struct rtc_tm *t);
 /* From the newest last-write time of the root directory after a USB session (FAT date << 16 |
  * time, local time of the PC): sets the clock when it is not valid or late by more than a minute.
  * Returns 1 when it was set. */

@@ -104,6 +104,11 @@ int usb_in(const void *buf, uint32_t len)
     return 0;
 }
 
+/* The device's shared 64 KiB buffer at a fixed address (shared.h): host memory here */
+#define SHARED_H
+static uint32_t shared_usb[16384];
+#define SHARED_USB shared_usb
+
 #include "../src/msc.c"
 
 /* ---- host side ---- */

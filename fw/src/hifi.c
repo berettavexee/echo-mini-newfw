@@ -18,10 +18,14 @@
 #define HIGHRAM0   0x01000000u
 #define HIGHRAM1   0x01020000u
 
-uint32_t hifi_data_size, hifi_hz;
+static uint32_t hifi_data_size;
+uint32_t hifi_hz;
 static int powered;
 
-void hifi_power(void)
+static uint32_t hifi_div = 4;                   /* core B clock divider, see hifi_set_div() */
+static uint32_t hifi_own_forget(void);
+
+static void hifi_power(void)
 {
     if (powered)
         return;
@@ -54,7 +58,6 @@ void hifi_power(void)
 
 void hifi_prepare(void)
 {
-    extern uint32_t hifi_own_forget(void);
     hifi_own_forget();
     hifi_power();
     hifi_stop();
@@ -83,7 +86,6 @@ void hifi_stop(void)
 /* A long pause (ui.c): core B in reset, the clocks of core B, its accelerators, the HIGHRAM and
  * the PD_HIGH bus gated (the RAM keeps its contents). Nothing on core A touches PD_HIGH until
  * hifi_power(), which starts over; our codec is loaded again. */
-uint32_t hifi_own_forget(void);
 
 void hifi_sleep(void)
 {
@@ -214,7 +216,7 @@ void hifi_ring(void)
 }
 
 /* hifi_prepare() resets the HIGHRAM: our codec image is gone */
-uint32_t hifi_own_forget(void)
+static uint32_t hifi_own_forget(void)
 {
     uint32_t c = own_codec;
     own_codec = 0;
@@ -226,7 +228,6 @@ uint32_t hifi_own_forget(void)
  * inter_con0 bits 14 caliram = HIGHRAM0, 15 caldram = HIGHRAM1, cleared by clock_init and
  * clock_slow; the stock firmware sets it only from 300 MHz): about 22 % less load. Switching
  * that wait state while core B runs gave its bus faults (0.72, ETUDE §51). */
-uint32_t hifi_div = 4;
 
 void hifi_set_div(uint32_t div)
 {

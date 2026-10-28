@@ -1,4 +1,5 @@
 /* Board support: pins, clocks, delays, keys, ADC, power. */
+#include <string.h>
 #include "board.h"
 #include "regs.h"
 

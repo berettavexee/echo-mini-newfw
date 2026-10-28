@@ -144,6 +144,16 @@ Last update: 2026-10-28, version 0.89.
   page early, about 0.5 s on average), so nothing is decoded for nothing; the page found by an
   exact search in fewer reads, past the cover picture. Silence after a seek on the device: 166 to
   204 ms in Vorbis, 310 to 339 ms in Opus (450 to 830 ms in 0.88); 52 seeks, no error.
+- 0.90: lists (browser, main menu, firmware installer): the position "selected/total" in the
+  title bar, a scroll bar when the list is longer than the screen. On the device: fine but a
+  remainder of the selection colour beside the scroll bar, fixed in 0.91.
+- 0.91: quality pass: `make check` / `make check-full` (`fw/tools/check.sh`: warnings as
+  errors, BSS room, log formats, host tests, the test variants and fuzzing harnesses, ruff,
+  codespell, dead code) and a pre-commit hook; stricter warnings fixed; 8 KiB of BSS freed
+  (one buffer for the Ogg scans); shared byte-order helpers and accelerator addresses;
+  `main.c` split (`install.c`, `usbmode.c`); header dependencies tracked by the Makefile;
+  `ECHO_PROBE`, `SD_WALK`, the Vorbis fuzzing harnesses and `msc_test` built again. Works on
+  the device (the scroll bar fixed).
 
 ## To do
 

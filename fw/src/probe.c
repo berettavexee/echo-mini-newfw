@@ -17,8 +17,6 @@
 #include "update.h"
 #include "version.h"
 
-#define REG(a) (*(volatile uint32_t *)(a))
-
 static struct probe_msg req, ans;
 static uint32_t box_lba, box_on, served;
 static char pending[13];

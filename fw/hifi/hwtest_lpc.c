@@ -3,13 +3,8 @@
  * compared with dr_flac's samples; counts per order, times (HIFIACC against dr_flac's own
  * prediction), the first difference and the first order-1 difference go to ctl->hwt, which core
  * A logs. The output stays dr_flac's. Included by codec_flac.c. */
-#define HACC        0x01060000u
-#define HACC_FIN    0x01060040u
-#define HACC_FOUT   0x010600a0u
-#define HACC_COEF   0x0106b000u
-#define DMA         0x01070000u
-#define DMA_CH(c)   (DMA + (c) * 0x58u)
-#define TIMER_NOW() (~REG(0x400e0028u))         /* TIMER1, 24 MHz */
+#include "accel.h"
+
 #define HWT_MAX_N   10240u                      /* larger blocks are counted as skipped */
 #define HWT_SEG     8191u                       /* HIFIACC's length field: 13 bits */
 #define HWT_CHUNK   2048u                       /* words per DMA block (LLI chain) */
@@ -70,9 +65,9 @@ static int hwt_run(const int32_t *in, int32_t *out, uint32_t n, uint32_t order, 
     REG(HACC + 0x0c) = 0xa0000000u | n << 15 | 3;   /* start */
     REG(DMA + 0x3a0) = 0x202;                   /* ChEnReg: channel 1, then 0 */
     REG(DMA + 0x3a0) = 0x101;
-    uint32_t t0 = TIMER_NOW();
+    uint32_t t0 = TIMER1_NOW();
     int ok = 0;
-    while (TIMER_NOW() - t0 < 5 * 24000u)       /* 5 ms (a 4608 block takes about 0.2 ms) */
+    while (TIMER1_NOW() - t0 < 5 * 24000u)       /* 5 ms (a 4608 block takes about 0.2 ms) */
         if ((REG(DMA + 0x2c0) & 1) && (REG(HACC + 0x08) & 0x8000)) {
             ok = 1;
             break;
@@ -89,7 +84,7 @@ void echo_lpc_hook(const int *y, unsigned n, unsigned bps, unsigned order, int s
 {
     volatile __typeof__(ctl->hwt) *h = &ctl->hwt;
     if (h->magic != HWT_MAGIC) {
-        memset((void *)h, 0, sizeof *h);
+        memset((void *)(uintptr_t)h, 0, sizeof *h);
         h->magic = HWT_MAGIC;
         hwt_timeouts = 0;
     }
@@ -111,7 +106,7 @@ void echo_lpc_hook(const int *y, unsigned n, unsigned bps, unsigned order, int s
             acc += (int64_t)qlp[j] * y[i - 1 - j];
         hwt_x[i] = y[i] - (int32_t)(acc >> shift);
     }
-    uint32_t t2 = TIMER_NOW();
+    uint32_t t2 = TIMER1_NOW();
     for (uint32_t k = 0; k < order; k++)        /* reverse order: COEF[k] weighs y[n-order+k] */
         REG(HACC_COEF + 4 * k) = (uint32_t)qlp[order - 1 - k];
     for (uint32_t k = order; k < 32; k++)       /* HW5: the unused taps to 0 (order 1 read a */
@@ -131,7 +126,7 @@ void echo_lpc_hook(const int *y, unsigned n, unsigned bps, unsigned order, int s
         s = from + len;
         segs++;
     }
-    uint32_t t3 = TIMER_NOW();
+    uint32_t t3 = TIMER1_NOW();
     if (segs > 1)
         h->split++;
     if (order > h->max_order)

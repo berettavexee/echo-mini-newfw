@@ -166,9 +166,9 @@ void play_stop(int how)
     q_playing = 0;
 }
 
-/* Plays track i of the queue; one that does not open is passed over in the direction dir (+1, or
+/* Plays track i of the queue; one that does not open is passed over in the direction step (+1, or
  * -1 for BACK: a failing track before does not send it forward again) */
-void play_step(int i, int dir)
+void play_step(int i, int step)
 {
     int keep = q_playing && audio.on;
     parked = 0;
@@ -183,7 +183,7 @@ void play_step(int i, int dir)
     }
     int r;
     while ((r = q_open(q_dec, keep)) < 0) {
-        q_dec += dir;
+        q_dec += step;
         if (++q_errors > 8 || q_dec < 0 || q_dec >= q_n) {
             play_stop(STOP_NOW);
             q_cur = q_dec = i;                  /* none would open: stay on the one chosen */

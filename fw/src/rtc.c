@@ -25,12 +25,12 @@ static uint32_t days(unsigned y, unsigned m, unsigned d)
     return n;
 }
 
-uint32_t rtc_seconds(const struct rtc_tm *t)
+static uint32_t rtc_seconds(const struct rtc_tm *t)
 {
     return days(t->year, t->mon, t->day) * 86400u + t->hour * 3600u + t->min * 60u + t->sec;
 }
 
-void rtc_from_seconds(uint32_t s, struct rtc_tm *t)
+static void rtc_from_seconds(uint32_t s, struct rtc_tm *t)
 {
     uint32_t d = s / 86400, r = s % 86400;
     t->hour = (uint8_t)(r / 3600);

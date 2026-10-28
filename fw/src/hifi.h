@@ -7,7 +7,6 @@
 
 enum { HIFI_EIMG = -40, HIFI_EREAD = -41, HIFI_ETIMEOUT = -42, HIFI_EPROTO = -43 };
 
-void hifi_power(void);          /* PD_HIGH on, clocks, core B held in reset (once) */
 void hifi_stop(void);           /* core B back in reset */
 void hifi_sleep(void);          /* reset and PD_HIGH clocks gated, until hifi_power() */
 void hifi_prepare(void);        /* PD_HIGH on, every HiFi block reset, core B held */
@@ -24,7 +23,7 @@ static inline void *hifi_ptr(uint32_t a)
     return (void *)(a < 0x20000 ? a + 0x01000000 : a);
 }
 
-extern uint32_t hifi_data_size, hifi_hz, hifi_div;
+extern uint32_t hifi_hz;
 void hifi_set_div(uint32_t div);   /* core B at PLL / div (400 MHz / 1..8) */
 
 #endif

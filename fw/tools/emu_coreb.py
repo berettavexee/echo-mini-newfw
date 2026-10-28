@@ -55,7 +55,7 @@ class Shared:
 
 
 class CoreB(emu_host.Hifi):
-    def __init__(self, sh, trace=False):                          # noqa: super().__init__ not used
+    def __init__(self, sh, trace=False):                          # super().__init__ not called
         self.sh, self.trace = sh, trace
         self.mb = sh.mb
         self.msgs = []

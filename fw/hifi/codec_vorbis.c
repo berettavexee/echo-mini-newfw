@@ -13,6 +13,7 @@
  * codec loaded, Tremor writing into its setup) fails the checksum: the headers are decoded. */
 #include <string.h>
 #include "rt.h"
+#include "hooks.h"
 #include "oggpage.h"
 #include "ivorbiscodec.h"
 #include "codec_internal.h"
@@ -24,11 +25,6 @@
 
 const uint32_t codec_id = HP_CODEC_VORBIS;
 
-void heap_reset(void);
-uint32_t heap_keep(void);
-void heap_resume(uint32_t floor, uint32_t cur);
-const uint8_t *heap_base(void);
-extern uint32_t heap_peak, heap_cur;
 
 #define CACHE_MAGIC 0x56424331u         /* "1CBV" */
 #define IDENT_MAX   64
@@ -117,7 +113,7 @@ static uint32_t start_trim(void)
         granule = granule << 8 | h[6 + i];
     int64_t sum = 0;
     uint32_t off = 27 + h[26], start = off;
-    long last = -1;
+    long prev = -1;
     for (int i = 0; i < h[26]; i++) {
         off += lace[i];
         if (lace[i] == 255)
@@ -126,9 +122,9 @@ static uint32_t start_trim(void)
             (b >> 1 & ((1 << modebits) - 1)) >= ci->modes)
             return 0;                           /* not an audio packet */
         long bs = ci->blocksizes[ci->mode_param[b >> 1 & ((1 << modebits) - 1)].blockflag];
-        if (last >= 0)
-            sum += (last + bs) >> 2;
-        last = bs;
+        if (prev >= 0)
+            sum += (prev + bs) >> 2;
+        prev = bs;
         start = off;
     }
     return granule >= 0 && sum > granule ? (uint32_t)(sum - granule) : 0;

@@ -6,11 +6,12 @@
  * output has the exact length of the source. 16-bit stereo packed frames, mono duplicated. */
 #include <string.h>
 #include "rt.h"
+#include "../src/bytes.h"
+#include "hooks.h"
 #if defined(ECHO_SYNTH) && !defined(ECHO_HWTEST) && !defined(ECHO_HWSYN)
 #include "mp3synth.c"
 #endif
 #if defined(ECHO_HWTEST) || defined(ECHO_HWSYN)
-#define REG(a) (*(volatile uint32_t *)(a))
 #include "hwtest_synth.c"
 #endif
 #include "pvmp3decoder_api.h"
@@ -36,7 +37,7 @@ static int header(const uint8_t *p, struct frame *f)
     static const uint16_t br1[15] = { 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320 };
     static const uint16_t br2[15] = { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 };
     static const uint16_t sr[3] = { 44100, 48000, 32000 };
-    uint32_t h = (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
+    uint32_t h = be32(p);
     uint32_t ver = h >> 19 & 3, layer = h >> 17 & 3, bri = h >> 12 & 15, sri = h >> 10 & 3;
     if ((h >> 21) != 0x7ff || ver == 1 || layer != 1 || bri == 0 || bri == 15 || sri == 3)
         return 0;
@@ -48,11 +49,6 @@ static int header(const uint8_t *p, struct frame *f)
     f->mode = h >> 6 & 3;
     f->crc = !(h >> 16 & 1);
     return 1;
-}
-
-static uint32_t be32(const uint8_t *p)
-{
-    return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3];
 }
 
 /* At least n bytes in the window, fewer only at the end of the input */

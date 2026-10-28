@@ -54,14 +54,14 @@ void ui_power_off(void)
     resume_save();
 }
 
-static const char *find_name;
+static char *find_name;
 static uint32_t find_cluster;
 static struct fat_dir *find_dir;
 static int find_entry(const struct fat_dirent *d, void *ctx)
 {
     (void)ctx;
     if ((d->attr & FAT_ATTR_DIR) && d->cluster == find_cluster) {
-        copy_name((char *)find_name, d->name, 64);
+        copy_name(find_name, d->name, 64);
         fat_dir_of(d, find_dir);
         return 1;
     }
@@ -77,7 +77,7 @@ void resume_load(void)
          __builtin_memcmp(r->magic, "NEWFWSTATE 2", 12)) || (r->depth & 0xff) >= DEPTH_MAX - 1)
         return;
     /* state 2 (before 0.58): no top level, index 0 was the internal root */
-    int old = r->magic[11] == '2', saved = (int)(r->depth & 0xff) + old, vol = (int)(r->depth >> 8);
+    int old = r->magic[11] == '2', saved = (int)(r->depth & 0xff) + old, v = (int)(r->depth >> 8);
     rs_last_sum = r->sum;
     if (r->level <= 0xfe)
         play_level = (int)r->level;
@@ -86,8 +86,8 @@ void resume_load(void)
     if ((r->mode >> 8) < RG_MODES)
         rg_mode = (int)(r->mode >> 8);
     if (old)
-        vol = FAT_VOL_INT;
-    if (!saved || vol > FAT_VOL_SD || (vol == FAT_VOL_SD && sd_open())) {
+        v = FAT_VOL_INT;
+    if (!saved || v > FAT_VOL_SD || (v == FAT_VOL_SD && sd_open())) {
         depth = 0;                              /* the top level (or the card is gone) */
         path[0].sel = old ? 0 : r->sel[0];
         dir_load(&path[0].dir);
@@ -96,7 +96,7 @@ void resume_load(void)
         log_printf("ui: resume: top level (%d saved)", saved);
         return;
     }
-    path_root(vol);
+    path_root(v);
     path[1].sel = r->sel[1 - old];
     path[1].top = r->top[1 - old];
     for (int i = 2; i <= saved; i++) {          /* the folder names, from their parents */
@@ -115,7 +115,7 @@ void resume_load(void)
     if (path[depth].sel >= dir_n)
         path[depth].sel = path[depth].top = 0;
     log_printf("ui: resume: %s, depth %d (%d saved), track %x at %u ms, playing %u, -%u dB",
-               vol == FAT_VOL_SD ? "card" : "internal", depth, saved, r->track, r->pos_ms,
+               v == FAT_VOL_SD ? "card" : "internal", depth, saved, r->track, r->pos_ms,
                r->playing, (uint32_t)play_level / 2);
     if (!r->track || depth != saved)
         return;

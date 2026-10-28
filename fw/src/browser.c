@@ -72,8 +72,9 @@ static uint32_t codec_of(const char *name)
 
 /* ---- directory listing (in .dirbuf) ---- */
 #define NAME_KEEP 72                            /* bytes of a name kept (the screen shows ~40) */
-struct dir_buf dir __attribute__((section(".dirbuf")));
-int dir_n, dir_full;
+static struct dir_buf dir __attribute__((section(".dirbuf")));
+int dir_n;
+static int dir_full;
 static uint32_t dir_pool_used;
 
 const char *ent_name(int i)
@@ -161,7 +162,7 @@ static void dir_sort(void)
 }
 
 /* The top level (ETUDE §38): the internal volume, then the card when one is in */
-int sd_bad;                                     /* the card in did not mount */
+static int sd_bad;                              /* the card in did not mount */
 
 static void top_entry(const char *name, uint16_t flags)
 {
@@ -207,7 +208,7 @@ void dir_of_entry(const struct entry *e, struct fat_dir *d)
     d->size = e->flags & F_VOLROOT ? 0 : e->size;
 }
 
-int same_file(const struct entry *a, const struct entry *b)
+static int same_file(const struct entry *a, const struct entry *b)
 {
     return a->cluster == b->cluster && (a->flags & F_SD) == (b->flags & F_SD);
 }
@@ -327,13 +328,13 @@ void draw_browser(void)
 }
 
 /* path[1]: the root of a volume */
-void path_root(int vol)
+void path_root(int v)
 {
     depth = 1;
-    path[0].sel = vol == FAT_VOL_SD;
+    path[0].sel = v == FAT_VOL_SD;
     path[0].top = 0;
-    fat_root(vol, &path[1].dir);
-    copy_name(path[1].name, vol == FAT_VOL_SD ? "SD card" : "Internal", sizeof path[1].name);
+    fat_root(v, &path[1].dir);
+    copy_name(path[1].name, v == FAT_VOL_SD ? "SD card" : "Internal", sizeof path[1].name);
     path[1].sel = path[1].top = 0;
 }
 

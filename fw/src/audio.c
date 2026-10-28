@@ -309,7 +309,7 @@ static void dma_start(void)
     REG(CH_EN) = 1u << (8 + 5) | 1u << 5;
 }
 
-uint32_t audio_dma_pos(void)
+static uint32_t audio_dma_pos(void)
 {
     return REG(CH_SAR) - audio.ring;
 }

@@ -1,8 +1,7 @@
-/* Step 3, first image: boot, power, clocks, panel, keys and ADC on a test screen, and a
- * firmware installer reading *.IMG files from the root of the internal volume.
- * No sound, no USB. The only flash writes are the installer's, inside the firmware area. */
+/* Boot (clocks, storage, internal volume, log), then the user interface (ui.c); the system
+ * functions it calls (sys.h): idle housekeeping, power and screen, the test screen; and the
+ * fault screen. The firmware installer is in install.c, the USB disk mode in usbmode.c. */
 #include <stdint.h>
-#include "audio.h"
 #include "board.h"
 #include "emmc.h"
 #include "fat.h"
@@ -10,21 +9,14 @@
 #include "i2c.h"
 #include "lcd.h"
 #include "log.h"
-#include "msc.h"
-#include "player.h"
-#include "hifi.h"
 #include "regs.h"
 #include "rtc.h"
 #include "sd.h"
-#include "update.h"
-#include "usb.h"
 #include "version.h"
 #include "sys.h"
 #include "keys.h"
-#ifdef ECHO_PROBE
-#include "probe.h"
-#endif
 #include "ui.h"
+#include "sys_priv.h"
 
 extern uint32_t boot_regs[4], boot_tag;
 
@@ -55,7 +47,7 @@ char *put_hex(char *p, uint32_t v, int digits)
 }
 
 /* One text line, padded with the background up to the right edge */
-static void line(int y, const char *s, uint16_t fg)
+void sys_line(int y, const char *s, uint16_t fg)
 {
     int x = lcd_text(4, y, s, fg, BG);
     lcd_fill(x, y, LCD_W - x, 16, BG);
@@ -67,7 +59,7 @@ static void line(int y, const char *s, uint16_t fg)
 static char status_text[STATUS_LINES][64];
 static uint16_t status_fg[STATUS_LINES];
 
-static void status_line(int i, int y, const char *s, uint16_t fg)
+void sys_status_line(int i, int y, const char *s, uint16_t fg)
 {
     int n = 0;
     while (s[n] && s[n] == status_text[i][n])
@@ -77,18 +69,19 @@ static void status_line(int i, int y, const char *s, uint16_t fg)
     for (n = 0; (status_text[i][n] = s[n]); n++)
         ;
     status_fg[i] = fg;
-    line(y, s, fg);
+    sys_line(y, s, fg);
 }
 
-static void status_reset(void)
+void sys_status_reset(void)
 {
     for (int i = 0; i < STATUS_LINES; i++)
         status_text[i][0] = (char)0xff;
 }
 
-static int fast, storage_err = 1, volume_err = 1, volume_dirty;
+static int fast, volume_dirty;
+int storage_err = 1, volume_err = 1;
 
-static void volume_init(void)
+void sys_volume_init(void)
 {
     volume_err = fat_mount(EMMC_FW1 + emmc.p);
     volume_dirty = volume_err ? 0 : fat_dirty();
@@ -122,7 +115,7 @@ static void storage_init(void)
     int r = emmc_sectors(&total);
     log_printf("emmc: %u sectors (%d); IDB copy %d: P %x R %x", total, r, emmc.idb_copy, emmc.p,
                emmc.r);
-    volume_init();
+    sys_volume_init();
 #ifdef SD_WALK
     sd_test();
 #endif
@@ -132,9 +125,9 @@ static void draw_static(void)
 {
     char b[64], *p;
 
-    status_reset();
+    sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    line(0, FW_NAME " " FW_VERSION " (" FW_DATE ")", TITLE);
+    sys_line(0, FW_NAME " " FW_VERSION " (" FW_DATE ")", TITLE);
     p = put_str(b, "CPU ");
     p = put_dec(p, cpu_hz / 1000000);
     p = put_str(p, fast ? " MHz" : " MHz (fallback)");
@@ -147,7 +140,7 @@ static void draw_static(void)
         p = put_hex(p, pll_con1 & 0xffff, 4);
     }
     *p = 0;
-    line(16, b, fast && cpu_hz == 200000000 ? FG : WARN);
+    sys_line(16, b, fast && cpu_hz == 200000000 ? FG : WARN);
     if (storage_err) {
         p = put_str(b, "eMMC/IDB error ");
         p = put_dec(p, -storage_err);
@@ -174,8 +167,8 @@ static void draw_static(void)
         }
     }
     *p = 0;
-    line(32, b, storage_err || volume_err || volume_dirty ? WARN : FG);
-    line(154, "any key: back", DIM);
+    sys_line(32, b, storage_err || volume_err || volume_dirty ? WARN : FG);
+    sys_line(154, "any key: back", DIM);
 }
 
 static uint32_t draw_us;                        /* last status refresh that drew something */
@@ -192,7 +185,7 @@ static void draw_status(void)
     p = put_str(p, ")  power ");
     p = put_str(p, power_key() ? "ON" : "-");
     *p = 0;
-    status_line(0, 48, b, FG);
+    sys_status_line(0, 48, b, FG);
     p = put_str(b, "battery ");
     p = put_dec(p, mv);
     p = put_str(p, " mV  usb ");
@@ -200,7 +193,7 @@ static void draw_status(void)
     p = put_str(p, "  chg ");
     p = put_dec(p, gpio_get(PIN_CHARGING));
     *p = 0;
-    status_line(1, 64, b, mv && mv < 3400 ? WARN : FG);
+    sys_status_line(1, 64, b, mv && mv < 3400 ? WARN : FG);
     p = put_str(b, "jack 3.5 ");
     p = put_str(p, gpio_get(PIN_JACK35) ? "in" : "-");
     p = put_str(p, "  4.4 ");
@@ -210,7 +203,7 @@ static void draw_status(void)
     p = put_str(p, " adc3 ");
     p = put_dec(p, adc_read(3));
     *p = 0;
-    status_line(2, 80, b, FG);
+    sys_status_line(2, 80, b, FG);
     uint32_t s = ticks() / 1000000;
     p = put_str(b, "up ");
     p = put_dec(p, s / 60);
@@ -227,291 +220,7 @@ static void draw_status(void)
         p = put_dec(p, (uint32_t)-logs.error);
     }
     *p = 0;
-    status_line(3, 96, b, logs.attached ? DIM : WARN);
-}
-
-static void message(int y, const char *s, uint16_t fg)
-{
-    line(y, s, fg);
-}
-
-/* ---- firmware menu ---- */
-#define MAX_IMG 32
-#define IMG_ROWS 8                              /* rows of 16 px from y = 18, above the help line */
-
-struct img_list {
-    struct fat_file f[MAX_IMG];
-    int n;
-};
-
-static int is_img(const char *name)
-{
-    int n = 0;
-    while (name[n])
-        n++;
-    return n > 4 && name[n - 4] == '.' && name[n - 3] == 'I' && name[n - 2] == 'M' && name[n - 1] == 'G';
-}
-
-static int collect(const struct fat_file *f, void *ctx)
-{
-    struct img_list *l = ctx;
-    if (is_img(f->name) && f->size >= 0x200)
-        l->f[l->n++] = *f;
-    return l->n == MAX_IMG;
-}
-
-static void progress(int stage, uint32_t done, uint32_t total)
-{
-    static const char *const what[] = { "checking CRC", "writing FW2", "writing FW1" };
-    char b[48], *p = put_str(b, what[stage]);
-    p = put_str(p, " ");
-    p = put_dec(p, (uint32_t)((uint64_t)done * 100 / total));
-    p = put_str(p, " %");
-    *p = 0;
-    message(112, b, FG);
-    int w = (int)((uint64_t)done * (LCD_W - 8) / total);
-    lcd_fill(4, 130, w, 6, stage ? WARN : TITLE);
-}
-
-static char *put_date(char *p, const struct fw_info *in)
-{
-    p = put_hex(p, in->year, 4);
-    *p++ = '-';
-    p = put_hex(p, in->month, 2);
-    *p++ = '-';
-    return put_hex(p, in->day, 2);
-}
-
-/* Returns when the user goes back; reboots after a successful install */
-static void firmware_menu(void)
-{
-    static struct img_list l;
-    struct fw_info info;
-    char b[64], *p;
-    int sel = 0, top = 0;
-
-    l.n = 0;
-    if (!storage_err && !volume_err)
-        fat_list_root(collect, &l);
-    for (;;) {
-        lcd_fill(0, 0, LCD_W, LCD_H, BG);
-        line(0, "Install firmware (*.IMG, internal root)", TITLE);
-        if (storage_err || volume_err)
-            line(32, "internal volume not available", WARN);
-        else if (!l.n)
-            line(32, "no .IMG file in the root folder", WARN);
-        if (l.n) {                              /* "selected/count" right-aligned */
-            p = put_dec(b, (uint32_t)sel + 1);
-            *p++ = '/';
-            p = put_dec(p, (uint32_t)l.n);
-            *p = 0;
-            lcd_text(LCD_W - 4 - lcd_text_width(b), 0, b, DIM, BG);
-        }
-        for (int i = top; i < l.n && i < top + IMG_ROWS; i++) {
-            uint16_t bg = i == sel ? SEL_BG : BG;
-            int y = 18 + 16 * (i - top);
-            p = put_str(b, l.f[i].name);
-            p = put_str(p, "  ");
-            p = put_dec(p, l.f[i].size >> 10);
-            p = put_str(p, " KiB");
-            *p = 0;
-            lcd_fill(0, y, 4, 16, bg);
-            lcd_text_clip(4, y, b, list_text_end(l.n, IMG_ROWS), FG, bg);
-        }
-        list_scrollbar(18, IMG_ROWS, top, l.n);
-        line(154, "VOL+/VOL-: choose  PLAY: check  BACK", DIM);
-
-        int k;
-        while (!(k = key_edge()))
-            wdt_kick();
-        if (k == KEY_BACK)
-            return;
-        if (k == KEY_VOLUP)                     /* the list wraps around */
-            list_move(&sel, &top, l.n, IMG_ROWS, -1);
-        if (k == KEY_VOLDOWN)
-            list_move(&sel, &top, l.n, IMG_ROWS, 1);
-        if (k != KEY_PLAY || !l.n)
-            continue;
-
-        lcd_fill(0, 18, LCD_W, 152, BG);
-        p = put_str(b, l.f[sel].name);
-        *p = 0;
-        line(18, b, FG);
-        int r = fw_check(&l.f[sel], &info, progress);
-        log_printf("install: %s, %u bytes: check %d (%s)", l.f[sel].name, l.f[sel].size, r,
-                   r ? upd_error(r) : "valid");
-        if (r) {
-            message(112, upd_error(r), WARN);
-            line(154, "BACK: return", DIM);
-            while (key_edge() != KEY_BACK)
-                wdt_kick();
-            continue;
-        }
-        p = put_str(b, "valid image, ");
-        p = put_date(p, &info);
-        p = put_str(p, ", ");
-        p = put_dec(p, info.fw_size >> 20);
-        p = put_str(p, " MiB");
-        *p = 0;
-        line(36, b, FG);
-        line(54, info.two_copies ? "writes FW2, then FW1" : "too big for FW2: writes FW1 only", FG);
-        unsigned mv = battery_mv();
-        if (!vbus() && mv < 3600) {
-            message(80, "battery too low: plug the USB cable", WARN);
-            line(154, "BACK: return", DIM);
-            while (key_edge() != KEY_BACK)
-                wdt_kick();
-            continue;
-        }
-        line(80, "do not power off during the install", WARN);
-        line(154, "PLAY: install   BACK: cancel", DIM);
-        while ((k = key_edge()) != KEY_PLAY && k != KEY_BACK)
-            wdt_kick();
-        if (k == KEY_BACK)
-            continue;
-        line(154, "", DIM);
-        log_printf("install: writing %s: fw_end %x, %u bytes, %s", l.f[sel].name, info.fw_end,
-                   info.fw_size, info.two_copies ? "FW2 then FW1" : "FW1 only");
-        log_flush();
-        uint32_t t0 = millis();
-        r = fw_install(&l.f[sel], &info, progress);
-        log_printf("install: result %d (%s) in %u ms", r, r ? upd_error(r) : "ok", millis() - t0);
-        log_flush();
-        if (r) {
-            message(112, upd_error(r), WARN);
-            message(130, "restart, then install again", WARN);
-            line(154, "BACK: return", DIM);
-            while (key_edge() != KEY_BACK)
-                wdt_kick();
-            continue;
-        }
-        message(112, "installed: restarting", TITLE);
-        mdelay(1500);
-        clock_fast_ok();                        /* this loop skips sys_idle(): a restart on */
-        reboot();                               /* purpose is not a failed 200 MHz attempt */
-    }
-}
-
-/* ---- USB disk: the user volume, read only ---- */
-static void usb_screen(void)
-{
-    char b[64], *p;
-
-    p = put_str(b, usb.configured ? "configured, " : "waiting for the host, ");
-    p = put_str(p, usb.high_speed ? "high speed" : "full speed");
-    *p = 0;
-    status_line(0, 36, b, usb.configured ? FG : DIM);
-    p = put_str(b, "cmds ");
-    p = put_dec(p, msc.commands);
-    p = put_str(p, "  read ");
-    p = put_dec(p, msc.read_sectors / 2048);
-    p = put_str(p, "  written ");
-    p = put_dec(p, msc.written_sectors / 2048);
-    p = put_str(p, " MiB");
-    *p = 0;
-    status_line(1, 52, b, FG);
-    p = put_str(b, "op ");
-    p = put_hex(p, msc.last_op, 2);
-    p = put_str(p, "  errors ");
-    p = put_dec(p, msc.errors);
-    p = put_str(p, "  resets ");
-    p = put_dec(p, usb.resets);
-    p = put_str(p, "  setups ");
-    p = put_dec(p, usb.setups);
-    *p = 0;
-    status_line(2, 68, b, msc.errors ? WARN : DIM);
-    p = put_str(b, "disk @");
-    p = put_hex(p, msc.base, 6);
-    p = put_str(p, " ");
-    p = put_dec(p, msc.count / 2048);
-    p = put_str(p, " MiB");
-    *p = 0;
-    status_line(3, 84, b, DIM);
-}
-
-/* writable: the host may write the user volume (and only it: emmc_write_user's fence) */
-static void usb_mode(int writable)
-{
-    uint32_t total = 0;
-
-    status_reset();
-    lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    line(0, writable ? "USB disk (read/write)" : "USB disk (read only)", writable ? WARN : TITLE);
-    if (storage_err || volume_err || emmc_sectors(&total) || total <= vol.base) {
-        line(36, "internal volume not available", WARN);
-        mdelay(2000);
-        return;
-    }
-    if (!vbus()) {
-        line(36, "plug the USB cable", WARN);
-        mdelay(2000);
-        return;
-    }
-    line(154, "BACK: exit (eject on the computer first)", DIM);
-    if (writable)
-        line(122, "eject on the computer before unplugging", WARN);
-    if (msc_start(vol.base, total - vol.base, writable)) {
-        line(36, "write fence refused: volume inside the system area", WARN);
-        log_printf("usb: write fence refused for %x + %u", vol.base, total - vol.base);
-        mdelay(3000);
-        return;
-    }
-    log_printf("usb: %s disk, sectors %x + %u", writable ? "read/write" : "read only", vol.base,
-               total - vol.base);
-#ifdef ECHO_PROBE
-    probe_attach(vol.base);                     /* before the host owns the volume */
-#endif
-    log_detach();                               /* the host owns the volume from here */
-    usb_start();
-    uint32_t t_draw = 0, t_key = 0, t_eject = 0, t0 = millis(), configured_at = 0;
-    const char *why = "?";
-    for (;;) {
-        wdt_kick();
-        msc_poll();
-        uint32_t now = ticks();
-        if (usb.configured && !configured_at) {
-            configured_at = millis();
-            log_printf("usb: configured after %u ms, %s speed", configured_at - t0,
-                       usb.high_speed ? "high" : "full");
-        }
-        if (now - t_key > 10000) {
-            t_key = now;
-            if (!vbus()) {
-                why = "cable unplugged";
-                break;
-            }
-            if (key_edge() == KEY_BACK) {
-                why = "BACK";
-                break;
-            }
-        }
-        if (now - t_draw > 250000) {
-            usb_screen();
-            t_draw = now;
-        }
-        /* The host stopped the bus (udisksctl power-off, port disabled): a mounted volume is
-         * polled every few seconds, so 5 s without activity means it is gone */
-        if (usb.suspended && now - usb.suspend_since > 5000000) {
-            why = "bus suspended 5 s";
-            break;
-        }
-        if (msc.ejected) {
-            if (!t_eject)
-                t_eject = now;
-            else if (now - t_eject > 500000) {
-                why = "ejected";
-                break;
-            }
-        }
-    }
-    usb_stop();
-    log_printf("usb: exit (%s) after %u s: %u commands, read %u written %u sectors, %u errors, "
-               "%u resets, %u setups", why, (millis() - t0) / 1000, msc.commands, msc.read_sectors,
-               msc.written_sectors, msc.errors, usb.resets, usb.setups);
-    volume_init();                              /* the host may have changed everything */
-#ifdef ECHO_PROBE
-    probe_after_usb();
-#endif
+    sys_status_line(3, 96, b, logs.attached ? DIM : WARN);
 }
 
 /* ---- for the user interface (sys.h) ---- */
@@ -556,7 +265,7 @@ void sys_idle(void)
             sys_t_power = now ? now : 1;
         else if (now - sys_t_power > 2000000) {
             sys_screen_set(1);
-            message(122, "power off", WARN);
+            sys_line(122, "power off", WARN);
             sys_power_off("Power 2 s");
             charge_screen(0);                   /* still powered: the USB cable is in */
         }
@@ -611,28 +320,6 @@ void sys_screen_set(int on)
     log_printf("screen %s", on ? "on" : "off");
 }
 
-static int newest_write(const struct fat_dirent *e, void *ctx)
-{
-    uint32_t *m = ctx;
-    if (e->mtime > *m)
-        *m = e->mtime;
-    return 0;
-}
-
-/* After a read/write session the clock may be set from what the computer wrote (rtc_from_fat) */
-void sys_usb(int writable)
-{
-    usb_mode(writable);
-    uint32_t newest = 0;
-    if (writable && !volume_err && !fat_list_dir(0, newest_write, &newest) && newest)
-        rtc_from_fat(newest);
-}
-
-void sys_install(void)
-{
-    firmware_menu();
-}
-
 void sys_screen(void)
 {
     draw_static();
@@ -651,7 +338,7 @@ void sys_screen(void)
 
 void sys_loader_usb(void)
 {
-    message(122, "USB loader mode (exit: RST)", WARN);
+    sys_line(122, "USB loader mode (exit: RST)", WARN);
     log_printf("reboot to the loader USB mode (main menu)");
     log_flush();
     mdelay(1000);

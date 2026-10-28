@@ -9,12 +9,9 @@
 
 #define RGB(r, g, b) ((uint16_t)((((r) & 0xf8) << 8) | (((g) & 0xfc) << 3) | ((b) >> 3)))
 
-extern uint32_t lcd_id;
-extern int lcd_variant;         /* 0 = A, 1 = B (id & 0xff0000 == 0xe80000) */
 extern int lcd_ready;
 
 void lcd_init(void);
-void lcd_set_timing(uint32_t hclk);
 void lcd_fill(int x, int y, int w, int h, uint16_t color);
 int lcd_text(int x, int y, const char *s, uint16_t fg, uint16_t bg);
 /* UTF-8 */

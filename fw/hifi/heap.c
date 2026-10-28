@@ -4,7 +4,9 @@
  * codebooks) can be kept from one track to the next, see heap_keep()/heap_resume(). */
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
+#include "hooks.h"
 
 #ifndef HEAP_SIZE
 #define HEAP_SIZE (88 * 1024)

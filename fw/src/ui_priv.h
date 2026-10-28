@@ -54,13 +54,11 @@ struct dir_buf {
     uint16_t order[DIR_MAX];
     char pool[81920];
 };
-extern struct dir_buf dir;
-extern int dir_n, dir_full;
+extern int dir_n;
 const char *ent_name(int i);                    /* the i-th entry shown, sorted */
 const struct entry *ent(int i);
 int dir_load(const struct fat_dir *d);
 void dir_of_entry(const struct entry *e, struct fat_dir *d);
-int same_file(const struct entry *a, const struct entry *b);
 
 #define VOL_TOP   2                             /* fat_dir.vol of the top level */
 #define DEPTH_MAX 16
@@ -71,9 +69,8 @@ struct path_level {
 };
 extern struct path_level path[DEPTH_MAX];
 extern int depth;                               /* path[depth] is the folder shown */
-extern int sd_bad;                              /* the card in did not mount */
 void copy_name(char *d, const char *s, int max);
-void path_root(int vol);                        /* path[1]: the root of a volume */
+void path_root(int v);                          /* path[1]: the root of a volume */
 int sd_open(void);                              /* the card set up and mounted, 0: ready */
 void sd_forget(void);                           /* set up again at the next access */
 int sd_watch(void);                             /* the detect switch: 1 redraw, 2 playback stopped */
@@ -114,7 +111,7 @@ extern uint32_t parked_ms;
 enum { STOP_NOW, STOP_SKIP, STOP_DRAIN };
 void play_stop(int how);
 void play_index(int i);
-void play_step(int i, int dir);
+void play_step(int i, int step);
 #define Q_EEMPTY (-60)                          /* an empty file (0 bytes) */
 extern char fail_name[64];                      /* nothing could be played: the banner */
 extern int fail_code, fail_due;

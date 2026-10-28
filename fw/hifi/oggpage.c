@@ -5,6 +5,7 @@
  * cover art instead of reading it. */
 #include <string.h>
 #include "rt.h"
+#include "../src/bytes.h"
 #include "oggpage.h"
 
 struct pg_state pg;
@@ -14,11 +15,6 @@ struct pg_state pg;
 void pg_reset(void)
 {
     memset(&pg, 0, sizeof pg);
-}
-
-static uint32_t le32(const uint8_t *p)
-{
-    return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
 }
 
 /* Next page header of our stream: 1, or 0 at the end of the input */

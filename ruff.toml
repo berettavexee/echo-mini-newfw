@@ -1,0 +1,5 @@
+line-length = 110
+
+[lint]
+# pyflakes and syntax errors: the checks of fw/tools/check.sh
+select = ["F", "E9"]

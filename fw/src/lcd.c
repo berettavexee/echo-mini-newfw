@@ -9,8 +9,8 @@
 #include "font.h"
 #include "regs.h"
 
-uint32_t lcd_id;
-int lcd_variant;
+static uint32_t lcd_id;
+static int lcd_variant;
 int lcd_ready;
 
 #define ROW_OFFSET 35   /* the 170 visible lines start at line 35 of the controller */
@@ -149,7 +149,7 @@ static void bus_to_vop(void)
 
 /* Timing of the MCU interface from the bus clock, as the stock firmware computes it:
  * n = hclk / 8 MHz, CS-to-strobe = n / 8, strobe width = n / 6, strobe-to-CS = n / 8. */
-void lcd_set_timing(uint32_t hclk)
+static void lcd_set_timing(uint32_t hclk)
 {
     uint32_t n = hclk / 8000000, csrw = n >> 3, rwpw = n / 6, rwcs = n >> 3;
 

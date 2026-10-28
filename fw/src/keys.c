@@ -13,7 +13,7 @@
 #define KEY_SETTLE_US   30000
 #define KEY_RELEASE_US  60000
 #define KEY_CHORD_US   100000
-unsigned key_adc;                               /* channel 1 when the key held was taken */
+static unsigned key_adc;                               /* channel 1 when the key held was taken */
 
 static const char *const key_names[] = { "none", "vol-", "vol+", "play", "menu", "back" };
 
@@ -22,7 +22,7 @@ const char *key_name(int k)
     return key_names[k];
 }
 
-int key_scan(void)
+static int key_scan(void)
 {
     static int raw = KEY_NONE, stable = KEY_NONE;
     static uint32_t since;
@@ -144,11 +144,6 @@ static uint32_t plug_since[3], plug_t;
 static int plug_read(int i)
 {
     return i == 0 ? gpio_get(PIN_JACK35) : i == 1 ? !gpio_get(PIN_JACK44) : vbus();
-}
-
-int plug_state(int src)
-{
-    return plug_in[src - SRC_JACK35];
 }
 
 static int plug_poll(int *src)

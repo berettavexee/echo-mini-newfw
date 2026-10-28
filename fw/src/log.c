@@ -44,7 +44,7 @@ static void ring_put(const char *s, uint32_t n)
     }
 }
 
-uint32_t log_pending(void)
+static uint32_t log_pending(void)
 {
     return R->wr - R->fl;
 }

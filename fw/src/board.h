@@ -59,4 +59,8 @@ void reboot(void);
 void reboot_loader_usb(void);
 void power_off(void);
 
+/* start.c's vector table: the SysTick interrupt, and the fault screen of main.c */
+void SysTick_Handler(void);
+void fault_screen(const uint32_t *frame, uint32_t exc);
+
 #endif

@@ -1,0 +1,4 @@
+[codespell]
+# English text and code; ETUDE.md is in French
+skip = ./ETUDE.md,./third_party,./work,./loader,./flash,./fwbase,./fw/build,./fw/font,./fw/hifi/ext,./docs/manual,*.png,*.jpg,*.bin,*.IMG,fft_tw.h,upsample_tab.h,hwtest_imdct_tab.h,./.git
+ignore-words-list = ans,nd,nam,synopsys,statics,clen

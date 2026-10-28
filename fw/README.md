@@ -9,7 +9,23 @@ our codecs on the HiFi core (`hifi/`). The study behind it is `../ETUDE.md` (in 
 
 Needs `arm-none-eabi-gcc` and Python 3. Output: `build/HIFIEC70.IMG` (FW1 image: main-core
 code, the pack of our codec images, the font). The codec sources are in `../third_party`.
-`EXTRA=-DSD_WALK` builds an emulator test of the microSD card (`src/sdtest.c`).
+`EXTRA=-DSD_WALK` builds an emulator test of the microSD card (`src/sdtest.c`). The objects
+depend on the headers they include and on the flags, so a change of `EXTRA` or of a header
+rebuilds what needs it; `BUILD=dir` builds into another folder.
+
+## Checks
+
+    make check          # before a commit
+    make check-full     # before a release: also the test variants and the fuzzing harnesses
+
+`tools/check.sh`: the image built with warnings as errors (our code also gets `-Wshadow
+-Wmissing-prototypes -Wcast-qual -Wundef`), at least 2 KiB of BSS left before the DAC ring,
+the `log_printf` formats checked against their arguments, the host tests `tools/log_test.c` and
+`tools/msc_test.c`, `ruff` (or `pyflakes`) on the Python tools and `codespell` when installed
+(`../ruff.toml`, `../.codespellrc`), and a list of the functions the linker drops. Each build
+goes into `build/check/`. `tools/pre-commit` runs the fast checks before each commit, and
+refuses the local-only folders and Rockchip SDK text; install it once with
+`ln -s ../../fw/tools/pre-commit .git/hooks/pre-commit`.
 
 The font is Fusion Pixel 12px proportional by TakWolf (`font/fusion-pixel-12px`, SIL Open
 Font License 1.1, see `OFL.txt` and `LICENSES/` there): Latin, Greek, Cyrillic, kana, CJK
@@ -21,7 +37,8 @@ into the code. Any copy of the image must ship with that license.
 
 | File | Role |
 |---|---|
-| `main.c` | start-up, storage, system screens, firmware installer and USB screens |
+| `main.c` | start-up, storage, power and screen, test screen, fault screen |
+| `install.c`, `usbmode.c` | firmware installer; USB disk mode and its screen |
 | `keys.c` | key ladder debouncing; events for the screens (press, long, repeat, chord, plugs in/out) |
 | `ui.c` | the main loop: events to the screen shown, drawing, power saving (shared state: `ui_priv.h`) |
 | `browser.c` | top level (internal memory, microSD card), folder listings, path, browser screen and keys |
@@ -76,7 +93,7 @@ guidance (Ogg, Vorbis, Opus, MP3, AAC, the MP4 container, the tags): `mkseeds.sh
 <target>`, then `build/<target>/fuzz SEEDS OUT SECONDS`. See `../docs/FUZZING.md`.
 
 The Makefile does not track the headers of the third-party decoders: after changing one (for
-instance `third_party/tremor-lowmem/codec_internal.h`), rebuild from clean (`rm -rf build`).
+instance `third_party/tremor-lowmem/codec_internal.h`), rebuild from clean (`make clean`).
 
 ## On the device
 

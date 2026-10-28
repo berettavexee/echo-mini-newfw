@@ -6,6 +6,7 @@
  * the start of .data. The data are copied again from their load address inside the code, and
  * the BSS cleared, so that the firmware does not depend on what the loader did. */
 #include <stdint.h>
+#include "board.h"
 #include "regs.h"
 
 extern uint32_t _sidata[], _sdata[], _edata[], _sbss[], _ebss[], _estack[];
@@ -13,8 +14,6 @@ extern int main(void);
 void Reset_Handler(void);
 void Default_Handler(void);
 void HardFault_Handler(void);
-void SysTick_Handler(void);
-void fault_screen(const uint32_t *frame, uint32_t exc);
 
 uint32_t boot_regs[4];          /* r0-r3 at entry, from the loader */
 uint32_t boot_tag;              /* PMU_SYS_REG3 at entry */
@@ -67,7 +66,7 @@ __attribute__((naked, noreturn)) void Reset_Handler(void)
         "b     reset_c\n");
 }
 
-__attribute__((noreturn, used)) void reset_c(void)
+static __attribute__((noreturn, used)) void reset_c(void)
 {
     REG(SCB_VTOR) = (uint32_t)vectors;
     boot_tag = REG(PMU_SYS_REG3);

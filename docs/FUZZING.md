@@ -14,6 +14,7 @@ The tools are in [`fw/tools/fuzz/`](../fw/tools/fuzz/):
 | `fuzz_host.c` | The fuzzer and the stand-in for core B's runtime |
 | `build.sh` | Builds one target (see below) |
 | `mkseeds.sh` | Makes the seed files |
+| `mkfatseeds.py` | Makes the seed disks of the `fat` target |
 
 ## What is tested
 
@@ -30,10 +31,23 @@ The firmware's own code, unchanged, built for the PC:
 | `aac` | `mp4.c`, then `fw/hifi/codec_aac.c` + pvaacdec (AOSP) on the packet stream it makes | an M4A file |
 | `aacpkt` | `codec_aac.c` + pvaacdec alone | a packet stream (`hifi_proto.h`), configuration included |
 | `tags` | `fw/src/tags.c` (core A), for every format | any file |
+| `fat` | `fw/src/fat.c` (core A): the internal volume (FAT32) and the card (FAT32 or exFAT): mount, root, every folder down to depth 4, reads in every file | a disk, as sparse sectors |
 
 A core B codec is opened as on the device (`codec_open()`), then decodes up to 400 blocks
 (`codec_run()`). Core A code reads the file through a stand-in for `fat_pread()`. The `aac`
 target goes through the real input ring at the address core B uses, as `player.c` does.
+
+The `fat` input is a disk given as records: a 32-bit sector number (little endian), then the
+512 bytes of that sector; the other sectors read as zeros, and those past 2 GiB as a read error.
+The same disk serves as the eMMC (`fat_mount`, which searches FAT32 from sector 0, alone or
+behind an MBR) and as the card (`fat_mount_sd`: a FAT32 or exFAT volume at sector 0 or in the
+MBR). The folders are walked as the firmware does: a folder is listed in full, then its files
+read and its subfolders walked (`fat_list` is not reentrant). More than 2,000,000 sector reads
+in a run count as a hang: a loop in a cluster chain. `mkfatseeds.py` makes the seeds from real
+volumes (mkfs.fat and mtools, mkfs.exfat and `fw/tools/exfat_add.py`): long names with accents
+and CJK, folders three deep, a folder of 40 entries over several clusters, empty, small,
+multi-cluster and fragmented files, a hidden one; clusters of 512 bytes and 4 KiB (FAT32), 4
+and 32 KiB (exFAT), with and without an MBR.
 
 ## How it works
 
@@ -56,7 +70,8 @@ target goes through the real input ring at the address core B uses, as `player.c
     Xing/LAME frame);
   - for MP4, the `moov` box wherever it is (it holds everything `mp4.c` reads; it may be at the
     end of the file);
-  - for `tags`, also the last 512 bytes (ID3v1, APEv2).
+  - for `tags`, also the last 512 bytes (ID3v1, APEv2);
+  - for `fat`, inside the sectors, and one mutation in 16 in a sector number (a sector moves).
 - **Faithful to the target**: `-funsigned-char` as on ARM (a `char` index that is negative on the
   PC is not on the device). The `vorbis-heap` target keeps core B's own allocator
   (`fw/hifi/heap.c`) in place of the C library's. ASan cannot see inside that allocator, but some
@@ -73,6 +88,14 @@ cd fw/tools/fuzz
 ./build.sh vorbis                   # or any target of the table above
 build/vorbis/fuzz seeds/vorbis out/vorbis 1500     # 25 minutes
 FUZZ_STREAM=s.hp4p build/mp4/fuzz -r seeds/m4a/syn1.m4a   # a packet stream, seed for aacpkt
+./mkfatseeds.py seeds/fat && ./build.sh fat        # needs mkfs.fat, mtools, mkfs.exfat
+FUZZ_V=1 build/fat/fuzz -r seeds/fat/exfat_4k      # the tree the reader sees
+```
+
+Several instances can run side by side on the same seeds (each draws its own random sequence):
+
+```sh
+for i in 1 2 3 4 5 6; do build/fat/fuzz seeds/fat out/fat$i 7200 > out/fat$i.log & done
 ```
 
 `mkseeds.sh` encodes a few seconds of tone and noise at several rates, channel counts and

@@ -2,6 +2,7 @@
  * main loop driven by the control block, and the ring helpers. Core B sleeps in WFI whenever
  * it cannot progress; core A wakes it through A2B channel 1 of the mailbox (exception 0x1a). */
 #include "rt.h"
+#include <stdlib.h>
 #include <string.h>
 
 #define MBOX        0x40110000u
@@ -10,7 +11,6 @@
 #define NVIC_ISER0  0xe000e100u
 #define SCB_VTOR    0xe000ed08u
 #define SCB_CFSR    0xe000ed28u
-#define REG(a)      (*(volatile uint32_t *)(a))
 #define IRQ_DOORBELL 0x1a
 
 extern uint32_t _sbss, _ebss;
@@ -50,7 +50,7 @@ __attribute__((naked)) static void fault(void)
         "b hp_fault\n");
 }
 
-__attribute__((used)) void hp_fault(const uint32_t *frame)
+static __attribute__((used)) void hp_fault(const uint32_t *frame)
 {
     ctl->fault_pc = frame[6];
     ctl->fault_lr = frame[5];
@@ -414,16 +414,14 @@ int abs(int x)
 }
 
 /* ---- main loop ---- */
-#define TIMER1_CUR0 0x400e0028u               /* 24 MHz, shared with core A */
-
 static void sleep_until_rung(void)
 {
     __asm volatile ("cpsid i");
     if (!rung) {
-        uint32_t t0 = ~REG(TIMER1_CUR0);
+        uint32_t t0 = TIMER1_NOW();
         ctl->sleep_since = t0 | 1;
         wfi();                                  /* a pending doorbell wakes it at once */
-        ctl->idle_ticks += ~REG(TIMER1_CUR0) - t0;
+        ctl->idle_ticks += TIMER1_NOW() - t0;
         ctl->sleep_since = 0;
     }
     rung = 0;

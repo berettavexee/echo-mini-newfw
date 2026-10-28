@@ -4,13 +4,8 @@
  * dr_flac for orders 3 to 32 (orders 1 and 2 are wrong on the hardware: the stock FLAC module
  * keeps them in software too). Blocks over 8191 samples (13-bit length field) in passes, each
  * later one with the last outputs of the one before as its warm-up. Included by codec_flac.c. */
-#define HACC        0x01060000u
-#define HACC_FIN    0x01060040u
-#define HACC_FOUT   0x010600a0u
-#define HACC_COEF   0x0106b000u
-#define DMA         0x01070000u
-#define DMA_CH(c)   (DMA + (c) * 0x58u)
-#define HACC_NOW()  (~REG(0x400e0028u))         /* TIMER1, 24 MHz */
+#include "accel.h"
+
 #define HACC_SEG    8191u                       /* the length field: 13 bits */
 #define HACC_CHUNK  2048u                       /* words per DMA block (LLI chain) */
 
@@ -69,12 +64,12 @@ static int hacc_pass(const int32_t *in, int32_t *out, uint32_t n, uint32_t order
     REG(HACC + 0x0c) = 0xa0000000u | n << 15 | 3;   /* start */
     REG(DMA + 0x3a0) = 0x202;                   /* ChEnReg: channel 1, then 0 */
     REG(DMA + 0x3a0) = 0x101;
-    uint32_t t0 = HACC_NOW();
+    uint32_t t0 = TIMER1_NOW();
     int ok = 0;
     /* 30 ms: HIFIACC runs at core B's clock, about one product per cycle: 8191 samples at
      * order 32 take some 5 ms at 50 MHz (0.85 timed out at 5 ms, ETUDE §67); a block of 8192
      * lasts 85 ms at 96 kHz */
-    while (HACC_NOW() - t0 < 30 * 24000u)
+    while (TIMER1_NOW() - t0 < 30 * 24000u)
         if ((REG(DMA + 0x2c0) & 1) && (REG(HACC + 0x08) & 0x8000)) {
             ok = 1;
             break;
@@ -88,7 +83,7 @@ static int hacc_pass(const int32_t *in, int32_t *out, uint32_t n, uint32_t order
 
 /* The LPC prediction of a block on HIFIACC, from in (warm-up then residuals) into out (in == out
  * allowed), order 3 to 32: 1 done, 0 timeout (out is then incomplete) */
-static int hacc_lpc(const int32_t *in, int32_t *out, uint32_t n, uint32_t order, uint32_t shift,
+static int hacc_lpc(int32_t *in, int32_t *out, uint32_t n, uint32_t order, uint32_t shift,
                     const int32_t *qlp)
 {
     for (uint32_t k = 0; k < order; k++)        /* reverse order: COEF[k] weighs y[n-order+k] */
@@ -101,7 +96,7 @@ static int hacc_lpc(const int32_t *in, int32_t *out, uint32_t n, uint32_t order,
         const int32_t *src = in + from;
         if (s && in != out) {                   /* the warm-up of a later pass: outputs */
             for (uint32_t i = 0; i < order; i++)
-                ((int32_t *)in)[from + i] = out[from + i];
+                in[from + i] = out[from + i];
         }
         if (!hacc_pass(src, out + from, len, order, shift))
             return 0;

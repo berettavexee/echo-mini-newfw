@@ -7,6 +7,7 @@
  * TXXX frames; R128_TRACK/ALBUM_GAIN in Opus (Q7.8 dB for -23 LUFS: +5 dB for the -18 LUFS of
  * ReplayGain; the header's output gain is applied by the decoder). */
 #include <stdint.h>
+#include "bytes.h"
 #include "fat.h"
 #include "hifi_proto.h"
 #include "tags.h"
@@ -48,8 +49,6 @@ static int rd_at(uint32_t pos, uint32_t n, const uint8_t **p)
     return 0;
 }
 
-static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
-static uint32_t be16(const uint8_t *p) { return (uint32_t)p[0] << 8 | p[1]; }
 static uint32_t syncsafe(const uint8_t *p) { return p[0] << 21 | p[1] << 14 | p[2] << 7 | p[3]; }
 
 /* ---- text into a field: UTF-8 out, cut on a character boundary ---- */

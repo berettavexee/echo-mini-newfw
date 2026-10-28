@@ -12,16 +12,9 @@
  * -DECHO_HWTEST computes both and compares them, the sound from Tremor (ctl->hwf). Included by
  * codec_vorbis.c. */
 #if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
+#include "accel.h"
 #include "fft_tw.h"
 
-#ifndef REG
-#define REG(a) (*(volatile uint32_t *)(a))
-#endif
-
-#define HACC        0x01060000u
-#define FFT_IM      0x01061000u
-#define FFT_RE      0x01062000u
-#define FFT_NOW()   (~REG(0x400e0028u))         /* TIMER1, 24 MHz */
 #define FFT_WAIT    (24000u * 3)                /* 3 ms: some 0.1 ms at 24 MHz (to measure) */
 
 static uint32_t fft_timeouts;
@@ -61,9 +54,9 @@ static int fft_imdct(int n, const int32_t *in, int32_t *out)
     REG(HACC + 0x24) = size << 29 | 1u << 27;   /* FFT without scaling, complex input */
     REG(HACC + 0x0c) = 0x40000000;              /* function 2: FFT */
     REG(HACC + 0x0c) = 0x40000003;
-    uint32_t t0 = FFT_NOW();
+    uint32_t t0 = TIMER1_NOW();
     while (!(REG(HACC + 0x08) & 0x8000))
-        if (FFT_NOW() - t0 > FFT_WAIT)
+        if (TIMER1_NOW() - t0 > FFT_WAIT)
             break;
     int done = (REG(HACC + 0x08) & 0x8000) != 0;
     REG(HACC + 0x04) &= ~0x8000u;
@@ -111,20 +104,20 @@ static uint32_t fft_t_sw;
 
 int echo_fft_imdct(int n, int32_t *in)
 {
-    uint32_t t0 = FFT_NOW();
+    uint32_t t0 = TIMER1_NOW();
     fft_hw_ok = fft_imdct(n, in, fft_hw_out);
-    uint32_t t1 = FFT_NOW();
+    uint32_t t1 = TIMER1_NOW();
     if (fft_hw_ok)
         ctl->hwf.hw_ticks += t1 - t0;
     else if (n == 256 || n == 2048)
         ctl->hwf.timeouts++;
-    fft_t_sw = FFT_NOW();
+    fft_t_sw = TIMER1_NOW();
     return 0;
 }
 
 void echo_fft_check(int n, const int32_t *in)
 {
-    uint32_t t = FFT_NOW() - fft_t_sw;
+    uint32_t t = TIMER1_NOW() - fft_t_sw;
     if (!fft_hw_ok)
         return;
     fft_hw_ok = 0;

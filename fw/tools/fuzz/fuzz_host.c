@@ -14,7 +14,8 @@
  * (src/mp4.c), -DT_AAC (mp4.c, then codec_aac.c on the stream it makes), -DT_TAGS (src/tags.c
  * for every format); -DREAL_HEAP keeps core B's hifi/heap.c for Vorbis (no ASan).
  * FUZZ_STREAM=file (T_MP4, T_AAC replay) writes the packet stream mp4.c makes: seeds for
- * T_AACPKT. */
+ * T_AACPKT. -DT_FAT: src/fat.c (FAT32 and exFAT) on a disk given as sparse sectors (see
+ * "the disk" below; tools/fuzz/mkfatseeds.py makes them from real images). */
 #include <dirent.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -33,6 +34,9 @@
 #if defined(T_MP4) || defined(T_AAC) || defined(T_TAGS)
 #include "mp4.h"
 #include "tags.h"
+#endif
+#if defined(T_FAT)
+#include "fat.h"
 #endif
 
 /* ---- core B runtime over a memory buffer ---- */
@@ -85,6 +89,138 @@ void heap_reset(void) { }
 uint32_t heap_keep(void) { return 0; }
 void heap_resume(uint32_t floor, uint32_t cur) { (void)floor; (void)cur; }
 const uint8_t *heap_base(void) { return zero_heap; }
+#endif
+
+#if defined(T_FAT)
+/* ---- the disk: the input is a list of records, a 32-bit sector number (little endian) then
+ * the 512 bytes of that sector; the other sectors read as zeros, past DISK_SECTORS as an error.
+ * The same disk is the eMMC (fat_mount) and the card (fat_mount_sd). ---- */
+#define DISK_SECTORS 0x400000u                  /* 2 GiB */
+#define REC 516u
+static long disk_reads;
+static const uint8_t *disk_sector(uint32_t lba)
+{
+    const uint8_t *found = 0;
+    for (uint32_t o = 0; o + REC <= in_len; o += REC)     /* the last record of a sector wins */
+        if ((uint32_t)(in_buf[o] | in_buf[o + 1] << 8 | in_buf[o + 2] << 16 |
+                       (uint32_t)in_buf[o + 3] << 24) == lba)
+            found = in_buf + o + 4;
+    return found;
+}
+static int disk_read(uint32_t lba, uint32_t n, void *buf)
+{
+    if (lba >= DISK_SECTORS || n > DISK_SECTORS - lba)
+        return -1;
+    if ((disk_reads += n) > 2000000)
+        _exit(77);                      /* reads without end: a hang (a loop in a chain) */
+    for (uint32_t i = 0; i < n; i++) {
+        const uint8_t *s = disk_sector(lba + i);
+        if (s)
+            memcpy((uint8_t *)buf + 512 * i, s, 512);
+        else
+            memset((uint8_t *)buf + 512 * i, 0, 512);
+    }
+    return 0;
+}
+int emmc_read(uint32_t sector, uint32_t count, void *buf) { return disk_read(sector, count, buf); }
+int sd_read(uint32_t sector, uint32_t count, void *buf) { return disk_read(sector, count, buf); }
+
+/* What the firmware does with a volume: the root, every folder down to depth 4 (as sdtest.c and
+ * the queue), and reads in every file: its start, a cluster boundary, its end, then
+ * sequentially with a cursor; bounded so that one run stays short */
+static int walk_dirs, walk_entries;
+static void walk_file(const struct fat_dirent *e)
+{
+    static uint8_t b[65536];
+    struct fat_file f;
+    struct fat_cursor c = { 0, 0 };
+    fat_file_of(e, &f);
+    uint32_t first, count;
+    fat_extent(&f, &first, &count);
+    if (!f.size)
+        return;
+    uint32_t n = f.size < 3000 ? f.size : 3000;
+    fat_pread(&f, &c, 0, b, n);
+    if (f.size > 70000) {
+        fat_pread(&f, &c, 65536 - 100, b, 200);
+        fat_pread(&f, &c, f.size - 1000, b, 1000);
+    }
+    struct fat_cursor s = { 0, 0 };
+    for (uint32_t pos = 0, k = 0; pos < f.size && k < 8; pos += sizeof b, k++)
+        fat_pread(&f, &s, pos, b, f.size - pos < sizeof b ? f.size - pos : sizeof b);
+}
+/* fat_list is not reentrant (its sector buffer is static): as the firmware does (sdtest.c,
+ * queue.c), the entries of a folder are collected first, then its files read and its folders
+ * walked */
+#define WALK_MAX 48
+struct walk_list { int n; struct fat_dirent e[WALK_MAX]; };
+static int walk_cb(const struct fat_dirent *e, void *ctx)
+{
+    struct walk_list *l = ctx;
+    if (++walk_entries > 2000)
+        return 1;
+    if (l->n < WALK_MAX)
+        l->e[l->n++] = *e;
+    return 0;
+}
+static void walk(const struct fat_dir *d, int depth)
+{
+    static struct walk_list lists[5];
+    struct walk_list *l = &lists[depth];
+    if (++walk_dirs > 64)
+        return;
+    l->n = 0;
+    fat_list(d, walk_cb, l);
+    for (int i = 0; i < l->n; i++) {
+        const struct fat_dirent *e = &l->e[i];
+        if (getenv("FUZZ_V"))
+            fprintf(stderr, "  %*s%s%s  %u bytes, cluster %u%s\n", 2 * depth, "", e->name,
+                    e->attr & FAT_ATTR_DIR ? "/" : "", e->size, e->cluster,
+                    e->contig ? " (contig)" : "");
+        if (!(e->attr & FAT_ATTR_DIR))
+            walk_file(e);
+        else if (depth < 4) {
+            struct fat_dir sub;
+            fat_dir_of(e, &sub);
+            walk(&sub, depth + 1);
+        }
+    }
+}
+static int root_cb(const struct fat_file *f, void *ctx)
+{
+    (void)f;
+    return ++*(int *)ctx > 300;
+}
+static void run_fat(void)
+{
+    struct fat_dir d;
+    if (!fat_mount(0)) {                        /* the internal volume: FAT32 */
+        int n = 0;
+        struct fat_file f;
+        if (getenv("FUZZ_V"))
+            fprintf(stderr, "  internal: part %u, %u clusters of %u sectors, root %u\n", vol.part,
+                    vol.clusters, vol.spc, vol.root);
+        fat_list_root(root_cb, &n);
+        fat_dirty();
+        if (!fat_find_root("NEWFWLOG.TXT", &f)) {
+            static uint8_t b[4096];
+            fat_open(&f);
+            fat_read(&f, b, sizeof b);
+        }
+        walk_dirs = walk_entries = 0;
+        fat_root(FAT_VOL_INT, &d);
+        walk(&d, 0);
+    }
+    if (!fat_mount_sd()) {                      /* the card: FAT32 or exFAT */
+        if (getenv("FUZZ_V"))
+            fprintf(stderr, "  card: %s, part %u, %u clusters of %u sectors, root %u\n",
+                    sdvol.exfat ? "exFAT" : "FAT32", sdvol.part, sdvol.clusters, sdvol.spc,
+                    sdvol.root);
+        walk_dirs = walk_entries = 0;
+        fat_root(FAT_VOL_SD, &d);
+        walk(&d, 0);
+    }
+}
 #endif
 
 #if defined(T_MP4) || defined(T_AAC) || defined(T_TAGS)
@@ -153,7 +289,7 @@ void __sanitizer_cov_trace_pc(void)
     prev = pc >> 1;
 }
 
-#if !defined(T_OGG) && !defined(T_MP4) && !defined(T_TAGS)
+#if !defined(T_OGG) && !defined(T_MP4) && !defined(T_TAGS) && !defined(T_FAT)
 /* A core B codec on the input buffer: open, then up to 400 blocks (all with FUZZ_PCM) */
 static void run_codec(void)
 {
@@ -221,6 +357,8 @@ static void run_one(const uint8_t *d, uint32_t n)
     c->in_rd = 0;
     c->in_wr = c->in_end = k;
     run_codec();
+#elif defined(T_FAT)
+    run_fat();
 #elif defined(T_OGG)
     static uint8_t pkt[65536];
     pg_reset();
@@ -281,6 +419,12 @@ static uint32_t pos(uint32_t n)
 #if defined(T_TAGS)
     if (!rnd(8))
         return n - 1 - rnd(n < 512 ? n : 512);
+#endif
+#if defined(T_FAT)
+    if (n >= REC) {                             /* in a sector; one in 16 in its sector number */
+        uint32_t o = rnd(n / REC) * REC;
+        return rnd(16) ? o + 4 + rnd(512) : o + rnd(4);
+    }
 #endif
     if (rnd(4) && hot_hi > hot_lo && hot_hi <= n)
         return hot_lo + rnd(hot_hi - hot_lo);
@@ -420,7 +564,7 @@ int main(int argc, char **argv)
     }
     if (!ncorpus)
         return 1;
-    rng ^= (uint64_t)time(0);
+    rng ^= (uint64_t)time(0) ^ (uint64_t)getpid() << 32;     /* parallel instances differ */
     uint32_t cap = 1 << 20;
     uint8_t *b = malloc(cap);
     time_t t0 = time(0), tl = t0;

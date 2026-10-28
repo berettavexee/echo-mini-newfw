@@ -6,6 +6,7 @@
  * data in the high bits); mono is duplicated. AIFF needs COMM before SSND (as every encoder
  * writes it): the input only moves forward. */
 #include "rt.h"
+#include "../src/bytes.h"
 
 const uint32_t codec_id = HP_CODEC_WAV;
 
@@ -13,10 +14,6 @@ static uint32_t data_left, block;           /* bytes of sample data left, bytes 
 static int big;                             /* samples big-endian (AIFF) */
 static int signed8;                         /* 8-bit samples signed (AIFF), else offset (WAV) */
 
-static uint32_t le16(const uint8_t *p) { return p[0] | p[1] << 8; }
-static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
-static uint32_t be16(const uint8_t *p) { return p[0] << 8 | p[1]; }
-static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
 
 /* AIFF's sample rate: an 80-bit IEEE extended number (sign and 15-bit exponent, then a 64-bit
  * mantissa with its integer bit); 0 when out of range */

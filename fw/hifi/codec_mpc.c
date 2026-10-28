@@ -5,7 +5,9 @@
  * goes through mpc_demux_seek_sample from a fresh open (SV7: it walks the frame headers from
  * the start). 16-bit packed stereo frames in the ring (the reference tool's >> FRACTPART), mono
  * duplicated. */
+#include <math.h>
 #include <string.h>
+#include "hooks.h"
 #include "rt.h"
 #include <mpc/mpcdec.h>
 

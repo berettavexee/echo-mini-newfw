@@ -53,7 +53,7 @@ static int write_run(uint32_t sector, uint32_t count, const void *buf)
 {
     while (count) {
         uint32_t n = count > 128 ? 128 : count;
-        int r = transfer(sector, n, (uint32_t *)buf, 1);
+        int r = transfer(sector, n, (uint32_t *)(uintptr_t)buf, 1);   /* only read */
         if (r)
             return r;
         sector += n;

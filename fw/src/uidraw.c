@@ -100,6 +100,8 @@ void list_scrollbar(int y, int rows, int top, int n)
         t = 8;
     room = h - t;
     int ty = (int)((int64_t)room * top / (n - rows));
+    /* the gap before it: rows drawn full width before (a list that fitted) leave their colour */
+    lcd_fill(LCD_W - SB_W - SB_GAP, y, SB_GAP, h, BG);
     lcd_fill(LCD_W - SB_W, y, SB_W, ty, RGB(40, 40, 50));
     lcd_fill(LCD_W - SB_W, y + ty, SB_W, t, BAR_FG);
     lcd_fill(LCD_W - SB_W, y + ty + t, SB_W, h - ty - t, RGB(40, 40, 50));

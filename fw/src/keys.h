@@ -18,14 +18,11 @@ struct key_ev {
     int type;                   /* EV_* */
 };
 
-int key_scan(void);             /* the debounced key down now, KEY_NONE: none */
 int key_poll(struct key_ev *e); /* the next event (e->type, also returned), EV_NONE: none */
-int plug_state(int src);        /* SRC_*: 1 = in (as last reported by key_poll) */
 int key_held(void);             /* a key is down, as key_poll() sees it */
 uint32_t key_held_us(void);     /* since the key held (or the last change) */
 int key_is_vol(int k);          /* VOL+ or VOL- */
 const char *key_name(int k);
-extern unsigned key_adc;        /* channel 1 when the key held was taken (for the log) */
 
 /* Simple screens (system, installer): the key newly down, once, else KEY_NONE */
 int key_edge(void);

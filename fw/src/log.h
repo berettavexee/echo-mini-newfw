@@ -30,12 +30,16 @@ void log_init(void);            /* at boot, before anything is logged */
 /* A word for the next boot, kept in PMU-SRAM across a reset; taken (and cleared) once */
 void log_boot_note(uint32_t v);
 uint32_t log_boot_note_take(void);
+/* tools/check.sh checks the formats with LOG_FORMAT_CHECK (and uint32_t as unsigned int: it is
+ * unsigned long here, which %u prints all the same) */
+#ifdef LOG_FORMAT_CHECK
+__attribute__((format(printf, 1, 2)))
+#endif
 void log_printf(const char *fmt, ...);   /* %s %c %d %u %x, width, 0 flag */
 int log_attach(void);           /* finds the file (after the volume is mounted) */
 void log_detach(void);          /* writes what is pending, then stops writing (USB mode) */
 int log_flush(void);            /* writes the pending lines now */
 void log_poll(void);            /* writes them when enough time or text has gone by */
-uint32_t log_pending(void);
 /* The last sector of the log file is not part of the ring: it keeps the resume state of the
  * user interface (512 bytes, starting with "NEWFWSTATE", ui.c) */
 int log_state_read(void *buf);
