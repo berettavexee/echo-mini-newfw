@@ -12,10 +12,6 @@ int main_menu(void)
     int sel = 0, top = 0, dirty = 1;
     for (;;) {
         if (dirty) {                            /* ROWS of the M_COUNT entries: scrolled */
-            if (sel < top)
-                top = sel;
-            if (sel >= top + ROWS)
-                top = sel - ROWS + 1;
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
             lcd_text(4, 0, "Menu", TITLE_FG, BG);
             for (int i = top; i < M_COUNT && i < top + ROWS; i++) {
@@ -27,8 +23,9 @@ int main_menu(void)
                 if (i == M_RG)
                     p = put_str(p, rg_names[rg_mode]);
                 *p = 0;
-                lcd_text_clip(12, y, b, LCD_W, FG, bg);
+                lcd_text_clip(12, y, b, list_text_end(M_COUNT, ROWS), FG, bg);
             }
+            list_scrollbar(ROW_Y0, ROWS, top, M_COUNT);
             dirty = 0;
         }
         sys_idle();
@@ -45,10 +42,10 @@ int main_menu(void)
             resume_save();
             dirty = 1;
         } else if (k == KEY_VOLUP && ev != EV_LONG) {
-            sel = sel ? sel - 1 : M_COUNT - 1;
+            list_move(&sel, &top, M_COUNT, ROWS, -1);
             dirty = 1;
         } else if (k == KEY_VOLDOWN && ev != EV_LONG) {
-            sel = sel < M_COUNT - 1 ? sel + 1 : 0;
+            list_move(&sel, &top, M_COUNT, ROWS, 1);
             dirty = 1;
         } else if (k == KEY_BACK || (k == KEY_MENU && ev == EV_PRESS))
             return -1;

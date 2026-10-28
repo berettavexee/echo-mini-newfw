@@ -237,6 +237,7 @@ static void message(int y, const char *s, uint16_t fg)
 
 /* ---- firmware menu ---- */
 #define MAX_IMG 32
+#define IMG_ROWS 8                              /* rows of 16 px from y = 18, above the help line */
 
 struct img_list {
     struct fat_file f[MAX_IMG];
@@ -287,7 +288,7 @@ static void firmware_menu(void)
     static struct img_list l;
     struct fw_info info;
     char b[64], *p;
-    int sel = 0;
+    int sel = 0, top = 0;
 
     l.n = 0;
     if (!storage_err && !volume_err)
@@ -299,15 +300,25 @@ static void firmware_menu(void)
             line(32, "internal volume not available", WARN);
         else if (!l.n)
             line(32, "no .IMG file in the root folder", WARN);
-        for (int i = 0; i < l.n; i++) {
-            p = put_str(b, i == sel ? "> " : "  ");
-            p = put_str(p, l.f[i].name);
+        if (l.n) {                              /* "selected/count" right-aligned */
+            p = put_dec(b, (uint32_t)sel + 1);
+            *p++ = '/';
+            p = put_dec(p, (uint32_t)l.n);
+            *p = 0;
+            lcd_text(LCD_W - 4 - lcd_text_width(b), 0, b, DIM, BG);
+        }
+        for (int i = top; i < l.n && i < top + IMG_ROWS; i++) {
+            uint16_t bg = i == sel ? SEL_BG : BG;
+            int y = 18 + 16 * (i - top);
+            p = put_str(b, l.f[i].name);
             p = put_str(p, "  ");
             p = put_dec(p, l.f[i].size >> 10);
             p = put_str(p, " KiB");
             *p = 0;
-            line(18 + 14 * i, b, i == sel ? FG : DIM);
+            lcd_fill(0, y, 4, 16, bg);
+            lcd_text_clip(4, y, b, list_text_end(l.n, IMG_ROWS), FG, bg);
         }
+        list_scrollbar(18, IMG_ROWS, top, l.n);
         line(154, "VOL+/VOL-: choose  PLAY: check  BACK", DIM);
 
         int k;
@@ -315,10 +326,10 @@ static void firmware_menu(void)
             wdt_kick();
         if (k == KEY_BACK)
             return;
-        if (k == KEY_VOLUP && l.n)              /* the list wraps around */
-            sel = sel > 0 ? sel - 1 : l.n - 1;
-        if (k == KEY_VOLDOWN && l.n)
-            sel = sel < l.n - 1 ? sel + 1 : 0;
+        if (k == KEY_VOLUP)                     /* the list wraps around */
+            list_move(&sel, &top, l.n, IMG_ROWS, -1);
+        if (k == KEY_VOLDOWN)
+            list_move(&sel, &top, l.n, IMG_ROWS, 1);
         if (k != KEY_PLAY || !l.n)
             continue;
 

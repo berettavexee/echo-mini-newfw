@@ -64,3 +64,44 @@ void draw_clock(int x0, int x1, int force)
         b[0] = 0;
     text_right(x0, x1, 0, b, DIM, BG);
 }
+
+/* ---- lists ---- */
+#define SB_W   3                                /* the scroll bar, at the right edge */
+#define SB_GAP 3                                /* between the text and the bar */
+
+void list_move(int *sel, int *top, int n, int rows, int d)
+{
+    if (n <= 0)
+        return;
+    *sel += d;
+    if (*sel < 0)
+        *sel = n - 1;
+    if (*sel >= n)
+        *sel = 0;
+    if (*sel < *top)
+        *top = *sel;
+    if (*sel >= *top + rows)
+        *top = *sel - rows + 1;
+}
+
+int list_text_end(int n, int rows)
+{
+    return n > rows ? LCD_W - SB_W - SB_GAP : LCD_W;
+}
+
+/* The bar beside rows of 16 px from y: the thumb's height is the share of the list shown (8 px
+ * at least), its place that of the first row shown; nothing when the list fits */
+void list_scrollbar(int y, int rows, int top, int n)
+{
+    if (n <= rows)
+        return;
+    int h = rows * 16, t = h * rows / n, room;
+    if (t < 8)
+        t = 8;
+    room = h - t;
+    int ty = (int)((int64_t)room * top / (n - rows));
+    lcd_fill(LCD_W - SB_W, y, SB_W, ty, RGB(40, 40, 50));
+    lcd_fill(LCD_W - SB_W, y + ty, SB_W, t, BAR_FG);
+    lcd_fill(LCD_W - SB_W, y + ty + t, SB_W, h - ty - t, RGB(40, 40, 50));
+}
+

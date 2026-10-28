@@ -257,12 +257,27 @@ static void draw_row(int r, int sel, int mark)
     lcd_fill(0, y, 22, 16, bg);
     if (dirent || i == mark)
         lcd_glyph(dirent ? 6 : 3, y, dirent ? 0xbb : 0x266a, dirent ? DIR_FG : TITLE_FG, bg);
-    lcd_text_clip(22, y, ent_name(i), LCD_W, dirent ? DIR_FG : e->size ? FG : DIM, bg);
+    lcd_text_clip(22, y, ent_name(i), list_text_end(dir_n, ROWS), dirent ? DIR_FG : e->size ? FG : DIM,
+                  bg);
+}
+
+/* "selected/count" right-aligned on the first line */
+static void draw_count(int sel)
+{
+    char b[24], *p = b;
+    if (dir_n) {
+        p = put_dec(p, (uint32_t)sel + 1);
+        *p++ = '/';
+    }
+    p = put_dec(p, (uint32_t)dir_n);
+    if (dir_full)
+        *p++ = '+';
+    *p = 0;
+    text_right(LCD_W - 70, LCD_W - 4, 0, b, DIM, BG);
 }
 
 void draw_browser(void)
 {
-    char b[96], *p;
     int sel = path[depth].sel, top = path[depth].top, mark = playing_index();
     if (!b_dirty && top == b_top) {
         /* the same page: only the rows whose look changed (selection, playing mark) */
@@ -272,27 +287,27 @@ void draw_browser(void)
                 if ((i == sel) != (i == b_sel) || (i == mark) != (i == b_mark))
                     draw_row(r, sel, mark);
         }
+        if (sel != b_sel)
+            draw_count(sel);
         b_sel = sel;
         b_mark = mark;
         if (q_playing && player_heard.length_ms)
             progress_bar(ROW_Y0 + 16 * ROWS + 3, 4, player_heard.time_ms, player_heard.length_ms);
-        draw_clock(LCD_W - 100, LCD_W - 60, 0);
+        draw_clock(LCD_W - 114, LCD_W - 70, 0);
         return;
     }
     if (b_dirty) {                              /* every band once, nothing cleared first */
         lcd_fill(0, 0, 4, 16, BG);
-        lcd_text_clip(4, 0, depth ? path[depth].name : "Storage", LCD_W - 104, TITLE_FG, BG);
-        draw_clock(LCD_W - 104, LCD_W - 60, 1);
-        p = put_dec(b, (uint32_t)dir_n);
-        if (dir_full)
-            *p++ = '+';
-        *p = 0;
-        text_right(LCD_W - 60, LCD_W - 4, 0, b, DIM, BG);
+        lcd_text_clip(4, 0, depth ? path[depth].name : "Storage", LCD_W - 114, TITLE_FG, BG);
+        draw_clock(LCD_W - 114, LCD_W - 70, 1);
         lcd_fill(LCD_W - 4, 0, 4, 16, BG);
         lcd_fill(0, 16, LCD_W, ROW_Y0 - 16, BG);
     }
     for (int r = 0; r < ROWS; r++)
         draw_row(r, sel, mark);
+    list_scrollbar(ROW_Y0, ROWS, top, dir_n);
+    if (b_dirty || sel != b_sel)
+        draw_count(sel);
     b_sel = sel;
     b_top = top;
     b_mark = mark;
@@ -438,18 +453,7 @@ int sd_watch(void)
 
 static void move(int d)
 {
-    int *sel = &path[depth].sel, *top = &path[depth].top;
-    if (!dir_n)
-        return;
-    *sel += d;
-    if (*sel < 0)
-        *sel = dir_n - 1;
-    if (*sel >= dir_n)
-        *sel = 0;
-    if (*sel < *top)
-        *top = *sel;
-    if (*sel >= *top + ROWS)
-        *top = *sel - ROWS + 1;
+    list_move(&path[depth].sel, &path[depth].top, dir_n, ROWS, d);
 }
 
 /* A key on the browser: VOL+/VOL- move, BACK goes up, PLAY opens a folder or plays the file and

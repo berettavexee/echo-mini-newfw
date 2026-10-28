@@ -11,6 +11,7 @@
 #define BG    RGB(0, 0, 0)
 #define TITLE RGB(255, 200, 0)
 #define WARN  RGB(255, 80, 60)
+#define SEL_BG RGB(40, 70, 140)                 /* the selected row of a list */
 
 #ifndef SCREEN_TIMEOUT_US
 #define SCREEN_TIMEOUT_US 30000000u     /* screen off after 30 s without a key */

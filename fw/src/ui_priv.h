@@ -28,7 +28,6 @@
 
 #define TITLE_FG RGB(255, 210, 90)
 #define DIR_FG   RGB(140, 200, 255)
-#define SEL_BG   RGB(40, 70, 140)
 #define BAR_FG   RGB(90, 160, 255)
 #define SK_FG    RGB(255, 150, 60)              /* the seek target */
 #define RG_TRACK_BG RGB(240, 200, 0)            /* ReplayGain of the track (not the album) */
