@@ -1,0 +1,43 @@
+# make check on every push and pull request, and the firmware image as an artifact.
+# The image is built with the same toolchain as on the developer's machine (Debian's
+# gcc-arm-none-eabi 14.2.rel1), so that it is byte-identical to a local build.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    steps:
+      - name: Tools
+        run: |
+          apt-get update -q
+          apt-get install -qy --no-install-recommends git ca-certificates make gcc libc6-dev \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi python3 python3-venv
+          python3 -m venv /opt/venv
+          /opt/venv/bin/pip install -q ruff==0.17.3 codespell==2.4.3
+          echo /opt/venv/bin >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - name: Publication rules
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          sh fw/tools/pubcheck.sh
+      - name: make check
+        run: make -C fw check
+      - name: Image
+        run: |
+          make -C fw -j"$(nproc)" | tee build.log
+          grep '^wrote' build.log >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HIFIEC70-${{ github.sha }}
+          path: fw/build/HIFIEC70.IMG
+          retention-days: 30

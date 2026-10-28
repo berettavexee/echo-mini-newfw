@@ -1,0 +1,33 @@
+# make check-full (the test variants and the fuzzing harnesses build), weekly and on demand.
+name: check-full
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-full:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    steps:
+      - name: Tools
+        run: |
+          apt-get update -q
+          apt-get install -qy --no-install-recommends git ca-certificates make gcc g++ libc6-dev \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi python3 python3-venv
+          python3 -m venv /opt/venv
+          /opt/venv/bin/pip install -q ruff==0.17.3 codespell==2.4.3
+          echo /opt/venv/bin >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - name: make check-full
+        run: make -C fw check-full
+      - name: Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-full-logs
+          path: fw/build/check/*.log

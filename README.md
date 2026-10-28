@@ -1,5 +1,7 @@
 # ECHO MINI new firmware
 
+[![check](https://github.com/berettavexee/echo-mini-newfw/actions/workflows/check.yml/badge.svg)](https://github.com/berettavexee/echo-mini-newfw/actions/workflows/check.yml)
+
 > The interface is minimalist and rough around the edges; the primary aim is to test codec
 > addition, gapless playback and ReplayGain. These are things I couldn’t do by patching the
 > official firmware.

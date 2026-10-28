@@ -6,6 +6,9 @@ FONT_BDF  = font/fusion-pixel-12px/fusion-pixel-12px-proportional-$(FONT_LANG).b
 # Build folder: tools/check.sh builds the test variants side by side
 BUILD ?= build
 OUT   ?= $(BUILD)/HIFIEC70.IMG
+# Date in the image header: the last commit's, so that the same tree gives the same image on any
+# machine and any day (the CI's artifact against a local build); today's outside git
+IMG_DATE ?= $(shell git log -1 --format=%cs 2>/dev/null)
 
 CROSS  = arm-none-eabi-
 CC     = $(CROSS)gcc
@@ -140,7 +143,9 @@ $(BUILD)/hifi_mp3.elf: $(PVMP3_OBJS) $(HDEPS)
 # than -O2 on the QEMU bench, ETUDE §54). Portable C fixed-point operations for now. The two
 # FFTs of its IMDCT on HIFIACC (hifi/aacfft.c, ETUDE §76), as Vorbis: -DECHO_NO_HWFFT, -DECHO_HWTEST
 PVAAC_DIR ?= ../third_party/pvaacdec/src
-PVAAC_OBJS := $(patsubst $(PVAAC_DIR)/%.cpp,$(BUILD)/pvaac/%.o,$(wildcard $(PVAAC_DIR)/*.cpp))
+# sorted: the order of wildcard follows the locale (fr_FR puts getfill before get_ics_info), and
+# the link order must not, for an image identical on every machine
+PVAAC_OBJS := $(patsubst $(PVAAC_DIR)/%.cpp,$(BUILD)/pvaac/%.o,$(sort $(wildcard $(PVAAC_DIR)/*.cpp)))
 PVAAC_CFLAGS = -mcpu=cortex-m3 -mthumb -O3 -g -ffreestanding -nostdlib -fno-exceptions -fno-rtti \
                -ffunction-sections -fdata-sections -w -Wno-narrowing "-DOSCL_UNUSED_ARG(x)=(void)(x)" \
                -DOSCL_IMPORT_REF= -DOSCL_EXPORT_REF= -I$(PVAAC_DIR) \
@@ -188,7 +193,8 @@ $(BUILD)/codecs.bin: $(BUILD)/hifi_pcm.elf $(BUILD)/hifi_flac.elf $(BUILD)/hifi_
 	  4:$(BUILD)/hifi_vorbis.elf 5:$(BUILD)/hifi_opus.elf 7:$(BUILD)/hifi_aac.elf 8:$(BUILD)/hifi_alac.elf 9:$(BUILD)/hifi_mpc.elf
 
 $(OUT): $(BUILD)/fw.elf $(BUILD)/codecs.bin $(BUILD)/font.bin tools/mkimg.py
-	python3 tools/mkimg.py $(BUILD)/fw.elf $@ --pack $(BUILD)/codecs.bin --font $(BUILD)/font.bin
+	python3 tools/mkimg.py $(BUILD)/fw.elf $@ --pack $(BUILD)/codecs.bin --font $(BUILD)/font.bin \
+	  $(if $(IMG_DATE),--date $(IMG_DATE))
 
 # Automatic checks (tools/check.sh): check before a commit, check-full before a release
 check:
