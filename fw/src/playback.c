@@ -87,22 +87,69 @@ static void heard_sync(void)
 /* Why nothing could be played: shown by the main loop (a banner, then the browser) */
 char fail_name[64];
 int fail_code, fail_due;
+uint32_t fail_why;
 
 void play_failed(const char *name, int code)
 {
+    const char *what, *hint;
     copy_name(fail_name, name, sizeof fail_name);
     fail_code = code;
+    fail_why = code <= PLAYER_EFORMAT && code >= PLAYER_EFAULT ? player.why : HP_WHY_NONE;
     fail_due = 1;
-    log_printf("ui: cannot play %s: %s", fail_name, fail_reason(code));
+    fail_text(code, fail_why, &what, &hint);
+    log_printf("error: %s: %s (code %d, why %u)", fail_name, what, code, fail_why);
 }
 
-const char *fail_reason(int code)
+static const char *const why_text[] = {
+    [HP_WHY_NONE] = "Not supported: this variant of the format",
+    [HP_WHY_CHANNELS] = "Not supported: more than 2 channels",
+    [HP_WHY_BITS] = "Not supported: this bit depth",
+    [HP_WHY_FLOAT] = "Not supported: floating-point samples",
+    [HP_WHY_COMPRESSED] = "Not supported: compressed WAV or AIFF",
+    [HP_WHY_HEAAC] = "Not supported: HE-AAC (AAC+)",
+    [HP_WHY_AAC_TYPE] = "Not supported: this AAC profile",
+    [HP_WHY_MP4_CODEC] = "Not supported: neither AAC nor ALAC",
+    [HP_WHY_OPUS_MAPPING] = "Not supported: multichannel Opus",
+    [HP_WHY_MEMORY] = "Not supported: too large for the memory",
+    [HP_WHY_RATE] = "Not supported: no sample rate",
+};
+
+void fail_text(int code, uint32_t why, const char **what, const char **hint)
 {
-    return code == Q_EEMPTY ? "empty file (0 bytes)" :
-           code == PLAYER_ENOAUDIO ? "damaged file (no audio data)" :
-           code == HIFI_EPROTO ? "unreadable file (format)" :
-           code == HIFI_EREAD ? "read error" :
-           code == HIFI_EIMG ? "no codec for it in the firmware" : "core B did not answer";
+    static const char check[] = "Check the file on a computer";
+    *hint = check;
+    switch (code) {
+    case Q_EEMPTY:
+        *what = "Empty file (0 bytes)";
+        *hint = "Copy it again";
+        break;
+    case PLAYER_ENOAUDIO:
+        *what = "Damaged: no audio found";
+        break;
+    case PLAYER_EFORMAT:
+        *what = "Damaged, or not what its name says";
+        break;
+    case PLAYER_EDECODE:
+        *what = "Damaged: decoding error";
+        break;
+    case PLAYER_EUNSUPPORTED:
+        *what = why_text[why < sizeof why_text / sizeof *why_text ? why : HP_WHY_NONE];
+        *hint = why == HP_WHY_CHANNELS ? "Convert it to stereo" :
+                why == HP_WHY_HEAAC || why == HP_WHY_AAC_TYPE ? "Convert it to AAC-LC, MP3 or Opus" :
+                "Convert it to FLAC, MP3, AAC-LC or Opus";
+        break;
+    case HIFI_EREAD:
+        *what = "Read error";
+        *hint = "Reinsert the card, or check the disk";
+        break;
+    case HIFI_EIMG:
+        *what = "Its codec is missing from the firmware";
+        *hint = "Install the firmware again";
+        break;
+    default:                                    /* timeout, fault, protocol */
+        *what = "Internal error (core B)";
+        *hint = "Please report it with NEWFWLOG.TXT";
+    }
 }
 
 static int q_open(int i, int chain)
@@ -181,13 +228,19 @@ void play_step(int i, int step)
         q_playing = 0;
         return;
     }
-    int r;
+    int r, r0 = 0;
+    uint32_t why0 = 0;
     while ((r = q_open(q_dec, keep)) < 0) {
+        if (q_dec == i) {                       /* the screen tells why the one chosen failed */
+            r0 = r;
+            why0 = player.why;
+        }
         q_dec += step;
         if (++q_errors > 8 || q_dec < 0 || q_dec >= q_n) {
             play_stop(STOP_NOW);
             q_cur = q_dec = i;                  /* none would open: stay on the one chosen */
-            play_failed(q_name(i), r);
+            player.why = why0;
+            play_failed(q_name(i), r0);
             return;
         }
     }

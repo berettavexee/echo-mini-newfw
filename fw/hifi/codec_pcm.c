@@ -29,8 +29,10 @@ static uint32_t ext80(const uint8_t *p)
 /* Shared by both containers once the format is read: frame size, the ring's frame */
 static int set_format(uint32_t ch, uint32_t bits, uint32_t rate)
 {
-    if (ch < 1 || ch > 2 || (bits != 8 && bits != 16 && bits != 24 && bits != 32) || !rate)
-        return -HP_ERR_UNSUPPORTED;
+    if (ch < 1 || ch > 2)
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_CHANNELS);
+    if ((bits != 8 && bits != 16 && bits != 24 && bits != 32) || !rate)
+        return REFUSE(HP_ERR_UNSUPPORTED, rate ? HP_WHY_BITS : HP_WHY_RATE);
     ctl->rate = rate;
     ctl->channels = ch;
     ctl->bits = bits;
@@ -122,8 +124,8 @@ int codec_open(void)
                 uint32_t tag = le16(f);
                 if (tag == 0xfffe && size >= 26)
                     tag = le16(f + 24);         /* subformat GUID: its first two bytes */
-                if (tag != 1)
-                    return -HP_ERR_UNSUPPORTED;
+                if (tag != 1)                   /* 3: IEEE float; others compressed */
+                    return REFUSE(HP_ERR_UNSUPPORTED, tag == 3 ? HP_WHY_FLOAT : HP_WHY_COMPRESSED);
                 r = set_format(le16(f + 2), le16(f + 14), le32(f + 4));
             } else {
                 if (form == 3) {
@@ -131,7 +133,8 @@ int codec_open(void)
                     if (c == 0x74776f73)        /* "sowt": little-endian */
                         big = 0;
                     else if (c != 0x454e4f4e && c != 0x736f7774)    /* "NONE", "twos" */
-                        return -HP_ERR_UNSUPPORTED;
+                        return REFUSE(HP_ERR_UNSUPPORTED, (c & 0xffff) == 0x6c66 ?  /* "fl32", */
+                                      HP_WHY_FLOAT : HP_WHY_COMPRESSED);           /* "fl64" */
                 }
                 frames = be32(f + 2);
                 r = set_format(be16(f), (be16(f + 6) + 7) & ~7u, ext80(f + 8));

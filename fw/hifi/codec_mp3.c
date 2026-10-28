@@ -152,7 +152,7 @@ int codec_open(void)
     pos = len = 0;
     ver0 = rate0 = 0;
     if (pvmp3_decoderMemRequirements() > sizeof mem)
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_MEMORY);
     skip_id3v2();
     uint32_t start = ctl->in_rd - (len - pos);      /* stream offset of the window start */
     if (!next_frame(&f))

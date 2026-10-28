@@ -43,6 +43,13 @@ enum hp_err {
     HP_ERR_NONE, HP_ERR_FORMAT, HP_ERR_UNSUPPORTED, HP_ERR_DECODE, HP_ERR_FAULT,
 };
 
+/* Why a file is refused, for the "Cannot play" screen (playback.c): set with the error by core B
+ * (REFUSE, rt.h) or by core A's MP4 reader; HP_WHY_NONE: the error alone says it */
+enum hp_why {
+    HP_WHY_NONE, HP_WHY_CHANNELS, HP_WHY_BITS, HP_WHY_FLOAT, HP_WHY_COMPRESSED, HP_WHY_HEAAC,
+    HP_WHY_AAC_TYPE, HP_WHY_MP4_CODEC, HP_WHY_OPUS_MAPPING, HP_WHY_MEMORY, HP_WHY_RATE,
+};
+
 struct hp_ctl {
     uint32_t magic, version, codec;     /* B: at start-up */
     uint32_t state, error, error_info;  /* B */
@@ -86,6 +93,7 @@ struct hp_ctl {
     uint32_t hacc_sub, hacc_soft;       /* FLAC: LPC subframes on HIFIACC, in software after a
                                            timeout (ETUDE §67) */
     uint32_t synth_gran, synth_soft;    /* MP3: granules on SYNTH, in software (ETUDE §71) */
+    uint32_t why;                       /* B: enum hp_why, with an HP_ERR_* of the open */
 #if defined(ECHO_HWTEST) || defined(ECHO_HWSYN) || defined(ECHO_FFTCMP)
     /* Test build only (ETUDE §66): HIFIACC's LPC against dr_flac, per track, written by core B
      * and logged by core A at the end of the track */

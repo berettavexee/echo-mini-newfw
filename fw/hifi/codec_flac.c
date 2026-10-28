@@ -121,7 +121,7 @@ int codec_open(void)
     if (!flac)
         return -HP_ERR_FORMAT;
     if (flac->channels < 1 || flac->channels > 2)
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_CHANNELS);
     ctl->rate = flac->sampleRate;
     ctl->channels = flac->channels;
     ctl->bits = flac->bitsPerSample;

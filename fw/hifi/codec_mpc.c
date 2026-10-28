@@ -115,7 +115,7 @@ int codec_open(void)
         return -HP_ERR_FORMAT;
     mpc_demux_get_info(demux, &si);
     if (si.channels < 1 || si.channels > 2 || !si.sample_freq)
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_CHANNELS);
     ch = si.channels;
     uint64_t total = si.samples > si.beg_silence ? si.samples - si.beg_silence : 0;
     ctl->rate = si.sample_freq;

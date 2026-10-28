@@ -35,18 +35,18 @@ int codec_open(void)
         return -HP_ERR_FORMAT;
     if (PVMP4AudioDecoderGetMemRequirements() > sizeof mem || !h.rate || h.channels < 1 ||
         h.channels > 2)
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_CHANNELS);
     memset(&ext, 0, sizeof ext);
     ext.outputFormat = OUTPUTFORMAT_16PCM_INTERLEAVED;
     ext.desiredChannels = 2;
     ext.aacPlusEnabled = false;
     if (PVMP4AudioDecoderInitLibrary(&ext, mem))
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_MEMORY);
     ext.pInputBuffer = cfg;
     ext.inputBufferCurrentLength = (Int)h.config_len;
     ext.inputBufferMaxLength = 0;
     if (PVMP4AudioDecoderConfig(&ext, mem))
-        return -HP_ERR_UNSUPPORTED;            /* not AAC-LC (or a configuration it refuses) */
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_AAC_TYPE);   /* not AAC-LC, or refused */
     skip = h.skip;
     left = h.length == 0xffffffffu ? 0xffffffffu :
            h.length > h.start_frame ? h.length - h.start_frame : 0;

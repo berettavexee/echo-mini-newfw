@@ -3465,3 +3465,16 @@ Image : `work/images/NEWFW092.IMG` (CRC `0x1851a67c`).
 **Sur l'appareil** :
 - image de banc « 0.93hwt » (`work/hwlog/1028_093syn/`) : environ 40 millions d'échantillons comparés, **74-76 % exacts, 2 LSB au plus**, 0 délai dépassé ; temps de synthèse sur une piste de 114 s : **SYNTH 8,3 s, libmpcdec 52,1 s** ;
 - image « 0.93 » (`work/hwlog/1028_093s/`) : pistes entières enchaînées à **10,3-10,8 MHz** (la même piste : 29,8 MHz avant, **−65 %**), palier de 50 MHz, charge maximale 24 %, 0 délai dépassé, 0 manque pendant la lecture.
+
+## 78. Messages d'erreur plus parlants (0.94, 2026-10-28)
+
+**Constat** : un seul écran « Cannot play: » avec six raisons ; le cœur B distinguait déjà format inconnu, variante non prise en charge, erreur de décodage et faute, mais le cœur A ramenait tout à « unreadable file (format) » ; un M4A en HE-AAC affichait « no codec for it in the firmware ».
+
+**Choix (avec l'utilisateur)** : la cause précise et une ligne « que faire » ; une ligne de journal uniforme ; délai inchangé (3 s) ; pas de bandeau pour une piste sautée (la lecture d'un album ne s'arrête pas pour une erreur) ; l'installeur, la carte et l'USB plus tard.
+
+**Code** :
+- `hifi_proto.h` : `enum hp_why` (canaux, profondeur, virgule flottante, WAV/AIFF compressé, HE-AAC, autre profil AAC, ni AAC ni ALAC, Opus multicanal, mémoire, fréquence) et le champ `why` du bloc de contrôle ; `rt.h` : `REFUSE(err, why)` ; les refus de `codec_open` des huit codecs l'utilisent ; le lecteur MP4 du cœur A met la raison dans `mp4_track.why` ;
+- `player.c` : l'erreur du cœur B devient `PLAYER_EFORMAT`, `EUNSUPPORTED`, `EDECODE` ou `EFAULT`, la raison dans `player.why` ; un délai dépassé reste `HIFI_ETIMEOUT` ;
+- `playback.c` : `fail_text()` donne les deux lignes ; l'écran montre la raison de la piste choisie, pas celle de la dernière essayée de la file ; journal : `error: <fichier>: <message> (code, why)`.
+
+**Essais** : sept fichiers synthétiques (`work/testsets/errors/` : WAV ADPCM, WAV flottant, FLAC 5.1, M4A HE-AAC par l'octet de configuration, FLAC à l'en-tête abîmé, MP3 aléatoire, fichier vide), scénarios `err-*` de l'émulateur, puis sur l'appareil (`work/hwlog/1028_094/`, dossier `errors_msg`) : les sept messages attendus, 0 faute.

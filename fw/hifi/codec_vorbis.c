@@ -142,7 +142,7 @@ int codec_open(void)
     if (ilen < 30 || ident[0] != 1 || memcmp(ident + 1, "vorbis", 6))
         return -HP_ERR_FORMAT;
     if (ident[11] < 1 || ident[11] > 2)         /* audio_channels */
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_CHANNELS);
     int len;
     if (ctl->comment_end_page) {                /* core A found where it ends (tags.c) */
         if (pg_skip_to(ctl->comment_end_page, ctl->comment_end_seg))
@@ -171,7 +171,7 @@ int codec_open(void)
             header_in(pkt, len, 0))
             return -HP_ERR_FORMAT;
         if (vi.channels < 1 || vi.channels > 2)
-            return -HP_ERR_UNSUPPORTED;
+            return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_CHANNELS);
         if (ilen <= IDENT_MAX && len <= SETUP_MAX) {
             cache.floor = heap_keep();
             cache.cur = heap_cur;
@@ -186,7 +186,7 @@ int codec_open(void)
     }
     vd = vorbis_dsp_create(&vi);
     if (!vd)
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_MEMORY);
     uint64_t g = ctl->end_granule_lo | (uint64_t)ctl->end_granule_hi << 32;
     ctl->rate = (uint32_t)vi.rate;
 #if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)

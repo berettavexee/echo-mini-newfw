@@ -220,9 +220,12 @@ void ui_main(void)
             sys_screen_set(1);
             t_key = ticks();
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text_clip_x(8, 40, "Cannot play:", LCD_W, WARN, BG, 2);
-            lcd_text_clip(8, 90, fail_name, LCD_W - 8, FG, BG);
-            lcd_text_clip(8, 115, fail_reason(fail_code), LCD_W - 8, DIM, BG);
+            const char *what, *hint;
+            fail_text(fail_code, fail_why, &what, &hint);
+            lcd_text_clip_x(8, 20, "Cannot play", LCD_W, WARN, BG, 2);
+            lcd_text_clip(8, 62, fail_name, LCD_W - 8, FG, BG);
+            lcd_text_clip(8, 92, what, LCD_W - 8, FG, BG);
+            lcd_text_clip(8, 118, hint, LCD_W - 8, DIM, BG);
             scr = SCR_BROWSER;
         }
         if (banner_ms && millis() - banner_ms > 3000) {

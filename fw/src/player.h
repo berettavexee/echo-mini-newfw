@@ -11,6 +11,7 @@ struct player_state {
     uint32_t rate, channels, bps, length_ms, time_ms;
     uint32_t frames, reads, read_bytes;
     uint32_t codec;             /* the core B codec of the track (M4A: AAC or ALAC, from its content) */
+    uint32_t why;               /* with an error: enum hp_why (hifi_proto.h), for the screen */
     /* our codecs: core B in the last 250 ms window (step 5g) */
     uint32_t b_load;            /* per mille of the time awake */
     uint32_t b_mhz10;           /* tenths of MHz used */
@@ -45,6 +46,11 @@ void player_seek_hint(uint32_t ms);
 int player_service(void);
 /* player_service() error: input read on and on without a frame decoded (zeros, garbage) */
 #define PLAYER_ENOAUDIO (-50)
+/* Core B's errors (enum hp_err), and the MP4 reader's: player.why may say more */
+#define PLAYER_EFORMAT (-51)            /* damaged, or not the format its name says */
+#define PLAYER_EUNSUPPORTED (-52)       /* a variant of the format we do not play */
+#define PLAYER_EDECODE (-53)            /* a decoding error */
+#define PLAYER_EFAULT (-54)             /* core B stopped on a fault */
 void player_close(int stopped);
 int player_is_open(void);
 

@@ -36,11 +36,11 @@ int codec_open(void)
         return -HP_ERR_FORMAT;
     uint32_t ch = pkt[9], family = pkt[18];
     if (ch < 1 || ch > 2 || family > 1)
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, family > 1 ? HP_WHY_OPUS_MAPPING : HP_WHY_CHANNELS);
     pre_skip = pkt[10] | pkt[11] << 8;
     int16_t gain = (int16_t)(pkt[16] | pkt[17] << 8);
     if ((uint32_t)opus_decoder_get_size(2) > sizeof dec_mem)
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_MEMORY);
     dec = (OpusDecoder *)dec_mem;
     if (opus_decoder_init(dec, 48000, 2) != OPUS_OK)
         return -HP_ERR_DECODE;

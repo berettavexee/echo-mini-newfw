@@ -27,6 +27,15 @@ static int fail(int err, const char *what)
 /* ---- our runtime and codecs (ETUDE §19) ---- */
 #include "hifi_proto.h"
 
+/* Core B's error (enum hp_err) as a player error; its reason into player.why */
+static int b_error(volatile struct hp_ctl *c)
+{
+    player.why = c->why;
+    return c->error == HP_ERR_FORMAT ? PLAYER_EFORMAT :
+           c->error == HP_ERR_UNSUPPORTED ? PLAYER_EUNSUPPORTED :
+           c->error == HP_ERR_DECODE ? PLAYER_EDECODE : PLAYER_EFAULT;
+}
+
 static uint32_t fed_since_ring, freed_since_ring;
 static int mp4_on;                              /* the input is mp4.c's packet stream */
 
@@ -549,10 +558,13 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     if (mp4_on) {                               /* the container read here, the seek done here */
         struct mp4_track t;
         r = mp4_open(file, seek, &t);         /* own_file: f may be the caller's copy */
-        if (r)
-            return fail(r == MP4_EREAD ? HIFI_EREAD : r == MP4_EFORMAT ? HIFI_EPROTO : HIFI_EIMG,
-                        r == MP4_EUNSUPPORTED ? "MP4: neither AAC-LC nor ALAC as we play them" :
+        if (r) {
+            player.why = r == MP4_EUNSUPPORTED ? t.why : HP_WHY_NONE;
+            return fail(r == MP4_EREAD ? HIFI_EREAD : r == MP4_EFORMAT ? PLAYER_EFORMAT :
+                        PLAYER_EUNSUPPORTED, r == MP4_EUNSUPPORTED ?
+                        "MP4: neither AAC-LC nor ALAC as we play them" :
                         "MP4: container not readable");
+        }
         seek = 0;
         codec = t.codec;                        /* an M4A: AAC or ALAC, the container says */
     }
@@ -611,10 +623,12 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
             hifi_ring();
         }
         if (c->state == HP_ERROR || ticks() - ts > 3000000) {
-            log_printf("player: open failed: state %u error %u, fault pc %x lr %x cfsr %x, in %u/%u",
-                       c->state, c->error, c->fault_pc, c->fault_lr, c->fault_cfsr, c->in_rd, c->in_wr);
+            log_printf("player: open failed: state %u error %u why %u, fault pc %x lr %x cfsr %x, "
+                       "in %u/%u", c->state, c->error, c->why, c->fault_pc, c->fault_lr,
+                       c->fault_cfsr, c->in_rd, c->in_wr);
+            r = c->state == HP_ERROR ? b_error(c) : HIFI_ETIMEOUT;
             hifi_stop();
-            return fail(HIFI_EPROTO, "our codec could not open the file");
+            return fail(r, "our codec could not open the file");
         }
     }
     ps.t_open = ticks();
@@ -734,7 +748,7 @@ int player_service(void)
     if (c->state == HP_ERROR) {
         log_printf("player: core B error %u, fault pc %x lr %x cfsr %x, at %u MHz", c->error,
                    c->fault_pc, c->fault_lr, c->fault_cfsr, hifi_hz / 1000000);
-        player.error = HIFI_EPROTO;
+        player.error = b_error(c);
         return player.error;
     }
     if (c->state == HP_END && !out_avail() &&

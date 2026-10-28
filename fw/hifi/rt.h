@@ -6,6 +6,8 @@
 #include "../src/hifi_proto.h"
 
 #define ctl HP_CTL
+/* codec_open's refusal with its reason: return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_CHANNELS); */
+#define REFUSE(err, w) (ctl->why = (w), -(err))
 #define REG(a) (*(volatile uint32_t *)(a))
 /* TIMER1: 64-bit, 24 MHz, counting down from 2^64 - 1, shared with core A; TIMER1_NOW() counts up */
 #define TIMER1_CUR0 0x400e0028u

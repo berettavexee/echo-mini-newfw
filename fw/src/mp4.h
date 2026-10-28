@@ -14,6 +14,7 @@ struct mp4_track {
     uint32_t length;                    /* frames once the delay and padding are removed */
     uint32_t delay, padding;            /* encoder delay and padding, frames */
     uint32_t samples;                   /* packets in the track */
+    uint32_t why;                       /* MP4_EUNSUPPORTED: enum hp_why */
 };
 
 /* Reads the container of f and prepares the packet stream from seek_ms (0: the start) */

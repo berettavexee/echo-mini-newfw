@@ -190,11 +190,11 @@ hand.
 
 ## Messages
 
-![Cannot play: an empty file](docs/manual/cannot-play.png)
+![Cannot play: an HE-AAC file](docs/manual/cannot-play.png)
 
 | Message | Meaning |
 |---|---|
-| **Cannot play:** name, reason | nothing in the queue could be played: an empty file, a damaged file (no audio data), an unreadable format, or a read error. Shown 3 s, then the browser |
+| **Cannot play**: name, what went wrong, what to do | the track chosen could not be played, nor the next ones of the queue. What went wrong: an empty file; a damaged file (or not what its name says); a variant of a format the player does not play, with the reason (more than 2 channels, floating-point or compressed WAV/AIFF, HE-AAC, another AAC profile, multichannel Opus, a bit depth, too large for the memory); a read error; an internal error (please report it with `NEWFWLOG.TXT`). Shown 3 s, then the browser; the log has the same line, `error:` |
 | **Low battery** / plug the USB cable | under 3.425 V (about 45 minutes of playback left). With music, three beeps, then one every 5 min |
 | **Battery empty** | under 3.3 V for 30 s. Two low beeps, a pause, then the player powers off; the position is saved. Under 3.35 V the player does not start |
 | **SD card (not readable)** | the card could not be read; take it out and insert it again |

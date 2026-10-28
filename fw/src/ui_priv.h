@@ -115,8 +115,10 @@ void play_step(int i, int step);
 #define Q_EEMPTY (-60)                          /* an empty file (0 bytes) */
 extern char fail_name[64];                      /* nothing could be played: the banner */
 extern int fail_code, fail_due;
+extern uint32_t fail_why;
 void play_failed(const char *name, int code);
-const char *fail_reason(int code);
+/* What went wrong and what to do, for the "Cannot play" screen (code: a player error) */
+void fail_text(int code, uint32_t why, const char **what, const char **hint);
 void volume(int d);
 #ifndef SEEK_IDLE_MS
 #define SEEK_IDLE_MS 2000u

@@ -34,11 +34,11 @@ int codec_open(void)
      * the headers; 8 bytes more, read (not used) by the bit reader past the end */
     pkt_max = dec.max_frame_bytes ? dec.max_frame_bytes : dec.frame_len * dec.channels * 4 + 64;
     if (pkt_max > 64 * 1024)
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_MEMORY);
     pkt = rt_alloc(pkt_max + 8);
     pcm = rt_alloc(dec.frame_len * (dec.bits == 16 ? 4 : 8));
     if (!pkt || !pcm)
-        return -HP_ERR_UNSUPPORTED;
+        return REFUSE(HP_ERR_UNSUPPORTED, HP_WHY_MEMORY);
     skip = h.skip;
     left = h.length == 0xffffffffu ? 0xffffffffu :
            h.length > h.start_frame ? h.length - h.start_frame : 0;

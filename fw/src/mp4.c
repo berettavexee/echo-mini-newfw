@@ -436,6 +436,7 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
         box_at(stsd.body + 8, stsd.end, &entry_box))
         return MP4_EFORMAT;
     int alac = entry_box.type == FOURCC('a', 'l', 'a', 'c');
+    t->why = HP_WHY_MP4_CODEC;
     if ((!alac && entry_box.type != FOURCC('m', 'p', '4', 'a')) || rd(entry_box.body, buf, 28))
         return MP4_EUNSUPPORTED;
     /* AudioSampleEntry: QuickTime versions 1 and 2 have 16 or 36 more bytes before the children */
@@ -456,6 +457,7 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
             (t->bits != 16 && t->bits != 20 && t->bits != 24)) {
             log_printf("mp4: ALAC %u bits, %u channels, %u frames per packet: not played (16, 20 "
                        "or 24 bits, mono or stereo)", t->bits, t->channels, flen);
+            t->why = t->channels < 1 || t->channels > 2 ? HP_WHY_CHANNELS : HP_WHY_BITS;
             return MP4_EUNSUPPORTED;
         }
         t->codec = HP_CODEC_ALAC;
@@ -472,6 +474,8 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
         log_printf("mp4: audio object type %u, rate index %u, %u channels%s: not played (AAC-LC "
                    "only, mono or stereo, 1024-sample frames)", aot, sri, ch,
                    cfg[1] & 4 ? ", 960-sample frames" : "");
+        t->why = aot == 5 || aot == 29 ? HP_WHY_HEAAC : ch < 1 || ch > 2 ? HP_WHY_CHANNELS :
+                 HP_WHY_AAC_TYPE;
         return MP4_EUNSUPPORTED;
     }
     if (!alac) {
