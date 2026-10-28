@@ -137,14 +137,16 @@ $(BUILD)/hifi_mp3.elf: $(PVMP3_OBJS) $(HDEPS)
 
 # AAC-LC: PacketVideo decoder of AOSP (third_party/pvaacdec, unmodified, Apache-2.0), C++ without
 # exceptions or RTTI, without AAC_PLUS (no SBR, no parametric stereo); -O3 (8 % fewer instructions
-# than -O2 on the QEMU bench, ETUDE §54). Portable C fixed-point operations for now.
+# than -O2 on the QEMU bench, ETUDE §54). Portable C fixed-point operations for now. The two
+# FFTs of its IMDCT on HIFIACC (hifi/aacfft.c, ETUDE §76), as Vorbis: -DECHO_NO_HWFFT, -DECHO_HWTEST
 PVAAC_DIR ?= ../third_party/pvaacdec/src
 PVAAC_OBJS := $(patsubst $(PVAAC_DIR)/%.cpp,$(BUILD)/pvaac/%.o,$(wildcard $(PVAAC_DIR)/*.cpp))
 PVAAC_CFLAGS = -mcpu=cortex-m3 -mthumb -O3 -g -ffreestanding -nostdlib -fno-exceptions -fno-rtti \
                -ffunction-sections -fdata-sections -w -Wno-narrowing "-DOSCL_UNUSED_ARG(x)=(void)(x)" \
-               -DOSCL_IMPORT_REF= -DOSCL_EXPORT_REF= -I$(PVAAC_DIR)
+               -DOSCL_IMPORT_REF= -DOSCL_EXPORT_REF= -I$(PVAAC_DIR) \
+               $(filter -DECHO_NO_HWFFT -DECHO_HWTEST -DECHO_FFTCMP,$(EXTRA))
 
-$(BUILD)/pvaac/%.o: $(PVAAC_DIR)/%.cpp
+$(BUILD)/pvaac/%.o: $(PVAAC_DIR)/%.cpp $(BUILD)/flags
 	@mkdir -p $(dir $@)
 	$(CROSS)g++ $(PVAAC_CFLAGS) -c $< -o $@
 

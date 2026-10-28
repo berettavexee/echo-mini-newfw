@@ -223,6 +223,28 @@
 
 #include "window_block_fxp.h"
 
+/* ECHO MINI: the two FFTs on HIFIACC (fw/hifi/aacfft.c, ETUDE §76); -1 = not done, ours then */
+#if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
+extern "C" int echo_aac_fft(Int32 *data, int bits, Int32 *max);
+extern "C" void echo_aac_fft_check(const Int32 *data, int bits, int e);
+#ifndef ECHO_FFTCMP
+#define ECHO_FFT(data, bits, max, own, fn) \
+    ({ Int echo_e = echo_aac_fft(data, bits, max); \
+       if (echo_e < 0) { echo_e = own; echo_aac_fft_check(data, bits, echo_e); } echo_e; })
+#else
+/* Test build: the sound from HIFIACC, pvaacdec's FFT on a copy of the input to compare */
+extern "C" void echo_aac_fft_cmp(const Int32 *hw, int e_hw, const Int32 *sw, int e_sw, int bits);
+static Int32 echo_cp[1024];
+#define ECHO_FFT(data, bits, max, own, fn) \
+    ({ Int32 echo_m = *(max); pv_memcpy(echo_cp, data, (2 << (bits)) * sizeof(Int32)); \
+       Int echo_e = echo_aac_fft(data, bits, max); \
+       if (echo_e < 0) { echo_e = own; echo_aac_fft_check(data, bits, echo_e); } \
+       else echo_aac_fft_cmp(data, echo_e, echo_cp, fn(echo_cp, &echo_m), bits); echo_e; })
+#endif
+#else
+#define ECHO_FFT(data, bits, max, own, fn) (own)
+#endif
+
 /*----------------------------------------------------------------------------
 ; MACROS
 ; Define module specific macros here
@@ -443,8 +465,8 @@ Int imdct_fxp(Int32   data_quant[],
         if (n != SHORT_WINDOW_TYPE)
         {
 
-            shift -= mix_radix_fft(data_quant,
-                                   &max);
+            shift -= ECHO_FFT(data_quant, 9, &max, mix_radix_fft(data_quant,
+                              &max), mix_radix_fft);          /* ECHO MINI */
 
             shift -= inv_long_complex_rot(data_quant,
                                           max);
@@ -453,7 +475,8 @@ Int imdct_fxp(Int32   data_quant[],
         else        /*  n_4 is 64 */
         {
 
-            shift -= fft_rx4_short(data_quant,   &max);
+            shift -= ECHO_FFT(data_quant, 6, &max, fft_rx4_short(data_quant,   &max),
+                              fft_rx4_short);   /* ECHO MINI */
 
 
             shift -= inv_short_complex_rot(data_quant,

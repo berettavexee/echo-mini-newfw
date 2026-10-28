@@ -153,7 +153,11 @@ Last update: 2026-10-28, version 0.89.
   (one buffer for the Ogg scans); shared byte-order helpers and accelerator addresses;
   `main.c` split (`install.c`, `usbmode.c`); header dependencies tracked by the Makefile;
   `ECHO_PROBE`, `SD_WALK`, the Vorbis fuzzing harnesses and `msc_test` built again. Works on
-  the device (the scroll bar fixed).
+  the device (the scroll bar fixed). A fuzzing target for the FAT32 and exFAT reader (`fat`):
+  9 million runs, no crash, no hang.
+- 0.92: the two FFTs of the AAC decoder's IMDCT on HIFIACC (§76, `docs/HIFIACC.md`), the FFT
+  driver shared with Vorbis; AAC at 23 MHz of core B instead of 25 (an album of 13 tracks, no
+  timeout, no underrun), Vorbis unchanged (34.7 MHz).
 
 ## To do
 
@@ -257,10 +261,11 @@ Other items:
 
 - ALAC: the predictor (63 % of our decoder's time, §57) on the HIFIACC's adaptive FIR, as the
   stock firmware does, or in Thumb-2 assembly; not needed for now (16-bit at the lowest step).
-- AAC: assembly optimisations, not a priority (core B already at 25 MHz, the lowest level, for
+- AAC: assembly optimisations, not a priority (core B at 23 MHz since 0.92, the FFTs on HIFIACC;
+  it was 25 MHz, the lowest level, for
   AAC 125 kb/s, §55): a Cortex-M3 header for the fixed-point operations (smull/smlal; the
   decoder's ARMv5TE variant uses DSP instructions the M3 lacks), then hand-written Thumb-2 for
-  the hot functions of the QEMU profile (fft_rx4_long 25 %, trans4m_freq_2_time_fxp_2 14 %,
+  the hot functions of the QEMU profile (fft_rx4_long 25 %, on HIFIACC since 0.92, trans4m_freq_2_time_fxp_2 14 %,
   inv_long_complex_rot 9 %, §54); no reference assembly exists in AOSP for this decoder.
 - AAC in ADTS (`.aac`), a distant prospect: pvaacdec already reads ADTS headers; an ADTS mode in
   codec_aac.c reading the file directly (frames found by their headers, as codec_mp3.c does),

@@ -207,6 +207,13 @@ hang. All 5,443 saved crashes replay clean. The 34 M4A files of a real library a
 decode bit-exact before and after the fixes. On the ARM image, in the emulator, an MP3 and two
 M4A files decode bit-exact against 0.81.
 
+## Results: FAT32 and exFAT (version 0.91, October 2026)
+
+Six instances of the `fat` target for two hours each, on the seeds of `mkfatseeds.py`:
+8,955,972 runs, **no crash and no hang**. Coverage stops growing after about 20 minutes (55 to
+68 corpus entries per instance): more varied seeds (other cluster sizes, deeper and larger
+folders, a damaged FAT) would be the next step.
+
 ## Limits
 
 - The PC build is 64-bit and uses the C versions of the ARM assembly macros and routines (Tremor,

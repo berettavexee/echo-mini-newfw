@@ -11,6 +11,10 @@ void echo_fft_check(int n, const int32_t *in);
 /* pvmp3dec's synthesis (mp3synth.c, hwtest_synth.c): 1 = done on SYNTH */
 int echo_synth_granule(const int32_t *work, int16_t *out, int nch, int ch);
 void echo_synth_reset(void);
+/* pvaacdec's IMDCT FFTs (aacfft.c): the exponent, or -1 (pvaacdec's own FFT, then the check) */
+int echo_aac_fft(int32_t *data, int bits, int32_t *max);
+void echo_aac_fft_check(const int32_t *data, int bits, int e);
+void echo_aac_fft_cmp(const int32_t *hw, int e_hw, const int32_t *sw, int e_sw, int bits);
 /* dr_flac's LPC subframes (codec_flac.c): 1 = done on HIFIACC */
 int echo_hacc_block(int *y, unsigned n, unsigned order, int shift, const int *qlp);
 /* libmpcdec's stream header check (codec_mpc.c) */

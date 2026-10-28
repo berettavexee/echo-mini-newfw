@@ -783,10 +783,19 @@ void player_close(int stopped)
         log_printf("fft: %s: %u IMDCT blocks on HIFIACC, %u in software after a timeout",
                    own_file.name, c->fft_blocks, c->fft_soft);
 #endif
+#ifdef ECHO_FFTCMP
+    if (c->hwf.magic == HWT_MAGIC && c->hwf.blocks)  /* test build: sound from HIFIACC */
+        log_printf("fcmp: %s: %u blocks (%u short), %u samples: %u exact, %u within 1, max %u "
+                   "LSB at block %u (index %u): e_hw %u e_sw %u, %u-point, |hw| OR %x",
+                   own_file.name, c->hwf.blocks, c->hwf.short_blocks, c->hwf.samples,
+                   c->hwf.exact, c->hwf.within1, c->hwf.max, c->hwf.worst_at, c->hwf.worst_i,
+                   c->hwf.worst_info & 0xff, c->hwf.worst_info >> 8 & 0xff,
+                   1u << (c->hwf.worst_info >> 16), c->hwf.worst_m);
+#endif
 #ifdef ECHO_HWTEST
-    if (c->hwf.magic == HWT_MAGIC && c->hwf.blocks)  /* test build: FFT against Tremor (§74) */
+    if (c->hwf.magic == HWT_MAGIC && c->hwf.blocks)  /* test build: FFT against the software */
         log_printf("hwf: %s: %u IMDCT blocks (%u short), %u samples: %u exact, %u within 1, "
-                   "max %u LSB; hw %u us, Tremor %u us in all; %u timeouts", own_file.name,
+                   "max %u LSB; hw %u us, software %u us in all; %u timeouts", own_file.name,
                    c->hwf.blocks, c->hwf.short_blocks, c->hwf.samples, c->hwf.exact,
                    c->hwf.within1, c->hwf.max, c->hwf.hw_ticks / 24, c->hwf.sw_ticks / 24,
                    c->hwf.timeouts);

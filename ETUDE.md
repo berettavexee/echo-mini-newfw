@@ -3419,3 +3419,30 @@ Séquence qui marche : `+0x24` = `taille << 29 | options` (64 → 0, 128 → 1, 
 
 Il reste surtout le décodage de la page qui précède la cible (environ 150 ms en Vorbis, 280 ms en Opus) : piste en prospective (ROADMAP) : le granule de cette page transmis au cœur B, qui démarrerait sur la page de la cible (Opus : 80 ms de pré-décodage, RFC 7845) ; et de l'anneau rempli de silence au moment de la recherche, pour que le court manque ne rejoue pas l'ancien son.
 
+
+## 76. AAC : les FFT de l'IMDCT de pvaacdec sur HIFIACC (0.92, 2026-10-28)
+
+**Où** : l'IMDCT de pvaacdec (`imdct_fxp.cpp`) garde ses pré- et post-rotations ; seules ses deux FFT changent de place : `mix_radix_fft` (blocs longs, 512 points complexes) et `fft_rx4_short` (blocs courts, 64 points). Accroche par une macro `ECHO_FFT` aux deux appels (marqués « ECHO MINI »), code dans `fw/hifi/aacfft.c` (inclus par `codec_aac.c`). Le pilotage de la FFT (registres, lancement, attente de 3 ms, 3 délais puis logiciel) est sorti de `hififft.c` dans `fw/hifi/haccfft.h`, commun à Vorbis et à l'AAC.
+
+**Contrat de pvaacdec** : `data[]` complexe en place, `*max` = l'OU des |x| en entrée et en sortie, valeur rendue = l'exposant `e` (sortie = DFT × 2^−e). Ses sorties **ne sont pas en ordre naturel** ; HIFIACC rend l'ordre naturel, relu dans les cases de pvaacdec (vérifié sur PC contre les deux fonctions) :
+- blocs longs : les fréquences paires 2j dans la première moitié, les impaires 2j+1 dans la seconde (son découpage en base 2) ;
+- blocs courts : les chiffres en base 4 de la case, inversés (base 4).
+
+**Échelle** : HIFIACC calcule sans échelle sur 32 bits. L'entrée est décalée juste assez pour que rien ne déborde : aucune sortie ne dépasse la somme des |re| + |im| de l'entrée (borne L1, bien plus serrée que points × crête sur de vrais blocs, donc moins de bits perdus). Les sorties sont ensuite **ramenées à 24 bits**, la plage de la FFT de pvaacdec, la seule pour laquelle le reste de son IMDCT a été écrit et essayé (k bits de plus dans l'exposant ; aucune perte de précision par rapport à pvaacdec, coût négligeable).
+
+**Banc sur l'appareil** (`-DECHO_HWTEST` : les deux FFT calculées, le son de pvaacdec, écarts en LSB de la crête du bloc prise sur 16 bits ; `work/hwlog/1028_hwt1`, `1028_hwt2`) :
+
+| | décalage | écart max | exacts ou 1 LSB | temps FFT, Guerrilla Radio (207 s) |
+|---|---|---|---|---|
+| hwt1 | sur la crête | 9-15 LSB | — | matériel 7,0 s |
+| hwt2 | borne L1 | **6-9 LSB** | **87 %** | **matériel 10,9 s, pvaacdec 24,4 s** |
+
+Vorbis dans la même image (code commun) : 3 LSB au plus, comme en 0.88 ; aucun délai dépassé. Le temps matériel compte les transferts, l'ordre bit-inversé et la relecture rangée.
+
+**Fausse piste** : un « silence vers 1:20 de Testify » entendu avec la 0.92, la 0.92b et une image `-DECHO_FFTCMP` (le son de HIFIACC, comparé à pvaacdec sur une copie : 8 LSB au plus, `work/hwlog/1028_fc1`). Décodage sur PC avec une FFT idéale propre, UBSan sans débordement nouveau. Écoute du fichier sur PC par l'utilisateur : **le silence fait partie de la piste**. `ECHO_FFTCMP` reste disponible pour un prochain doute (version « 0.92fc »).
+
+**0.92 sur l'appareil** (`work/hwlog/1028_092f/`, `1028_092v/`) : l'album AAC (13 pistes, 50 min) enchaîné sans pause : **22,8-23,1 MHz par piste contre 25,0-25,3 MHz en 0.75 (−9 %)**, ≈ 290 000 blocs, 0 repli logiciel, 0 manque aux enchaînements (un manque de 2 560 octets sur un redémarrage manuel de piste, l'anneau à 13 ms). Vorbis inchangé : Claws 34,7 MHz (0.88 : 34,6-34,7), 0 repli, 0 manque. Le gain est modeste : la FFT ne pèse qu'environ 25 % du décodage AAC (profil QEMU, §54), et le cœur B reste au palier de 50 MHz.
+
+Image : `work/images/NEWFW092.IMG` (CRC `0x1851a67c`).
+
+**Fuzzing de `fat.c` (cible `fat`, 0.91)** : 6 instances × 2 h, 8 955 972 exécutions, **0 plantage, 0 blocage** ; la couverture plafonne vers 55-68 entrées après 20 min (graines à varier).

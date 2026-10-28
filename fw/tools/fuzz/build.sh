@@ -41,7 +41,7 @@ tags)   DEF=-DT_TAGS; INC="-I$FW/src"; SRC="$FW/src/tags.c";;
 fat)    DEF=-DT_FAT; INC="-I$FW/src"; SRC="$FW/src/fat.c";;
 aac|aacpkt)
         PA=$TP/pvaacdec/src
-        DEF="-DT_$(echo $T | tr a-z A-Z) -DOSCL_IMPORT_REF= -DOSCL_EXPORT_REF="; INC="-I$FW/src -I$PA"
+        DEF="-DT_$(echo $T | tr a-z A-Z) -DECHO_NO_HWFFT -DOSCL_IMPORT_REF= -DOSCL_EXPORT_REF="; INC="-I$FW/src -I$PA"
         SRC="$FW/hifi/codec_aac.c $(ls $PA/*.cpp)"
         [ $T = aac ] && SRC="$FW/src/mp4.c $SRC";;
 mp3)    PM=$TP/pvmp3dec

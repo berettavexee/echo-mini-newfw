@@ -12,59 +12,33 @@
  * -DECHO_HWTEST computes both and compares them, the sound from Tremor (ctl->hwf). Included by
  * codec_vorbis.c. */
 #if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
-#include "accel.h"
+#include "haccfft.h"
 #include "fft_tw.h"
-
-#define FFT_WAIT    (24000u * 3)                /* 3 ms: some 0.1 ms at 24 MHz (to measure) */
-
-static uint32_t fft_timeouts;
-
-static inline uint32_t rbit(uint32_t x)
-{
-    uint32_t r;
-    __asm__("rbit %0, %1" : "=r"(r) : "r"(x));
-    return r;
-}
 
 /* out[0..n/2) from in[0..n/2), on HIFIACC (in == out allowed): 1 done, 0 not (size, timeout) */
 static int fft_imdct(int n, const int32_t *in, int32_t *out)
 {
     const int32_t (*w)[2];
-    uint32_t size, bits, n4 = (uint32_t)n / 4;
+    uint32_t bits, n4 = (uint32_t)n / 4;
     if (n == 2048) {
         w = fft_tw2048;
-        size = 3;                               /* 512 points */
-        bits = 9;
+        bits = 9;                               /* 512 points */
     } else if (n == 256) {
         w = fft_tw256;
-        size = 0;                               /* 64 points */
-        bits = 6;
+        bits = 6;                               /* 64 points */
     } else
         return 0;
     if (fft_timeouts >= 3)
         return 0;
-    volatile int32_t *re = (volatile int32_t *)FFT_RE, *im = (volatile int32_t *)FFT_IM;
+    volatile int32_t *re = FFT_RE_MEM, *im = FFT_IM_MEM;
     for (uint32_t m = 0; m < n4; m++) {
         int64_t a = in[2 * m], b = in[n / 2 - 1 - 2 * m], c = w[m][0], s = w[m][1];
         uint32_t j = rbit(m) >> (32 - bits);
         re[j] = (int32_t)((a * c + b * s) >> 31);
         im[j] = (int32_t)((b * c - a * s) >> 31);
     }
-    REG(HACC + 0x04) |= 0x8000;                 /* "done" in +0x08 bit 15 */
-    REG(HACC + 0x24) = size << 29 | 1u << 27;   /* FFT without scaling, complex input */
-    REG(HACC + 0x0c) = 0x40000000;              /* function 2: FFT */
-    REG(HACC + 0x0c) = 0x40000003;
-    uint32_t t0 = TIMER1_NOW();
-    while (!(REG(HACC + 0x08) & 0x8000))
-        if (TIMER1_NOW() - t0 > FFT_WAIT)
-            break;
-    int done = (REG(HACC + 0x08) & 0x8000) != 0;
-    REG(HACC + 0x04) &= ~0x8000u;
-    REG(HACC + 0x0c) = 0;                       /* the memory back to the bus */
-    if (!done) {
-        fft_timeouts++;
+    if (!hacc_fft(bits))
         return 0;
-    }
     for (uint32_t q = 0; q < n4 / 2; q++) {
         uint32_t k = n4 - 1 - q;
         int64_t fr = re[q], fi = im[q], c = w[q][0], s = w[q][1];

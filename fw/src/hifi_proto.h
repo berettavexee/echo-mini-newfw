@@ -86,7 +86,7 @@ struct hp_ctl {
     uint32_t hacc_sub, hacc_soft;       /* FLAC: LPC subframes on HIFIACC, in software after a
                                            timeout (ETUDE §67) */
     uint32_t synth_gran, synth_soft;    /* MP3: granules on SYNTH, in software (ETUDE §71) */
-#if defined(ECHO_HWTEST) || defined(ECHO_HWSYN)
+#if defined(ECHO_HWTEST) || defined(ECHO_HWSYN) || defined(ECHO_FFTCMP)
     /* Test build only (ETUDE §66): HIFIACC's LPC against dr_flac, per track, written by core B
      * and logged by core A at the end of the track */
     struct {
@@ -129,16 +129,18 @@ struct hp_ctl {
         /* ECHO_HWSYN (ETUDE §71): SYNTH plays; the first granules compared with the software */
         uint32_t p_gran, p_cmp, p_exact, p_within1, p_max, p_hw_ticks, p_polled, p_timeouts;
     } hws;
-    /* Vorbis IMDCT on HIFIACC's FFT against Tremor (ETUDE §74): blocks, output samples on the
-     * 16-bit scale, TIMER1 ticks of each */
+    /* Vorbis IMDCT on HIFIACC's FFT against Tremor (ETUDE §74), AAC FFT against pvaacdec's
+     * (§76): blocks, output samples on the 16-bit scale, TIMER1 ticks of each */
     struct {
         uint32_t magic, blocks, short_blocks, samples, exact, within1, max, timeouts;
         uint32_t hw_ticks, sw_ticks;
+        /* ECHO_FFTCMP: the worst block, e_hw | e_sw << 8 | bits << 16, the OR of |hw| */
+        uint32_t worst_at, worst_info, worst_m, worst_i;
     } hwf;
 #endif
 #if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
-    uint32_t fft_blocks, fft_soft;      /* Vorbis: IMDCT blocks on HIFIACC, in software after a
-                                           timeout (ETUDE §74) */
+    uint32_t fft_blocks, fft_soft;      /* Vorbis, AAC: IMDCT blocks on HIFIACC, in software
+                                           after a timeout (ETUDE §74, §76) */
 #endif
 };
 #define HWT_MAGIC 0x48575431u           /* "HWT1" */

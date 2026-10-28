@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "rt.h"
+#include "aacfft.c"
 #include "pvmp4audiodecoder_api.h"
 
 #define MEM_SIZE    (52 * 1024)         /* PVMP4AudioDecoderGetMemRequirements(): 48.7 KiB */
@@ -55,6 +56,13 @@ int codec_open(void)
     ctl->frame_bytes = 4;
     ctl->total_frames = h.length == 0xffffffffu ? 0 : h.length;
     ctl->start_frame = h.start_frame;
+#if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
+    ctl->fft_blocks = ctl->fft_soft = 0;
+#endif
+#if defined(ECHO_HWTEST) || defined(ECHO_FFTCMP)
+    for (uint32_t i = 0; i < sizeof ctl->hwf / 4; i++)
+        ((volatile uint32_t *)&ctl->hwf)[i] = 0;
+#endif
     return 0;
 }
 
