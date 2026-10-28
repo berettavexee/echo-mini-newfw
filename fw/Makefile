@@ -171,20 +171,22 @@ $(BUILD)/hifi_alac.elf: $(BUILD)/alacdec.o $(HDEPS)
 	  $(HLDFLAGS) -Wl,-Map=$(BUILD)/hifi_alac.map -o $@
 	$(CROSS)size $@
 
-# Musepack: libmpcdec (third_party/libmpcdec, unmodified, BSD), fixed point; -fcommon: its headers
-# declare tables without extern (ETUDE §61); mpc_reader.c (stdio) left out
+# Musepack: libmpcdec (third_party/libmpcdec, BSD), fixed point; -fcommon: its headers declare
+# tables without extern (ETUDE §61); mpc_reader.c (stdio) left out. Its synthesis on SYNTH
+# (hifi/mpcsynth.c, ETUDE §77): -DECHO_SYNTH, as MP3; with -DECHO_HWTEST, compared
 MPC_DIR ?= ../third_party/libmpcdec
 MPC_SRCS := huffman mpc_bits_reader mpc_decoder mpc_demux requant streaminfo synth_filter
 MPC_OBJS := $(patsubst %,$(BUILD)/mpc/%.o,$(MPC_SRCS))
 MPC_FLAGS = -mcpu=cortex-m3 -mthumb -O2 -g -ffreestanding -nostdlib -ffunction-sections \
-            -fdata-sections -w -fcommon -DMPC_FIXED_POINT -I$(MPC_DIR)/include -I$(MPC_DIR)
+            -fdata-sections -w -fcommon -DMPC_FIXED_POINT -DECHO_SYNTH -I$(MPC_DIR)/include \
+            -I$(MPC_DIR) $(filter -DECHO_HWTEST,$(EXTRA))
 
-$(BUILD)/mpc/%.o: $(MPC_DIR)/%.c
+$(BUILD)/mpc/%.o: $(MPC_DIR)/%.c $(BUILD)/flags
 	@mkdir -p $(dir $@)
 	$(CC) $(MPC_FLAGS) -c $< -o $@
 
 $(BUILD)/hifi_mpc.elf: $(MPC_OBJS) $(HDEPS)
-	$(CC) $(HCFLAGS) -fcommon -DMPC_FIXED_POINT -I$(MPC_DIR)/include hifi/rt.c hifi/codec_mpc.c \
+	$(CC) $(HCFLAGS) -fcommon -DMPC_FIXED_POINT -DECHO_SYNTH -I$(MPC_DIR)/include hifi/rt.c hifi/codec_mpc.c \
 	  $(MPC_OBJS) $(HLDFLAGS) -Wl,-Map=$(BUILD)/hifi_mpc.map -o $@
 	$(CROSS)size $@
 

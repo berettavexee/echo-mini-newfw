@@ -47,6 +47,64 @@ REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R
         UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12, UC_ARM_REG_SP, UC_ARM_REG_LR,
         UC_ARM_REG_PC, UC_ARM_REG_XPSR]
 
+class Synth:
+    """SYNTH, the MPEG polyphase synthesis (ETUDE.md sections 68-71 and 77, docs/MP3ACC.md), seen
+    by core B at 0x60050000: +0x804 channel (bit 0) and phase, the 32 subband samples written to
+    +0x000..+0x07c (the last one starts the computation), +0x80c nonzero when done (0x11 written
+    to acknowledge), the 32 PCM samples read back from +0x000..+0x07c; a write to the history
+    (+0x1000..+0x1ffc) clears it. Model: the standard synthesis (matrixing, then the window of
+    libmpcdec's synth_filter.c, read from third_party/), output = round(sum / 2^13), saturated
+    to 16 bits; one history per channel, the phase not checked. Against libmpcdec with the
+    device's input scale: within 1 LSB (the device: within 1-2 LSB of pvmp3dec and libmpcdec),
+    not bit-exact.
+    """
+    BASE = 0x60050000
+    OFF = (0, 96, 128, 224, 256, 352, 384, 480, 512, 608, 640, 736, 768, 864, 896, 992)
+
+    def __init__(self):
+        import math
+        import re
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "third_party", "libmpcdec",
+                           "synth_filter.c")
+        tab = open(src).read()
+        tab = tab[tab.index("Di_opt [32] [16]"):]
+        d = [int(v) / 65536 for v in re.findall(r"_\(\s*(-?\d+)\)", tab[:tab.index("};")])]
+        self.win = [list(zip(self.OFF, d[16 * k:16 * k + 16])) for k in range(32)]
+        self.n = [[math.cos((16 + i) * (2 * k + 1) * math.pi / 64) for k in range(32)] for i in range(64)]
+        self.io = [0] * 32
+        self.reg = {}
+        self.clear()
+
+    def clear(self):
+        self.v = [[0.0] * 1024, [0.0] * 1024]
+
+    def slot(self):
+        v = self.v[self.reg.get(0x804, 0) & 1]
+        x = [((s & 0xffffffff) ^ 0x80000000) - 0x80000000 for s in self.io]
+        new = [sum(a * b for a, b in zip(row, x)) for row in self.n]
+        v[64:] = v[:960]
+        v[:64] = new
+        for k in range(32):
+            y = round(sum(v[k + o] * c for o, c in self.win[k]) / 8192)
+            self.io[k] = max(-32768, min(32767, y)) & 0xffffffff
+        self.reg[0x80c] = 1
+
+    def rd(self, uc, off, size, _):
+        return self.io[off >> 2] if off < 0x80 else self.reg.get(off, 0)
+
+    def wr(self, uc, off, size, val, _):
+        if off < 0x80:
+            self.io[off >> 2] = val
+            if off == 0x7c:
+                self.slot()
+        elif off == 0x80c:
+            self.reg[off] = 0 if val == 0x11 else val
+        elif off >= 0x1000:
+            self.clear()
+        else:
+            self.reg[off] = val
+
+
 class Accel:
     """HIFIACC LPC (FLAC FIR) and DMAC2 model, from the register map of ETUDE.md section 1.5.
 

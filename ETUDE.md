@@ -3446,3 +3446,22 @@ Vorbis dans la même image (code commun) : 3 LSB au plus, comme en 0.88 ; aucun 
 Image : `work/images/NEWFW092.IMG` (CRC `0x1851a67c`).
 
 **Fuzzing de `fat.c` (cible `fat`, 0.91)** : 6 instances × 2 h, 8 955 972 exécutions, **0 plantage, 0 blocage** ; la couverture plafonne vers 55-68 entrées après 20 min (graines à varier).
+
+## 77. Musepack : la synthèse sur SYNTH, et un débordement du chargeur de codecs (0.93, 2026-10-28)
+
+**Pourquoi** : le filtre de synthèse pèse 68 % du décodage de libmpcdec (banc QEMU, §61) ; c'est la même synthèse polyphase à 32 sous-bandes que celle du MP3, que SYNTH fait déjà depuis la 0.87 (§68-71).
+
+**Banc sur PC** (`libmpcdec` compilée pour le PC, `--wrap` de `mpc_decoder_synthese_filter_float`, la synthèse de pvmp3dec comme modèle de SYNTH : elle en est à 2 LSB au plus sur l'appareil) : recherche de l'échelle et des signes sur de vrais blocs `Y_L`/`Y_R`. Résultat : pvmp3dec reçoit `Y >> 5`, donc **SYNTH reçoit `Y >> 1`** (pvmp3dec `<< 4`) ; aucun changement de signe, de sous-bande ni de retard. Sur 12 pistes SV7 entières de la bibliothèque (214 millions d'échantillons) : **1 LSB au plus, 57 % exacts**. Une synthèse MPEG standard en double (matriçage `cos((16+i)(2k+1)π/64)`, fenêtre `Di_opt` de libmpcdec / 65 536) donne la sortie de libmpcdec à 1 LSB par `arrondi(somme(Y) / 2^14)`.
+
+**Code** :
+- `fw/hifi/synth.h` : le pilote commun (remise à zéro de l'historique, `syn_begin`, `SYN_IO`, `syn_wait`), utilisé par `mp3synth.c` (même logique qu'en 0.87) et `mpcsynth.c` ;
+- `fw/hifi/mpcsynth.c` (inclus par `codec_mpc.c`) : par trame et par canal, 36 tranches de 32 échantillons `>> 1` ; la sortie 16 bits rendue à l'échelle de libmpcdec (`<< MPC_FIXED_POINT_FRACTPART`), `codec_run` inchangé ; historique remis à zéro à chaque `codec_open` (piste, recherche) ; un délai dépassé : la trame en logiciel, 3 : le reste de la piste ;
+- accroche dans `third_party/libmpcdec/synth_filter.c` (marquée « ECHO MINI ») ; `-DECHO_SYNTH` par le Makefile comme pour le MP3 ; `-DECHO_HWTEST` : les deux calculées, le son de libmpcdec, ligne « hwm: ».
+
+**Émulateur** : classe `Synth` (`tools/emu_host.py`, branchée dans `fw/tools/emu_coreb.py`) : la synthèse standard ci-dessus, `arrondi(somme / 2^13)`, saturée, un historique par canal ; la fenêtre lue dans `synth_filter.c`. À 1 LSB de libmpcdec. Le MP3 passe aussi par ce modèle (avant : mémoire simple, délai dépassé puis logiciel). Scénarios `play-mpc` et `play-mp3` (`work/emu/scenarios.py`, local).
+
+**Débordement trouvé en chemin** : dans l'émulateur, plus aucun MPC ne s'ouvrait depuis la **0.91** (« Cannot play », `open failed … in 0/0`), confirmé sur l'appareil ; le codec du cœur B était identique au bit près à celui de la 0.90. Cause : `hifi_load_own` (`fw/src/hifi.c`) garde une copie des données initialisées du codec (`data_copy`, 1 024 octets) pour un redémarrage sans rechargement ; il ne s'en sert pas quand elles sont plus grandes, mais **les copiait quand même** : les 4 992 octets de Musepack débordaient de 3,9 Ko sur le BSS du cœur A. Présent depuis la 0.80, sans effet visible tant que la zone écrasée ne servait pas pendant l'ouverture ; le réarrangement du BSS de la 0.91 y a placé `own_file` (la copie du fichier joué) : sa taille à 0, donc `in_end = 0`, et libmpcdec voyait un fichier vide. Correction : la copie seulement quand elle tient. **La release 0.92 ne lit pas le Musepack.**
+
+**Sur l'appareil** :
+- image de banc « 0.93hwt » (`work/hwlog/1028_093syn/`) : environ 40 millions d'échantillons comparés, **74-76 % exacts, 2 LSB au plus**, 0 délai dépassé ; temps de synthèse sur une piste de 114 s : **SYNTH 8,3 s, libmpcdec 52,1 s** ;
+- image « 0.93 » (`work/hwlog/1028_093s/`) : pistes entières enchaînées à **10,3-10,8 MHz** (la même piste : 29,8 MHz avant, **−65 %**), palier de 50 MHz, charge maximale 24 %, 0 délai dépassé, 0 manque pendant la lecture.

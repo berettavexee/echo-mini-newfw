@@ -354,9 +354,19 @@ mpc_synthese_filter_float_internal(MPC_SAMPLE_FORMAT* p_out, MPC_SAMPLE_FORMAT* 
     }
 }
 
+/* ECHO MINI (ETUDE §77): the synthesis on the SYNTH accelerator (fw/hifi/mpcsynth.c) */
+#ifdef ECHO_SYNTH
+int echo_mpc_synth(const mpc_int32_t *yl, const mpc_int32_t *yr, mpc_int32_t *out, int nch);
+void echo_mpc_synth_check(const mpc_int32_t *out, int nch);
+#endif
+
 void
 mpc_decoder_synthese_filter_float(mpc_decoder* p_dec, MPC_SAMPLE_FORMAT* p_out, mpc_int_t channels)
 {
+#ifdef ECHO_SYNTH
+    if (echo_mpc_synth(p_dec->Y_L[0], p_dec->Y_R[0], p_out, channels))
+        return;
+#endif
     /********* left channel ********/
     memmove(&p_dec->V_L[MPC_V_MEM], p_dec->V_L, 960 * sizeof *p_dec->V_L);
 	mpc_synthese_filter_float_internal(p_out, &p_dec->V_L[MPC_V_MEM], p_dec->Y_L[0], channels);
@@ -366,6 +376,9 @@ mpc_decoder_synthese_filter_float(mpc_decoder* p_dec, MPC_SAMPLE_FORMAT* p_out, 
 		memmove(&p_dec->V_R[MPC_V_MEM], p_dec->V_R, 960 * sizeof *p_dec->V_R);
 		mpc_synthese_filter_float_internal(p_out + 1, &p_dec->V_R[MPC_V_MEM], p_dec->Y_R[0], channels);
 	}
+#ifdef ECHO_SYNTH
+    echo_mpc_synth_check(p_out, channels);
+#endif
 }
 
 /*******************************************/

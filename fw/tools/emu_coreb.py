@@ -70,7 +70,10 @@ class CoreB(emu_host.Hifi):
         u.mem_map(0x40000000, 0x110000)
         u.mmio_map(0x40110000, 0x1000, self._rd, None, self._wr, None)
         u.mem_map(0x40111000, 0x400000 - 0x111000)
-        u.mem_map(0x60000000, 0x100000)
+        u.mem_map(0x60000000, 0x50000)                              # DMAC1, IMDCT36, SDMMC, ...: RAM
+        self.syn = emu_host.Synth()                                 # SYNTH model
+        u.mmio_map(0x60050000, 0x2000, self.syn.rd, None, self.syn.wr, None)
+        u.mem_map(0x60052000, 0x100000 - 0x52000)
         u.mem_map(0xE0000000, 0x100000)
         code = bytes(sh.hr0)
         self.wfi = code.find(bytes.fromhex("30bf7047"))

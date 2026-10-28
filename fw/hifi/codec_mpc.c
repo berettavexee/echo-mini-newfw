@@ -1,5 +1,5 @@
 /* Musepack (SV7 and SV8) for our core B runtime (ETUDE §61), with libmpcdec
- * (third_party/libmpcdec, BSD 3-clause, unmodified) in fixed point. Its reader reads the input
+ * (third_party/libmpcdec, BSD 3-clause) in fixed point; its synthesis on SYNTH (mpcsynth.c). Its reader reads the input
  * ring; a seek backwards (SV8: the seek table at the end of the file) asks core A to feed again
  * from there (in_seek). libmpcdec removes the decoder delay and gives the exact length; a seek
  * goes through mpc_demux_seek_sample from a fresh open (SV7: it walks the frame headers from
@@ -10,6 +10,9 @@
 #include "hooks.h"
 #include "rt.h"
 #include <mpc/mpcdec.h>
+#ifdef ECHO_SYNTH
+#include "mpcsynth.c"
+#endif
 
 const uint32_t codec_id = HP_CODEC_MPC;
 
@@ -104,6 +107,9 @@ static uint32_t ch;
 int codec_open(void)
 {
     mpc_streaminfo si;
+#ifdef ECHO_SYNTH
+    echo_mpc_synth_reset();
+#endif
     demux = mpc_demux_init(&reader);
     if (!demux)
         return -HP_ERR_FORMAT;

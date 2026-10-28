@@ -158,6 +158,11 @@ Last update: 2026-10-28, version 0.89.
 - 0.92: the two FFTs of the AAC decoder's IMDCT on HIFIACC (§76, `docs/HIFIACC.md`), the FFT
   driver shared with Vorbis; AAC at 23 MHz of core B instead of 25 (an album of 13 tracks, no
   timeout, no underrun), Vorbis unchanged (34.7 MHz).
+- 0.93: the Musepack synthesis on SYNTH (§77, `docs/MP3ACC.md`), the SYNTH driver shared with
+  MP3: 10-11 MHz of core B instead of about 29 (-65 %), within 2 LSB of libmpcdec. Fix: Musepack
+  files no longer opened since 0.91 ("Cannot play"): the codec loader copied Musepack's
+  initialised data (4,992 bytes) into a 1 KiB buffer, over core A's BSS. A SYNTH model in the
+  emulator.
 
 ## To do
 
@@ -226,7 +231,8 @@ Other items:
     and whether the stock firmware sets the DACs differently for it (mode, gain);
   - the Imdct36 MP3 accelerator, used by the stock MP3 module (TRM chapter 28, ETUDE §18):
     mapped but not used by us (no end flag found, small expected gain, §70); the synthesis runs
-    on SYNTH since 0.87, the FLAC LPC and the Vorbis IMDCT on HIFIACC since 0.85 and 0.88.
+    on SYNTH since 0.87 (Musepack since 0.93), the FLAC LPC and the Vorbis IMDCT on HIFIACC since
+    0.85 and 0.88.
 - Battery percentage: the curve is a generic Li-ion one, to be measured on the device. Overnight
   test (0.61, 2026-10-24): 6 h of MP3 320 kbps from the card, screen off, 4,184 to 3,710 mV (about
   70 mV/h after the first hour). Overnight test (0.80, 2026-10-26): 7.9 h from the card (MP3,

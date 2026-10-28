@@ -10,6 +10,10 @@ int echo_fft_imdct(int n, int32_t *in);
 void echo_fft_check(int n, const int32_t *in);
 /* pvmp3dec's synthesis (mp3synth.c, hwtest_synth.c): 1 = done on SYNTH */
 int echo_synth_granule(const int32_t *work, int16_t *out, int nch, int ch);
+/* libmpcdec's synthesis (mpcsynth.c): 1 = done on SYNTH; the check after libmpcdec's own */
+int echo_mpc_synth(const int32_t *yl, const int32_t *yr, int32_t *out, int nch);
+void echo_mpc_synth_check(const int32_t *out, int nch);
+void echo_mpc_synth_reset(void);
 void echo_synth_reset(void);
 /* pvaacdec's IMDCT FFTs (aacfft.c): the exponent, or -1 (pvaacdec's own FFT, then the check) */
 int echo_aac_fft(int32_t *data, int bits, int32_t *max);

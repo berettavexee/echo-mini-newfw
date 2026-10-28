@@ -811,6 +811,11 @@ void player_close(int stopped)
                    c->hws.p_timeouts);
 #endif
 #ifdef ECHO_HWTEST
+    if (c->hws.magic == HWT_MAGIC && c->hws.p_cmp && !c->hws.slots)  /* SYNTH against libmpcdec */
+        log_printf("hwm: %s: %u frames, %u samples: %u exact, %u within 1, max %u; SYNTH %u us, "
+                   "libmpcdec %u us; %u timeouts", own_file.name, c->hws.p_gran, c->hws.p_cmp,
+                   c->hws.p_exact, c->hws.p_within1, c->hws.p_max, c->hws.p_hw_ticks / 24,
+                   c->hws.syn_sw_ticks / 24, c->hws.p_timeouts);
     if (c->hwt.magic == HWT_MAGIC) {            /* test build: HIFIACC against dr_flac (§66) */
         log_printf("hwt: %s: %u LPC subframes: %u exact, %u differ, %u timeouts, %u skipped; "
                    "wide %u (%u differ); max order %u shift %u n %u; hw %u us, sw %u us; "

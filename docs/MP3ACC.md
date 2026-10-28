@@ -5,7 +5,8 @@ MP3 decoder uses. This page gives what this project established about them. The 
 French, is `ETUDE.md` §68 to §71.
 
 Status: **SYNTH is understood, verified on the device and used** by this firmware since 0.87
-(the MP3 synthesis filter bank, about 42 % less load on the HiFi core). **Imdct36 is mapped but
+for MP3 (the synthesis filter bank, about 42 % less load on the HiFi core) and since 0.93 for
+Musepack (about 65 % less). **Imdct36 is mapped but
 not used.**
 
 ## Where they are
@@ -75,6 +76,26 @@ core goes from 37-39 MHz to 21-23 MHz (44.1 kHz, *Discovery*), SYNTH busy about 
 Not used by this firmware: pvmp3dec's 18-point MDCT with window and overlap takes 16 µs per
 subband, and its history format would force a rewrite of the whole IMDCT stage for a small
 expected gain. Finding the end flag (or using the interrupt) is the open question.
+
+## Use by Musepack (0.93)
+
+Musepack uses the same 32-band polyphase synthesis. `fw/hifi/mpcsynth.c` replaces libmpcdec's
+`mpc_decoder_synthese_filter_float`: per frame and channel, 36 slots of 32 subband samples,
+written as libmpcdec keeps them shifted right by 1 (`Y >> 1`: libmpcdec's samples are 32 times
+pvmp3dec's, and SYNTH takes pvmp3dec's `<< 4`). No sign or order change, same delay. The 16-bit
+output goes back at libmpcdec's scale (`<< 14`). The register sequence is shared with MP3
+(`fw/hifi/synth.h`).
+
+On the device: within 2 LSB of libmpcdec (74-76 % exact); the synthesis of a 114 s track takes
+8.3 s on SYNTH against 52.1 s in software; whole tracks at 10.3-10.8 MHz of core B instead of
+about 29 MHz. `make EXTRA=-DECHO_HWTEST` computes both and compares them (`hwm:` log line).
+
+## Model in the emulator
+
+`tools/emu_host.py`, class `Synth`: the standard synthesis in floating point (matrixing
+`cos((16 + i)(2k + 1) pi / 64)`, then the window of libmpcdec's `synth_filter.c`), output
+`round(sum / 2^13)` saturated to 16 bits, one history per channel; within 1 LSB of libmpcdec,
+not bit-exact against the device.
 
 ## Test bench
 

@@ -169,10 +169,13 @@ int hifi_load_own(uint32_t codec)
                                      (void *)d_addr)))
                 return HIFI_EREAD;
             hifi_data_size = d_size;
-            /* initialised data kept for a restart without reloading (hifi_restart_own) */
+            /* initialised data kept for a restart without reloading (hifi_restart_own), when
+             * it fits (Musepack's 4,992 bytes do not: reloaded each time; until 0.92 they were
+             * copied all the same, over the BSS that follows, ETUDE §77) */
             own_codec = d_size <= sizeof data_copy ? codec : 0;
             own_data_addr = d_addr;
-            memcpy(data_copy, (const void *)d_addr, d_size);
+            if (own_codec)
+                memcpy(data_copy, (const void *)d_addr, d_size);
             log_printf("hifi: our codec %u from %s: code %u bytes, data %u bytes", codec,
                        k ? "FW2" : "FW1", e->code_size, d_size);
             return 0;
