@@ -56,8 +56,18 @@ class Accel:
     DMAC2 0x01070000 (DesignWare, 2 channels, stride 0x58): a channel runs when enabled
     through ChEnReg (+0x3a0); single blocks and LLI chains are followed; RawTfr/RawBlock are
     set and IRQ 0x38 is raised if the channel is unmasked. Memory-to-memory blocks are copied.
+
+    FFT (ETUDE.md section 73, measured on the device): +0x0c function 2 (0x40000000, | 3 =
+    start); +0x24 size << 29 (64: 0 .. 1024: 4), bit 27 no scaling (0: result / N), bit 20
+    real input (imaginary part ignored); imaginary parts at 0x01061000, real parts at
+    0x01062000, inputs in bit-reversed order, forward transform in natural order, in place.
+    While +0x0c still selects the FFT, the data memory reads as one value (here FFT_BUSY), as
+    on the device: the code must write 0 to +0x0c before reading. The model is the exact
+    transform rounded to integers; the device's twiddles have about 14 bits (error up to
+    0.008 % of the peak), so results are close, not bit-exact.
     """
     HACC, DMA, FIN, FOUT, COEF = 0x01060000, 0x01070000, 0x01060040, 0x010600a0, 0x0106b000
+    FFT_IM, FFT_RE, FFT_BUSY = 0x01061000, 0x01062000, 0x0badf00d
 
     def __init__(self, u, hifi):
         self.u, self.h, self.reg = u, hifi, {}
@@ -65,6 +75,8 @@ class Accel:
 
     def rd(self, uc, off, size, _):
         a = 0x01060000 + off
+        if self.FFT_IM <= a < self.FFT_RE + 0x1000 and self.reg.get(self.HACC + 0x0c, 0) >> 29 == 2:
+            return self.FFT_BUSY                                  # memory owned by the engine
         if a == self.HACC + 8:
             return self.reg.get(a, 0)
         if a in (self.DMA + 0x2e8, self.DMA + 0x2f0):             # StatusTfr / StatusBlock
@@ -108,6 +120,9 @@ class Accel:
             # the previous run left (the decoder may not read back a result it does not need)
             self.fin.clear()
             self.fout.clear()
+        if a == self.HACC + 0x0c and val & 3 == 3 and val >> 29 == 2:
+            self._fft()
+            return
         if a == self.HACC + 0x0c and val & 3 == 3:
             self.n = (val >> 15) & 0x1fff
             self.reg[self.HACC + 8] = self.reg.get(self.HACC + 8, 0) & ~0x8000
@@ -131,6 +146,31 @@ class Accel:
         self.n = 0
         self.reg[self.HACC + 8] = self.reg.get(self.HACC + 8, 0) | 0x8000
         self._service()
+
+    def _fft(self):
+        import cmath
+        cfg = self.reg.get(self.HACC + 0x24, 0)
+        n = 64 << min((cfg >> 29) & 7, 4)
+        s32 = lambda v: v - (1 << 32) if v & 0x80000000 else v
+        x = [complex(s32(self.reg.get(self.FFT_RE + 4 * i, 0)),
+                     0 if cfg & (1 << 20) else s32(self.reg.get(self.FFT_IM + 4 * i, 0)))
+             for i in range(n)]
+        # the input is already in bit-reversed order: iterative radix-2 butterflies
+        m = 2
+        while m <= n:
+            w = cmath.exp(-2j * cmath.pi / m)
+            for k in range(0, n, m):
+                t = 1
+                for j in range(m // 2):
+                    a, b = x[k + j], t * x[k + j + m // 2]
+                    x[k + j], x[k + j + m // 2] = a + b, a - b
+                    t *= w
+            m *= 2
+        scale = 1 if cfg & (1 << 27) else 1 / n
+        for i, v in enumerate(x):
+            self.reg[self.FFT_RE + 4 * i] = int(round(v.real * scale)) & 0xffffffff
+            self.reg[self.FFT_IM + 4 * i] = int(round(v.imag * scale)) & 0xffffffff
+        self.reg[self.HACC + 8] = self.reg.get(self.HACC + 8, 0) | 0x8000
 
     def _block(self, sar, dar, ctl, ctlh):
         """Run one DMA block; return False if it must wait for the accelerator."""

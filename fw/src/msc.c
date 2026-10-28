@@ -9,6 +9,9 @@
  * on a full packet it pads with zeros so the host's transfer ends, and the CSW residue tells
  * the host how much is valid. */
 #include "msc.h"
+#ifdef ECHO_PROBE
+#include "probe.h"
+#endif
 #include "board.h"
 #include "emmc.h"
 #include "usb.h"
@@ -111,6 +114,15 @@ static int write10(const uint8_t *cb, uint32_t expected, uint32_t *residue)
             have += got;
         }
         done += have;
+#ifdef ECHO_PROBE
+        if (probe_hit(lba, k)) {                /* the USB probe's mailbox: not the eMMC */
+            probe_write(lba, k, data);
+            msc.written_sectors += k;
+            lba += k;
+            n -= k;
+            continue;
+        }
+#endif
         if (emmc_write_user(msc.base + lba, k, data)) {
             msc.errors++;
             sense(3, 0x0c);                             /* write error */
@@ -143,6 +155,10 @@ static int read10(const uint8_t *cb, uint32_t expected, uint32_t *residue)
             sense(3, 0x11);                             /* unrecovered read error */
             return pad(expected - sent) ? -1 : 1;
         }
+#ifdef ECHO_PROBE
+        if (probe_hit(lba, k))
+            probe_read(lba, k, data);           /* the USB probe's answer */
+#endif
         if (usb_in(data, k * 512))
             return -1;
         msc.read_sectors += k;

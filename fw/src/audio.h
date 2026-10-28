@@ -22,6 +22,7 @@ struct audio_state {
     uint32_t rd, wr, last_pos;
     uint32_t ring_ur, i2s_ur;   /* underrun episodes: producer behind the DMA; I2S FIFO empty */
     uint32_t ring_lost;         /* bytes the DMA played again because the producer was late */
+    uint32_t ur_all, i2s_all, lost_all; /* the same since boot, never reset: per track by difference */
     int in_ur;
     int32_t min_fill;           /* lowest fill seen since the counters were reset, bytes */
 };

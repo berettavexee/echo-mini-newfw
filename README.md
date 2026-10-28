@@ -11,7 +11,7 @@ A from-scratch firmware for the main core of the SNOWSKY ECHO MINI digital audio
 by studying the official firmware V3.9.0; no code of it, of the Rockchip SDK, of ReChord or
 of RECHO is included.
 
-Status (version 0.80): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A),
+Status (version 0.88): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A),
 Musepack, gapless,
 at any sample rate from 8 to 192 kHz, with
 non-blocking sample-rate changes; folder browser with long names (FAT32 internal memory,
@@ -25,16 +25,17 @@ pause, low-battery warning and power off, charging screen. No equaliser.
 
 Our decoders run on the HiFi core (core B), whose clock follows the load in steps of 50, 57, 67,
 80, 100, 133 and 200 MHz (the step that keeps the load near 75 %). Measured on the device from
-the logs (versions 0.73 to 0.80), whole tracks, screen off:
+the logs (versions 0.73 to 0.88), whole tracks, screen off; since 0.85, parts of the FLAC, MP3
+and Vorbis decoders run on the chip's accelerators (`docs/HIFIACC.md`, `docs/MP3ACC.md`):
 
 | Format | Material measured | Core B, mean (clock step) | Decoder |
 |---|---|---|---|
 | WAV, AIFF | 16 bits, 44.1 kHz | 1 MHz (50 MHz) | ours (`codec_pcm.c`) |
 | AIFF | 24 bits, 48 kHz | 8 MHz (50 MHz) | ours |
 | AIFF | 24 bits, 96 kHz | 16 MHz (50 MHz) | ours |
-| FLAC | 16 bits, 44.1 kHz (~1,050 kb/s) | 15 MHz (50 MHz) | dr_flac |
-| MP3 | 320 kb/s, 44.1 kHz | 39-41 MHz (57 MHz) | PacketVideo (AOSP) |
-| Ogg Vorbis | 160-280 kb/s, 44.1 kHz | 46-50 MHz (67 MHz) | Tremor (lowmem) |
+| FLAC | 16 bits, 44.1 kHz (640-1,050 kb/s) | 9-12 MHz (50 MHz) | dr_flac, LPC prediction on HIFIACC (0.85) |
+| MP3 | 130-320 kb/s, 44.1 kHz | 20-25 MHz (50 MHz) | PacketVideo (AOSP), synthesis on SYNTH (0.87) |
+| Ogg Vorbis | 110-200 kb/s, 44.1 kHz | 29-36 MHz (50 MHz) | Tremor (lowmem), IMDCT on HIFIACC's FFT (0.88) |
 | Opus | 130-145 kb/s, 48 kHz | 50-55 MHz (67-80 MHz) | libopus 1.5.2 |
 | AAC-LC (M4A) | ~125 kb/s, 44.1 kHz (iTunes) | 25 MHz (50 MHz) | PacketVideo (AOSP) |
 | ALAC (M4A) | 16 bits, 44.1 kHz, mono | 11-13 MHz (50 MHz) | ours, derived from Apple's |
@@ -43,7 +44,7 @@ the logs (versions 0.73 to 0.80), whole tracks, screen off:
 | Musepack | SV7 and SV8, ~180 kb/s, 44.1 kHz | 28-29 MHz (50 MHz) | libmpcdec |
 
 The load rises for a moment at the start of a track and after a seek (the top step until the
-DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §61). Sample rates from 8 to
+DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §61, accelerators §66 to §74). Sample rates from 8 to
 192 kHz are played as they are (§60).
 
 ## Layout
@@ -57,7 +58,7 @@ DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §61). S
 | `fw/hifi/` | HiFi-core runtime and codec glue |
 | `fw/tools/` | image builder, emulator (`emu_fw.py`, Unicorn), test disk and exFAT image builders, log reader |
 | `fw/tools/fuzz/` | fuzzing bench for the decoders and file readers (ASan, UBSan, coverage-guided): see `docs/FUZZING.md` |
-| `docs/` | `FUZZING.md` (the fuzzing bench and its findings), `HIFIACC.md` (the RKNanoD audio accelerator: registers, sequence, pitfalls), screenshots of the manual |
+| `docs/` | `FUZZING.md` (the fuzzing bench and its findings), `HIFIACC.md` (the RKNanoD audio accelerator: registers, sequence, pitfalls), `MP3ACC.md` (the SYNTH and Imdct36 MP3 accelerators), screenshots of the manual |
 | `fw/font/` | Fusion Pixel 12 px (SIL OFL 1.1) |
 | `third_party/` | libopus 1.5.2 (decoder-only variant), Tremor lowmem (patched), AOSP pvmp3dec and pvaacdec, Apple ALAC decoder, libmpcdec |
 | `tools/` | reverse-engineering helpers used for the study (they expect the stock image and `re/rknanofw.py` next to this tree) |

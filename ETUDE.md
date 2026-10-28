@@ -3294,3 +3294,103 @@ Intégration simple, d'après le §66 : `fw/hifi/hifiacc.c` (pilote, partagé en
 Documentation pour d'autres développeurs : `docs/HIFIACC.md`. Image `work/images/NEWFW085.IMG`, CRC `0x2a006a84`.
 
 **0.85 sur l'appareil** (`work/hwlog/1027_085/`) : 2 919 sous-trames sur HIFIACC, aucune erreur ; charge du cœur B sur l'album de 1000mods vers 11 MHz contre 15,5 en 0.80 (environ −28 %, mesure gênée par des écoutes courtes avec sauts). Seul défaut : 3 dépassements de délai sur `w24_o32.flac` (blocs de 8 192 à l'ordre 32), puis le logiciel pour la fin de la piste : HIFIACC tourne à la fréquence du cœur B, environ un produit par cycle, soit à peu près 5 ms pour 8 191 échantillons à l'ordre 32 à 50 MHz. **0.86** : délai porté à 30 ms. Image `work/images/NEWFW086.IMG`, CRC `0xd1462b2`.
+
+## 68. Accélérateurs MP3 IMDCT36 et SYNTH : rétroconception du module 73 (2026-10-27)
+
+**TRM** (chapitres 27 et 28) : blocs distincts de HIFIACC. Adresses côté cœur A `0x62042000` (Imdct36) et `0x62044000` (Synth) ; le cœur B les voit à **`0x60010000`** et **`0x60050000`** (§4 ; RECHO utilise les mêmes). Imdct36 : 54 mots de SRAM (18 entrées, 36 résultats en lecture seule), 4 registres, ROM de 32 coefficients de 20 bits, mode « pré-décalage » (résultat décalé de 2 bits à droite). Synth : SRAM0 de 32 mots (entrées puis résultats), SRAM1 de 1 024 × 20 bits (historique), 5 registres, ROM de 1 024 coefficients de 20 bits ; « canal et phase » réglés par registre.
+
+**Module 73 (MP3 d'origine), désassemblé** (`out/elf/ovl73_codec_mp3.elf`, code à `0`) :
+
+| Adresse | Écrit / lu | Rôle déduit |
+|---|---|---|
+| `0x60010000` | 18 mots écrits (`memcpy` de 72 octets) | entrées de l'IMDCT ; **le calcul part à l'écriture** (aucun registre de lancement) |
+| `0x60010048` | 36 mots lus (144 octets) | résultats |
+| `0x60010800` | 3 à l'initialisation, 0 à l'arrêt | marche (et autorisation d'interruption, ou mode « pré-décalage » : à trancher) |
+| `0x6001080c` | 0 dans l'interruption | acquittement |
+| `0x60050000` | 32 mots écrits puis 32 lus (128 octets) | SRAM0 : sous-bandes en entrée, **échantillons PCM 16 bits** en sortie (lus en demi-mots) ; le calcul part à l'écriture |
+| `0x60050800` | 1 à l'initialisation, 0 à l'arrêt | marche |
+| `0x60050804` | `canal \| ((15 − phase) << 1)` avant chaque bloc | canal (bit 0) et phase (bits 1 à 4) ; la phase avance de 1 (modulo 16) par bloc de 32 |
+| `0x6005080c` | `0x11` dans l'interruption | acquittement |
+| `0x60050810` | 0 à l'initialisation et à chaque fin de bloc | état ou acquittement (à trancher) |
+| `0x60051000` | 4 096 octets mis à zéro à la remise à zéro du décodeur | SRAM1 : historique de la synthèse |
+
+**Fonctionnement d'origine** : par interruptions et en pipeline. IMDCT36 : boucle des 32 sous-bandes ; à chacune, attente de l'indicateur « terminé » posé par l'interruption, puis en logiciel la fenêtre selon le type de bloc (`0x5648`), le recouvrement-addition (`0x5956`) et l'inversion de signe des sous-bandes impaires, puis la copie des 18 entrées suivantes. **IMDCT36 ne fait donc que la transformée de 36 points.** SYNTH : par blocs de 32 sous-bandes et par canal, il fait la synthèse polyphasée complète, fenêtre et historique compris, et rend directement 32 échantillons PCM ; le logiciel les range en entrelacé (mono dupliqué).
+
+**Pour notre décodeur** (pvmp3dec) : SYNTH remplacerait `pvmp3_poly_phase_synthesis` (avec `pvmp3_polyphase_filter_window` et `pvmp3_dct_16`, environ 38 % du temps au §49) ; IMDCT36 remplacerait la transformée de `pvmp3_mdct_18` (environ 12 %), la fenêtre et le recouvrement restant en logiciel. Formats d'entrée à faire correspondre (pvmp3dec travaille en Q31/Q28 selon les étapes) : c'est l'objet du banc de comparaison (étape 2).
+
+**0.86 sur l'appareil** (`work/hwlog/1027_086/`) : l'album de 1000mods en pistes entières : 19 910 sous-trames sur HIFIACC, aucune en logiciel, aucune erreur ; cœur B **10,8 MHz** sur « Road to Burn » (15,5 en 0.80) et **11,0 MHz** sur « 7 Flies » (16,2) : **environ −30 %** de charge sur le FLAC 16 bits.
+
+## 69. SYNTH contre pvmp3dec sur l'appareil (images de test HS1, HS2, 2026-10-27)
+
+**Banc** (`make EXTRA=-DECHO_HWTEST`, `fw/hifi/hwtest_synth.c`, accroche sous `ECHO_HWTEST` dans `pvmp3_framedecoder.cpp` après `pvmp3_poly_phase_synthesis`) : pour chaque créneau (32 sous-bandes, `work_buf_int32[sb × 18 + créneau]`) et chaque canal, la séquence du module 73 : `+0x804` = `canal | ((15 − phase) << 1)`, les 32 entrées à `0x60050000` (le calcul part), attente de `+0x80c ≠ 0`, acquittement (`+0x80c` = `0x11`, `+0x810` = 0), lecture des 32 sorties (16 bits bas) ; phase par canal avancée de 1 modulo 16 ; historique SRAM1 et phases remis à zéro à chaque piste ; comparaison au PCM de pvmp3dec. Un décalage d'entrée différent par piste (le numéro d'essai est gardé par le cœur A à travers les redémarrages du cœur B).
+
+**Résultats** (`work/hwlog/1027_hs1b`, `1027_hs2`) :
+- **fin du calcul** : `+0x80c` passe de 0 à 1 ; plus de 8 millions de créneaux sans dépassement de délai (200 µs), sans blocage : l'interrogation remplace l'interruption du module d'origine ;
+- signe et ordre directs (corrélation positive, l'ordre inverse n'est pas meilleur) ;
+- **échelle** : sans décalage, SYNTH rend 1/16 de pvmp3dec (et 1/64, 1/256 avec 2, 4 bits à droite) : il attend des entrées **16 fois plus grandes** ;
+- **avec `x << 4`** : rapport d'amplitude 1,000 ; sur « Daftendirekt », **99,996 % des 14,5 millions d'échantillons à 1 LSB près, écart maximal 2 LSB**, 63 % identiques (une autre piste : 2 LSB au plus). Décalages 2, 3, 5 : écarts de milliers de LSB.
+
+**Conclusion** : SYNTH remplace la synthèse polyphasée de pvmp3dec (`pvmp3_poly_phase_synthesis`, avec la fenêtre et les DCT de 16 points, environ 38 % du temps au §49) à 2 LSB près, comparable à l'écart de pvmp3dec avec ffmpeg (1 LSB). Reste à mesurer son temps et à étudier IMDCT36, puis l'intégration.
+
+Images : `work/images/NEWFWHS1.IMG`, `NEWFWHS2.IMG` (version « 0.86hs2 »).
+
+## 70. IMDCT36 et temps de SYNTH (HS3) ; SYNTH intégré au MP3 (HM1, 2026-10-27)
+
+**HS3** (`work/hwlog/1027_hs3/`, 8 extraits d'une minute de *Discovery*, `work/testsets/test_mp3acc/`) :
+- SYNTH à `x << 4` : 2 LSB au plus sur chaque extrait ; son temps mesuré (888 µs pour 18 créneaux contre 996 µs pour pvmp3dec) incluait les comparaisons du banc et ne disait rien ;
+- IMDCT36, comparé à une IMDCT 36 points exacte (64 bits, table générée sur le PC) : **`+0x800` = 1** donne la transformée à l'échelle de l'entrée (rapport 1,0000 sans décalage, ×16 avec `x << 4`) ; **`+0x800` = 3** la divise par environ 4 096 (le mode « pré-décalage » choisi par le module 73 pour son format Q28). Seulement 27 % des sorties à 1 LSB de la référence (coefficients sur 20 bits) ; **`+0x80c` ne change jamais** pour IMDCT36 : aucun indicateur de fin trouvé (les résultats étaient justes après 200 µs). `pvmp3_mdct_18` ne prend que 16 µs, fenêtre comprise, et son historique a un format propre que relisent les blocs courts : intégrer IMDCT36 imposerait de réécrire toute l'étape IMDCT pour un gain incertain (environ 12 % du MP3). **Décision de l'utilisateur : SYNTH seul** ; IMDCT36 plus tard, si cela vaut la peine.
+
+**HM1** (`make EXTRA=-DECHO_HWSYN`, version « 0.86hm1 », `work/hwlog/1027_hm1/`) : SYNTH **joue** à la place de `pvmp3_poly_phase_synthesis` (`echo_synth_play` dans `hwtest_synth.c`, entrées `<< 4`, attente de `+0x80c`, acquittement, 32 sorties par créneau) ; sur les 100 premières granules de chaque piste, la synthèse logicielle est aussi calculée dans un tampon à part pour comparer. Sur les 8 extraits :
+- **charge du cœur B : 20,9 à 23,3 MHz, contre 36,7 à 39,1 MHz en 0.86, soit environ −42 %** ;
+- 921 600 échantillons comparés : **99,995 % à 1 LSB près, 2 LSB au plus**, 65 % identiques ;
+- 1,3 million de créneaux, aucun dépassement de délai ni erreur ; SYNTH occupe environ 7 % du temps réel.
+
+## 71. MP3 sur SYNTH (0.87, 2026-10-27)
+
+`fw/hifi/mp3synth.c`, inclus par `codec_mp3.c` sous `ECHO_SYNTH` (défini pour l'image MP3 dans le Makefile) : `echo_synth_granule()` remplace `pvmp3_poly_phase_synthesis` dans `pvmp3_framedecoder.cpp` (la séquence validée en HM1, §70). Après 3 dépassements de délai (200 µs par créneau), la piste repasse en logiciel (bref défaut possible : l'historique logiciel n'a pas suivi). `echo_synth_reset()` vide l'historique SRAM1 et les phases au démarrage, dans la remise à zéro du décodeur (ouverture, saut) et quand pvmp3dec rend une trame muette après une erreur. Compteurs `synth_gran` et `synth_soft` de `hp_ctl`, journalisés en fin de piste (« synth: … »). Documentation : `docs/MP3ACC.md`. Image `work/images/NEWFW087.IMG`, CRC `0xc3cc98fa`.
+
+## 72. Sonde par USB (image de test PR1, 2026-10-27)
+
+But : explorer les fonctions sans référence de HIFIACC (FFT, MAC), et plus tard d'autres blocs, depuis le PC, sans réinstaller d'image à chaque essai. RECHO n'a pas de tel mécanisme (ses chaînes ne montrent que des auto-tests : « hifi: self-test », « mp3hw: … » ; « SHELL » est un nom d'écran) ; il utilise IMDCT36 avec un état lisible (« timed out (stat %x / %x) ») : un indice pour plus tard.
+
+**Principe** (`make EXTRA=-DECHO_PROBE`, `fw/src/probe.c`, client `fw/tools/probe.py`) : une boîte aux lettres dans le fichier `PROBE.BIN` (4 Kio, d'un seul tenant) de la mémoire interne. À l'entrée en mode USB, le firmware note ses secteurs ; `msc.c` détourne l'écriture de ses 8 secteurs (une requête, exécutée quand le dernier arrive) et leur lecture (la réponse) ; rien n'atteint la mémoire flash. Côté PC, `O_DIRECT` et `fsync` font passer chaque requête et chaque réponse par l'appareil, sans pilote ni droits d'administrateur. Commandes : informations, lecture et écriture de mots (seulement dans le domaine PD_HIGH vu du cœur A, `0x01000000`-`0x0107ffff` : mémoires du cœur B, HIFIACC, DMAC2, et les accélérateurs MP3 côté cœur A, `0x62040000`-`0x6204ffff`), mise sous tension de PD_HIGH avec les blocs HiFi remis à zéro (cœur B tenu), lancement et arrêt du cœur B (code chargé dans HIGHRAM0, qu'il exécute à partir de 0), installation d'une image de la racine à la sortie du mode USB (les contrôles et l'écriture du menu), puis redémarrage. L'image de test garde le menu d'installation complet.
+
+Image `work/images/NEWFWPR1.IMG` (version « 0.87pr1 »).
+
+Premier essai (2026-10-27, au travers de `PROBE.BIN`, sans pilote ni droits) : le cœur A lit et écrit directement HIFIACC et le DMAC2. Carte mesurée : registres `+0x000`-`+0x0ff` ; **8 Kio de mémoire 32 bits à `+0x1000`-`+0x2fff`** ; `+0x3000`-`+0x8fff` ne retient pas les écritures (mémoires des filtres APE, valeurs instables) ; quatre mémoires de 1 Kio, chacune vue en quatre reflets : `+0x9000` (16 bits, ALAC), `+0xa000` (32 bits), `+0xb000` (16 bits, coefficients du FLAC), `+0xc000` (32 bits) ; au-delà, un reflet. Une exploration à l'aveugle (`fw/tools/hacc_explore.py`) avait repéré le type 2 dans `+0x0c` ; arrêtée quand le SDK de référence (lu localement, rien de recopié) a donné le nom des registres.
+
+## 73. La FFT de HIFIACC (mesurée sur l'appareil, 2026-10-27)
+
+Registres (noms du SDK de référence, valeurs vérifiées sur l'appareil) : `+0x0c` FUN_CFG, bits 31-29 = fonction (APE G 0, APE D 1, **FFT 2**, ALAC 3, MAC 4, FLAC 5 : notre `0xa…` du FLAC) ; `+0x24` FFT_CFG ; `+0x30` MAC_CFG ; `+0x34`/`+0x38` résultat de la MAC (bas, haut). Données de la FFT : **partie imaginaire à `+0x1000`, partie réelle à `+0x2000`** (1 024 mots de 32 bits chacune), résultat à la place.
+
+Séquence qui marche : `+0x24` = `taille << 29 | options` (64 → 0, 128 → 1, 256 → 2, 512 → 3, 1 024 → 4) ; `+0x0c` = `0x40000000`, puis `0x40000003` (lancement) ; puis **`+0x0c` = 0 avant de relire** : tant que la fonction reste choisie, la mémoire appartient au moteur et toute lecture rend la même valeur (piège qui avait trompé l'exploration à l'aveugle). Le calcul est fini avant la requête suivante de la sonde (moins d'une milliseconde) ; `+0x08` reste à 0 (pas d'indicateur de fin sans l'interruption activée).
+
+- **Entrées en ordre bit-inversé, sortie en ordre naturel** (une impulsion au mot 32 d'une FFT de 64 points est la fréquence 1).
+- `+0x24` bit 27 = 1 : FFT complète, sans échelle, `X[k] = Σ x[n] e^(−2iπkn/N)` ; bit 27 = 0 : la même divisée par N. **Pas de mode IFFT** : `ifft(x) = conj(FFT(conj x)) / N`.
+- `+0x24` bit 20 = 1 : la partie imaginaire de l'entrée est ignorée (FFT d'un signal réel) ; le SDK met les bits 27 et 20 ensemble, d'où un facteur ½ apparent sur une entrée complexe.
+- Précision (signaux aléatoires de 15 à 24 bits, 64 à 1 024 points) : écart maximal **0,003 à 0,008 % de la crête** (de l'ordre de −86 dB, cosinus d'environ 14 bits) ; aucun débordement observé jusqu'à 24 bits d'entrée et 1 024 points (sorties de plus de 2^28).
+- Pour Vorbis (FFT de 64 et 512 points sur Tremor 32 bits) et l'AAC (512) : utilisable, mais la précision est inférieure à celle des décodeurs logiciels (à mesurer sur l'audio décodé) ; temps de calcul à mesurer depuis le cœur B.
+
+**MAC** : type 4 dans `+0x0c`, `+0x30` = nombre de termes `<< 18` (le registre retient la valeur) ; avec la même séquence, en mémoire ou par la FIFO, le résultat reste à 0. Exploration automatique de la nuit : `fw/tools/mac_explore.py`, `work/hwlog/1027_hacc_mac/`.
+
+Émulateur : la classe `Accel` (`tools/emu_host.py`) modélise la FFT (transformée exacte arrondie, pas exacte au bit près vis-à-vis du matériel) et la mémoire occupée (lecture `0x0badf00d` tant que `+0x0c` choisit la FFT) ; vérifié contre numpy et contre la réponse impulsionnelle mesurée ; LPC inchangé.
+
+**MAC abandonnée** (décision de l'utilisateur, 2026-10-27) : 22 000 essais automatiques sans résultat dans `+0x34`/`+0x38` ; peu utile au firmware (`SMLAL` du cœur B, coût du transfert).
+
+## 74. Vorbis : l'IMDCT de Tremor sur la FFT de HIFIACC (2026-10-27)
+
+1. **Profil** (banc QEMU de `re/vorbis`, enveloppe `--wrap=mdct_backward`, Tremor du firmware) : `mdct_backward` = **52 % du décodage** (q3) et **41 %** (q9) ; un bloc de 2 048 coûte 92 400 instructions, un de 256, 8 900.
+2. **Formule** (Tremor compilé sur PC, matrice reconstruite par impulsions) : la sortie de `mdct_backward` (n/2 valeurs, à l'échelle 1) est `out[2m] = y[n/4−1−m]`, `out[2m+1] = y[3n/4−1−m]` de l'IMDCT `y[t] = Σ X[k] cos(2π/n (t + ½ + n/4)(k + ½))` ; par une FFT de n/4 points : `d = w · FFT(w · (X[2m] + i X[n/2−1−2m]))`, `w[m] = e^(−2iπ(m+⅛)/n)`, puis `out[4q] = −Im d[q]`, `out[4q+1] = −Re d[q]`, `out[4q+2] = Re d[n/4−1−q]`, `out[4q+3] = Im d[n/4−1−q]`. Tremor lui-même s'écarte de l'IMDCT exacte de 1 à 2·10⁻⁵ de la crête.
+3. **Sur l'appareil, par la sonde**, 90 vrais blocs (vidés du banc) : blocs de 256, **1 LSB au plus** sur la sortie 16 bits ; blocs de 2 048, **4 LSB au plus, 0,06 en moyenne**, 0,3 à 1,1 % au-delà de 1 LSB. Agrandir l'entrée (jusqu'à 2^29,6) ne change rien : l'erreur est relative (les cosinus du matériel). Indicateur de fin : `+0x04` bit 15 activé, `+0x08` bit 15 à la fin (comme le LPC).
+4. **Code** : `fw/hifi/hififft.c` (tailles 256 et 2 048, table `fw/hifi/fft_tw.h` de `fw/tools/mkfft_tw.py`, `rbit` pour l'ordre bit-inversé, délai 3 ms puis logiciel, logiciel définitif après 3 délais), accroche dans `mdct_backward` (`third_party/tremor-lowmem/mdct.c`), seulement avec `-DECHO_HWFFT` (le son vient de HIFIACC, ligne « fft: » du journal) ou `-DECHO_HWTEST` (les deux calculés, le son de Tremor, ligne « hwf: » : écarts et temps). La version normale reste identique au bit près.
+5. **Émulateur** (FFT idéale) : Vorbis q3 de 129 s décodé en entier, sans faute, **1 LSB au plus** de Tremor (98,7 % exacts).
+6. Images : `work/images/NEWFWFV1.IMG` (« 0.87fv1 », banc, CRC `0x5ed51874`) et `NEWFWFX1.IMG` (« 0.87fx1 », le son par HIFIACC, CRC `0x3aa32531`), copiées sur l'appareil ; essais en conditions réelles à faire.
+
+**Premiers essais sur l'appareil, image FV1 (2026-10-28, `work/hwlog/1028_fft/`)** : 6 pistes Vorbis (« Beast In… », 3 entières), **0 délai dépassé** ; matériel (rotations et transferts compris) **14,8 s contre 58,8 s pour Tremor** sur une piste entière, soit environ **4 fois plus rapide** (la MDCT pesant 41 à 52 % du décodage, environ −30 à −40 % de charge attendus). Précision sur la sortie 16 bits : 57 % des échantillons exacts, 37,6 % à 1 LSB, **5,4 % au-delà, max 9 LSB** (plus que sur le q3 du banc : 4 LSB, 1,1 %), probablement une musique plus forte (erreur relative à la crête).
+
+**Image FX1, le son par HIFIACC (2026-10-28, `work/hwlog/1028_fft2/`)** : album « Beast In… » (Vorbis, 44,1 kHz), 4 pistes entières et une vingtaine de lectures courtes (sauts) ; **aucun repli logiciel** (≈ 125 000 blocs). Pistes entières : **34,1 MHz en moyenne**, 97 % du temps au palier le plus bas (50 MHz). Référence estimée sur la même piste d'après FV1 (56,4 MHz, matériel + Tremor ; FV1 − temps matériel ≈ 51,6 MHz ; FV1 − temps Tremor ≈ 37 MHz) : **environ −34 %**. Un manque de 5 376 octets par piste (au démarrage, comme les manques d'une piste en 0.87) ; lors des sauts de piste rapprochés, des manques de 65 à 85 Ko, à comparer avec la 0.87 sur le même usage (pas de référence Vorbis dans ce journal).
+
+**Nuit avec FX1 (2026-10-28, `work/hwlog/1028_fx1_nuit/`)** : 7,6 h de lecture (FLAC, MP3, Vorbis, Musepack), dont 3,45 h de Vorbis en 54 pistes : **1 876 399 blocs sur HIFIACC, 0 repli logiciel** ; **34,6 MHz en moyenne** sur les 39 pistes Vorbis de plus d'une minute. Aucun manque pendant la lecture d'une piste : les vrais manques tombent tous aux changements de piste faits à la main, dans les 23 premières minutes. Les « 1 (9 600 octets) » de chaque fin de piste ensuite étaient le compteur reporté d'une piste enchaînée à l'autre (les statistiques ne sont pas remises à zéro quand le DAC est gardé) ; un départ à froid affichait « underruns during it 4294967295 » (valeurs de départ notées avant la remise à zéro de `audio_start`). Rien d'anormal à l'écoute. Batterie 4 179 → 3 647 mV en 7,3 h.
+
+**0.88 (2026-10-28)** : la FFT par défaut (`-DECHO_NO_HWFFT` pour s'en passer, `-DECHO_HWTEST` pour le banc) ; compteurs de manques par piste, par différence avec des totaux jamais remis à zéro (`audio.ur_all`, `lost_all`, `i2s_all`), et le minimum de remplissage propre à chaque piste, enchaînée ou non. Image `work/images/NEWFW088.IMG` (CRC `0xc865b73a`). **Sur l'appareil** (`work/hwlog/1028_088/`, 22 min, 29 pistes) : 4 pistes Vorbis entières enchaînées à **34,0-34,7 MHz, 0 manque**, ≈ 153 000 blocs, 0 repli ; compteurs à 0 après chaque enchaînement, plus de « 4294967295 ». Restent des manques de 1,6 à 9 Ko aux sauts de piste (13 ms dans l'anneau au moment du saut) et de **87 à 157 Ko après une recherche de position dans un fichier Ogg** (son rendu après 490 à 830 ms), aussi en **Opus** : la recherche de position Ogg, pas la FFT (ROADMAP, à faire).
+

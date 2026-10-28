@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-27, version 0.86.
+Last update: 2026-10-28, version 0.88.
 
 ## Done, validated on the device
 
@@ -132,6 +132,14 @@ Last update: 2026-10-27, version 0.86.
   On the device: no error, about 28 % less core B load on a FLAC album.
 - 0.86: the HIFIACC timeout at 30 ms (it runs at core B's clock: 5 ms timed out at 50 MHz on
   8,192-sample blocks at order 32).
+- 0.87: MP3 synthesis on the SYNTH accelerator (reverse-engineered from the stock MP3 module):
+  about 42 % less core B load (37-39 MHz to 21-23 MHz on *Discovery*), within 2 LSB of the
+  software (§68-71, `docs/MP3ACC.md`). The Imdct36 accelerator is mapped but not used (no end
+  flag found, small expected gain).
+- 0.88: the IMDCT of Vorbis on HIFIACC's FFT, with a software fallback (§73-74,
+  `docs/HIFIACC.md`): about 34 % less core B load (34-35 MHz on whole tracks, from about 50);
+  one night (1.9 million blocks) without a timeout. Underrun counters per track (no longer carried
+  over chained tracks). First session on the device fine (Vorbis album, chains between codecs).
 
 ## To do
 
@@ -143,6 +151,10 @@ New formats, in this order (agreed 2026-10-24):
 
 Other items:
 
+- Seek in Ogg files (Vorbis and Opus): a seek leaves 490 to 830 ms without sound, 87 to 157 KB of
+  DAC ring underrun (log of 0.88, 2026-10-28; the open reads 1 to 3 MB of the file first). Not
+  due to the hardware FFT: Opus does the same. To measure (bisection reads, time per step) and
+  shorten; compare with 0.87 on the same gesture.
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64).
 - Document every HIFIACC function (`docs/HIFIACC.md`; LPC for FLAC done, §66): map the
   registers of the ALAC filter (variable coefficients, memory at `0x01069000`, used by the stock
@@ -198,11 +210,9 @@ Other items:
 - To check on the device rather than add:
   - the 4.4 mm balanced output: the plug is detected, nothing is specific to it; check by ear,
     and whether the stock firmware sets the DACs differently for it (mode, gain);
-  - hardware acceleration of FLAC and MP3, as in the stock firmware: its MP3 module uses the
-    IMDCT36 and SYNTH accelerators of the chip (TRM chapters 27-28, ETUDE §18, about 31 MHz of
-    the HiFi core), while our MP3 decoder (PacketVideo) does it all in software (about 50 MHz
-    on average on the device); whether the stock FLAC module uses any hardware help is not
-    known yet.
+  - the Imdct36 MP3 accelerator, used by the stock MP3 module (TRM chapter 28, ETUDE §18):
+    mapped but not used by us (no end flag found, small expected gain, §70); the synthesis runs
+    on SYNTH since 0.87, the FLAC LPC and the Vorbis IMDCT on HIFIACC since 0.85 and 0.88.
 - Battery percentage: the curve is a generic Li-ion one, to be measured on the device. Overnight
   test (0.61, 2026-10-24): 6 h of MP3 320 kbps from the card, screen off, 4,184 to 3,710 mV (about
   70 mV/h after the first hour). Overnight test (0.80, 2026-10-26): 7.9 h from the card (MP3,

@@ -6,6 +6,13 @@
  * output has the exact length of the source. 16-bit stereo packed frames, mono duplicated. */
 #include <string.h>
 #include "rt.h"
+#if defined(ECHO_SYNTH) && !defined(ECHO_HWTEST) && !defined(ECHO_HWSYN)
+#include "mp3synth.c"
+#endif
+#if defined(ECHO_HWTEST) || defined(ECHO_HWSYN)
+#define REG(a) (*(volatile uint32_t *)(a))
+#include "hwtest_synth.c"
+#endif
 #include "pvmp3decoder_api.h"
 
 #define BUF         8192                /* input window: several frames (the largest is 2881) */

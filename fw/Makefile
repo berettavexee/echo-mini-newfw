@@ -11,7 +11,7 @@ CFLAGS = -mcpu=cortex-m3 -mthumb -Os -g -ffreestanding -fno-builtin -nostdlib \
          -ffunction-sections -fdata-sections -Wall -Wextra -Isrc $(EXTRA)
 LDFLAGS = -T link.ld -Wl,--gc-sections -Wl,-Map=build/fw.map -nostdlib -lgcc
 
-SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/resume.c src/uidraw.c src/main.c src/charge.c src/mp4.c src/font.c src/rtc.c build/font_ascii.c
+SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/resume.c src/uidraw.c src/main.c src/charge.c src/mp4.c src/font.c src/rtc.c src/probe.c build/font_ascii.c
 OBJS = $(patsubst %.c,build/%.o,$(notdir $(SRCS)))
 
 all: $(OUT)
@@ -76,7 +76,8 @@ build/hifi_opus.elf: hifi/rt.c hifi/oggpage.c hifi/codec_opus.c hifi/rt.h hifi/u
 TREMOR_DIR ?= ../third_party/tremor-lowmem
 TREMOR_SRCS := bitwise.c codebook.c dsp.c floor1.c floor_lookup.c info.c mapping0.c mdct.c misc.c res012.c
 TREMOR_OBJS := $(patsubst %.c,build/tremor/%.o,$(TREMOR_SRCS))
-TREMOR_DEFS := -DECHO_NO_FLOOR0 -DECHO_HEAP_ALLOCA -D_ARM_ASSEM_ -DECHO_SSAT
+TREMOR_DEFS := -DECHO_NO_FLOOR0 -DECHO_HEAP_ALLOCA -D_ARM_ASSEM_ -DECHO_SSAT \
+                $(filter -DECHO_NO_HWFFT -DECHO_HWTEST,$(EXTRA))
 TREMOR_CFLAGS = -mcpu=cortex-m3 -mthumb -Os -g -std=gnu99 -ffreestanding -nostdlib \
                 -ffunction-sections -fdata-sections -Wa,-mimplicit-it=thumb -w $(TREMOR_DEFS) -I$(TREMOR_DIR)
 
@@ -84,7 +85,7 @@ build/tremor/%.o: $(TREMOR_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(TREMOR_CFLAGS) -c $< -o $@
 
-build/hifi_vorbis.elf: hifi/rt.c hifi/heap.c hifi/oggpage.c hifi/codec_vorbis.c hifi/rt.h hifi/upsample_tab.h hifi/oggpage.h hifi/link.ld src/hifi_proto.h $(TREMOR_OBJS)
+build/hifi_vorbis.elf: hifi/rt.c hifi/heap.c hifi/oggpage.c hifi/codec_vorbis.c hifi/hififft.c hifi/fft_tw.h hifi/rt.h hifi/upsample_tab.h hifi/oggpage.h hifi/link.ld src/hifi_proto.h $(TREMOR_OBJS)
 	$(CC) $(HCFLAGS) -Wa,-mimplicit-it=thumb $(TREMOR_DEFS) -I$(TREMOR_DIR) hifi/rt.c hifi/heap.c hifi/oggpage.c \
 	  hifi/codec_vorbis.c $(TREMOR_OBJS) $(HLDFLAGS) -Wl,-Map=build/hifi_vorbis.map -o $@
 	$(CROSS)size $@
@@ -104,7 +105,7 @@ PVMP3_SRCS := pvmp3_normalize pvmp3_alias_reduction pvmp3_crc pvmp3_decode_heade
 PVMP3_ASM := pvmp3_polyphase_filter_window pvmp3_mdct_18 pvmp3_dct_9 pvmp3_dct_16
 PVMP3_OBJS := $(patsubst %,build/pvmp3/%.o,$(PVMP3_SRCS)) $(patsubst %,build/pvmp3/%_thumb.o,$(PVMP3_ASM))
 PVMP3_CFLAGS = -mcpu=cortex-m3 -mthumb -O2 -g -ffreestanding -nostdlib -fno-exceptions -fno-rtti \
-               -ffunction-sections -fdata-sections -w "-DOSCL_UNUSED_ARG(x)=(void)(x)" -DPV_ARM_GCC_V5 \
+               -ffunction-sections -fdata-sections -w "-DOSCL_UNUSED_ARG(x)=(void)(x)" -DPV_ARM_GCC_V5 -DECHO_SYNTH $(EXTRA) \
                -I$(PVMP3_DIR)/include -I$(PVMP3_DIR)/src
 
 build/pvmp3/%_thumb.o: hifi/mp3asm/%_thumb.S
@@ -115,8 +116,8 @@ build/pvmp3/%.o: $(PVMP3_DIR)/src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CROSS)g++ $(PVMP3_CFLAGS) -c $< -o $@
 
-build/hifi_mp3.elf: hifi/rt.c hifi/codec_mp3.c hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h $(PVMP3_OBJS)
-	$(CC) $(HCFLAGS) -I$(PVMP3_DIR)/include -I$(PVMP3_DIR)/src hifi/rt.c hifi/codec_mp3.c $(PVMP3_OBJS) \
+build/hifi_mp3.elf: hifi/rt.c hifi/codec_mp3.c hifi/mp3synth.c hifi/rt.h hifi/upsample_tab.h hifi/link.ld src/hifi_proto.h $(PVMP3_OBJS)
+	$(CC) $(HCFLAGS) -DECHO_SYNTH -I$(PVMP3_DIR)/include -I$(PVMP3_DIR)/src hifi/rt.c hifi/codec_mp3.c $(PVMP3_OBJS) \
 	  $(HLDFLAGS) -Wl,-Map=build/hifi_mp3.map -o $@
 	$(CROSS)size $@
 

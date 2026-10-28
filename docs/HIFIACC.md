@@ -6,8 +6,8 @@ use it without repeating the work. The study behind it, in French, is `ETUDE.md`
 map), §66 (on-device comparison) and §67 (use in the FLAC decoder).
 
 Status: the **LPC filter used by FLAC** is understood, verified bit-exact on the device and used
-by this firmware since version 0.85. The other functions (FFT, MAC, ALAC, APE) are documented by
-the TRM but their registers are not mapped yet.
+by this firmware since version 0.85. The **FFT** is mapped, measured on the device and used since
+version 0.88 for the IMDCT of the Vorbis decoder. The MAC, ALAC and APE functions are not mapped yet.
 
 ## What it is
 
@@ -113,6 +113,39 @@ Speed, against dr_flac's own prediction on the same subframes, DMA included: abo
 faster** in 16 bits at order 8, **15 to 16 times** at high orders and in 24 bits (where software
 needs 64-bit arithmetic).
 
+## The FFT
+
+Measured on the device with the USB probe (`ETUDE.md` §72-73).
+
+| Address | Use |
+|---|---|
+| `0x0106000c` | bits 31-29: the function (2 = FFT, 4 = MAC, 5 = FLAC); `0x40000000`, then `0x40000003` to start, then **0 before reading the result** |
+| `0x01060024` | `size << 29` (64: 0, 128: 1, 256: 2, 512: 3, 1,024: 4); bit 27: no scaling (0: the result is divided by N); bit 20: real input (the imaginary part is ignored) |
+| `0x01061000` | imaginary parts, 1,024 32-bit words; the result in place |
+| `0x01062000` | real parts, 1,024 32-bit words; the result in place |
+
+- **Inputs in bit-reversed order, output in natural order**; the result is the forward DFT
+  `X[k] = sum x[n] e^(-2 i pi k n / N)`.
+- There is no inverse mode: compute `ifft(x) = conj(FFT(conj(x))) / N`.
+- While the function field still says FFT, the data memory belongs to the engine: every read
+  returns the same value. Write 0 to `+0x0c` first.
+- Precision, random inputs of 15 to 24 bits, 64 to 1,024 points: largest error 0.003 to 0.008 %
+  of the peak (twiddles of about 14 bits); no overflow seen up to 24-bit inputs at 1,024 points.
+- The computation is done within a millisecond (the probe's round trip); the exact time is not
+  measured yet.
+
+### Use: the IMDCT of Vorbis (0.88)
+
+`fw/hifi/hififft.c` computes Tremor's `mdct_backward` for blocks of 256 and 2,048 with a FFT of
+n/4 points (`ETUDE.md` §74): a pre-rotation `w * (X[2m] + i X[n/2-1-2m])`, `w[m] =
+exp(-2 i pi (m + 1/8) / n)`, written in bit-reversed order, the FFT without scaling, then the
+same rotation on the output, unfolded into Tremor's order. Other sizes stay in software, and so
+does a block that times out (3 ms); after 3 timeouts, the rest of the session.
+
+On the device: about 4 times faster than Tremor's own IMDCT; whole Vorbis tracks at 34-35 MHz
+of core B instead of about 50 MHz (some -34 %); within 1 LSB of Tremor on 94 % of the 16-bit
+samples, 9 LSB at most (about -71 dBFS). Overnight: 1.9 million blocks, no timeout.
+
 ## How to test it yourself
 
 This repository has a comparison bench, built only on request: `make EXTRA=-DECHO_HWTEST` in
@@ -121,15 +154,19 @@ HIFIACC, compared, and timed; the results go to the device log (`hwt:` lines) at
 track, per order. The sound stays the software's. See `fw/hifi/hwtest_lpc.c`. The production
 driver is `fw/hifi/hifiacc.c`.
 
-The emulator `fw/tools/emu_fw.py` models the LPC filter and DMAC2 (`fw/tools/emu_host.py`, class
+The emulator `fw/tools/emu_fw.py` models the LPC filter and DMAC2 (`tools/emu_host.py`, class
 `Accel`); the model is exact for orders 3 to 32 but, unlike the hardware, also for orders 1
 and 2.
+
+It also models the FFT: the exact transform rounded to integers (the device's twiddles have about
+14 bits, so results are close, not bit-exact), and the busy memory: while `+0x0c` still selects
+the FFT, the data memory reads as `0x0badf00d`.
 
 ## Open questions
 
 - The meaning of the configuration word `0x01080108`.
-- The registers of the FFT/IFFT, the MAC, the ALAC filter (variable coefficients, memory at
-  `0x01069000`) and the APE decoder.
+- The MAC (function 4, term count at bit 18 of `+0x30`, result at `+0x34`/`+0x38`): the FFT's
+  sequence gives 0. The ALAC filter (memory at `0x01069000`) and the APE decoder.
 - Driving the FIFOs directly from the CPU (the TRM allows it), which may suit small blocks.
 - The MP3 accelerators **SYNTH** and **Imdct36** are separate blocks (TRM chapters 27 and 28,
   with memory maps); not studied yet.

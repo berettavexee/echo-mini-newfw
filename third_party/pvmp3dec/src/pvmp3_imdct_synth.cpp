@@ -100,6 +100,30 @@ Overlapping and adding with previous block
 #include "pvmp3_dec_defs.h"
 #include "pvmp3_mdct_18.h"
 #include "pvmp3_mdct_6.h"
+#ifdef ECHO_HWTEST
+/* ECHO MINI test build only (ETUDE §70): one long-block transform in 16 also on IMDCT36,
+ * pvmp3_mdct_18 timed on a copy (it changes its input and the history) */
+#include <string.h>
+extern "C" void echo_imdct_hook(const int32 *, uint32);
+extern "C" uint32 echo_now(void);
+static void echo_mdct18(int32 *vec, int32 *hist, const int32 *win)
+{
+    static uint32 n;
+    if ((++n & 15) == 0)
+    {
+        int32 x[18], v[18], h[18];
+        memcpy(x, vec, sizeof x);
+        memcpy(v, vec, sizeof v);
+        memcpy(h, hist, sizeof h);
+        uint32 t = echo_now();
+        pvmp3_mdct_18(v, h, win);
+        t = echo_now() - t;
+        echo_imdct_hook(x, t);
+    }
+    pvmp3_mdct_18(vec, hist, win);
+}
+#define pvmp3_mdct_18 echo_mdct18
+#endif
 #include "mp3_mem_funcs.h"
 
 

@@ -101,6 +101,24 @@ Input
 #include "pvmp3_framedecoder.h"
 #include "pvmp3_dec_defs.h"
 #include "pvmp3_poly_phase_synthesis.h"
+#if defined(ECHO_SYNTH) && !defined(ECHO_HWTEST) && !defined(ECHO_HWSYN)
+/* ECHO MINI (ETUDE §71): the synthesis on the SYNTH accelerator (fw/hifi/mp3synth.c) */
+extern "C" int echo_synth_granule(const int32 *, int16 *, int, int);
+extern "C" void echo_synth_reset(void);
+#define ECHO_SYNTH_ON 1
+#endif
+#ifdef ECHO_HWSYN
+/* ECHO MINI test build only (ETUDE §71): SYNTH plays; the first granules also in software,
+ * into a scratch buffer, for the comparison */
+extern "C" void echo_synth_play(const int32 *, int16 *, int, int);
+extern "C" void echo_synth_cmp(const int16 *, const int16 *, int);
+static int16 echo_sw[2 * SUBBANDS_NUMBER * FILTERBANK_BANDS];
+static uint32 echo_gran;
+#endif
+#ifdef ECHO_HWTEST
+extern "C" void echo_synth_hook(const int32 *, const int16 *, int, int, uint32);   /* ECHO MINI, §69 */
+extern "C" uint32 echo_now(void);
+#endif
 #include "pvmp3_tables.h"
 #include "pvmp3_imdct_synth.h"
 #include "pvmp3_alias_reduction.h"
@@ -339,6 +357,9 @@ ERROR_CODE pvmp3_framedecoder(tPVMP3DecoderExternal *pExt,
                       0,
                       SUBBANDS_NUMBER*FILTERBANK_BANDS*sizeof(pChVars[LEFT]->work_buf_int32[0]));
 
+#ifdef ECHO_SYNTH_ON
+            echo_synth_reset();     /* ECHO MINI: SYNTH's history too (ETUDE §71) */
+#endif
             /*  clear circular buffers, to avoid any glitch */
             pv_memset((void*)&pChVars[ LEFT]->circ_buffer[576],
                       0,
@@ -498,10 +519,38 @@ ERROR_CODE pvmp3_framedecoder(tPVMP3DecoderExternal *pExt,
                  *   Polyphase synthesis
                  */
 
+#ifdef ECHO_HWTEST
+                uint32 echo_t0 = echo_now();
+#endif
+#ifdef ECHO_HWSYN
+                if (echo_gran < 100)
+                    pvmp3_poly_phase_synthesis(pChVars[ch], pVars->num_channels,
+                                               pExt->equalizerType, &echo_sw[ch]);
+                echo_synth_play(pChVars[ch]->work_buf_int32, &ptrOutBuffer[ch],
+                                pVars->num_channels, ch);
+                if (echo_gran < 100 && ch == pVars->num_channels - 1)
+                    echo_synth_cmp(ptrOutBuffer, echo_sw,
+                                   pVars->num_channels * SUBBANDS_NUMBER * FILTERBANK_BANDS);
+                if (ch == pVars->num_channels - 1)
+                    echo_gran++;
+#elif defined(ECHO_SYNTH_ON)
+                if (!echo_synth_granule(pChVars[ch]->work_buf_int32, &ptrOutBuffer[ch],
+                                        pVars->num_channels, ch))
+                    pvmp3_poly_phase_synthesis(pChVars[ch], pVars->num_channels,
+                                               pExt->equalizerType, &ptrOutBuffer[ch]);
+#else
                 pvmp3_poly_phase_synthesis(pChVars[ch],
                                            pVars->num_channels,
                                            pExt->equalizerType,
                                            &ptrOutBuffer[ch]);
+#endif
+#ifdef ECHO_HWTEST
+                {   /* ECHO MINI test build only (ETUDE §69-70): the same slots on SYNTH */
+                    uint32 echo_dt = echo_now() - echo_t0;
+                    echo_synth_hook(pChVars[ch]->work_buf_int32, &ptrOutBuffer[ch],
+                                    pVars->num_channels, ch, echo_dt);
+                }
+#endif
 
 
             }/* end ch loop */
@@ -793,6 +842,9 @@ void pvmp3_resetDecoder(void  *pMem)
      *  Initialize polysynthesis circular buffer mechanism
      */
 
+#ifdef ECHO_SYNTH_ON
+    echo_synth_reset();     /* ECHO MINI: SYNTH's history with the decoder's (ETUDE §71) */
+#endif
     pv_memset((void*)&pChVars[ LEFT]->circ_buffer[576],
               0,
               480*sizeof(pChVars[ LEFT]->circ_buffer[0]));

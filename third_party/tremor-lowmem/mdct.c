@@ -387,11 +387,21 @@ void mdct_backward(int n, DATA_TYPE *in){
   shift=13-shift;
   step=2<<shift;
    
+#if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
+  /* ECHO: HIFIACC's FFT for the sizes it serves (fw/hifi/hififft.c, ETUDE §74) */
+  extern int echo_fft_imdct(int n, DATA_TYPE *in);
+  extern void echo_fft_check(int n, const DATA_TYPE *in);
+  if (echo_fft_imdct(n, in))
+    return;
+#endif
   presymmetry(in,n>>1,step);
   mdct_butterflies(in,n>>1,shift);
   mdct_bitreverse(in,n,shift);
   mdct_step7(in,n,step);
   mdct_step8(in,n,step);
+#if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
+  echo_fft_check(n, in);
+#endif
 }
 
 void mdct_shift_right(int n, DATA_TYPE *in, DATA_TYPE *right){

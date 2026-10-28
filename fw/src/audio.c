@@ -353,14 +353,16 @@ void audio_update(void)
     audio.last_pos = pos;
     if (REG(I2S_INTSR) & 2) {                   /* TX underrun */
         audio.i2s_ur++;
+        audio.i2s_all++;
         REG(I2S_INTCR) |= 4;
     }
     int32_t fill = audio_fill();
     if (fill < 0) {                             /* the DMA overtook the producer */
         if (!audio.in_ur)
-            audio.ring_ur++;                    /* one episode, however many polls it lasts */
+            audio.ring_ur++, audio.ur_all++;    /* one episode, however many polls it lasts */
         audio.in_ur = 1;
         audio.ring_lost += (uint32_t)-fill;
+        audio.lost_all += (uint32_t)-fill;
         audio.wr = audio.rd;
         fill = 0;
     } else if (fill > 0)

@@ -85,7 +85,8 @@ struct hp_ctl {
     uint32_t rewind_pos, rewind_seq, rewind_ack;
     uint32_t hacc_sub, hacc_soft;       /* FLAC: LPC subframes on HIFIACC, in software after a
                                            timeout (ETUDE §67) */
-#ifdef ECHO_HWTEST
+    uint32_t synth_gran, synth_soft;    /* MP3: granules on SYNTH, in software (ETUDE §71) */
+#if defined(ECHO_HWTEST) || defined(ECHO_HWSYN)
     /* Test build only (ETUDE §66): HIFIACC's LPC against dr_flac, per track, written by core B
      * and logged by core A at the end of the track */
     struct {
@@ -102,6 +103,42 @@ struct hp_ctl {
         int32_t o1_x[6], o1_sw[6], o1_hw[6];    /* the first order-1 difference: input, outputs */
         int32_t o1_coef, o1_shift;
     } hwt;
+    /* Test build only (ETUDE §69): MP3 SYNTH accelerator against pvmp3dec's synthesis */
+    struct {
+        uint32_t magic, trial;          /* trial: moved on by core A after each track */
+        int32_t shift;                  /* input shift of this track (x >> shift) */
+        uint32_t slots, polled, timeouts;
+        uint32_t exact, within1, within4;   /* samples, direct order */
+        uint32_t r_exact, r_within4;        /* samples, reversed order */
+        uint32_t max_err;
+        uint64_t sum_sw, sum_hw;            /* sum of |samples| */
+        int64_t dot;                        /* sum sw * hw: the sign */
+        int32_t x[4], sw[4], hw[4];         /* the first slot */
+        uint32_t st_before, st_after;       /* +0x80c before writing, after the wait */
+        uint32_t syn_hw_ticks, syn_sw_ticks;    /* HS3: SYNTH (18 slots) against pvmp3dec's */
+        uint32_t syn_timed;                     /* synthesis calls timed */
+        /* HS3: IMDCT36 against an exact IMDCT of 36 points, one transform in 16 */
+        uint32_t im_mode;                       /* +0x800 of this track */
+        int32_t im_shift;
+        uint32_t im_calls, im_polled, im_timeouts;
+        uint32_t im_exact[17], im_within1[17];  /* hw against ref scaled by 2^(e - 8) */
+        uint64_t im_sum_ref, im_sum_hw;
+        int64_t im_dot;
+        uint32_t im_hw_ticks, im_sw_ticks;      /* IMDCT36 against pvmp3_mdct_18 */
+        int32_t im_x[3], im_ref[3], im_hw[3];   /* the first transform */
+        /* ECHO_HWSYN (ETUDE §71): SYNTH plays; the first granules compared with the software */
+        uint32_t p_gran, p_cmp, p_exact, p_within1, p_max, p_hw_ticks, p_polled, p_timeouts;
+    } hws;
+    /* Vorbis IMDCT on HIFIACC's FFT against Tremor (ETUDE §74): blocks, output samples on the
+     * 16-bit scale, TIMER1 ticks of each */
+    struct {
+        uint32_t magic, blocks, short_blocks, samples, exact, within1, max, timeouts;
+        uint32_t hw_ticks, sw_ticks;
+    } hwf;
+#endif
+#if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
+    uint32_t fft_blocks, fft_soft;      /* Vorbis: IMDCT blocks on HIFIACC, in software after a
+                                           timeout (ETUDE §74) */
 #endif
 };
 #define HWT_MAGIC 0x48575431u           /* "HWT1" */

@@ -477,7 +477,7 @@ int player_drain_service(void)
 /* ---- non-blocking playback (step 6): open, then service from the main loop, then close ---- */
 static struct {
     int flags, warm, kept, changed, full, open;
-    uint32_t t0, t_load, t_ready, t_open, t_dac, t_first, t_play, ur0, lost0, fb;
+    uint32_t t0, t_load, t_ready, t_open, t_dac, t_first, t_play, ur0, lost0, i2s0, fb;
     uint32_t na_frames, na_t, na_in;    /* the last change of the frames decoded: when, input */
     int32_t fill0;
 } ps;
@@ -516,8 +516,9 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     ps.kept = (flags & PLAY_CHAIN) && dac.running && audio.on;
     drain.on = 0;
     ps.fill0 = ps.kept ? audio_fill() : 0;      /* what the DAC ring holds at the switch */
-    ps.ur0 = audio.ring_ur;
-    ps.lost0 = audio.ring_lost;
+    ps.ur0 = audio.ur_all;                      /* the counters of this track by difference */
+    ps.lost0 = audio.lost_all;
+    ps.i2s0 = audio.i2s_all;
     log_printf("player: %s, %u bytes, our codec %u", f->name, f->size, codec);
     mp4_on = codec == HP_CODEC_AAC || codec == HP_CODEC_ALAC;
     if (mp4_on) {                               /* the container read here, the seek done here */
@@ -686,7 +687,7 @@ int player_service(void)
                    ps.kept ? "kept" : ps.changed ? "rate changed in" : "started in",
                    ps.t_dac - ps.t_open, ps.t_first - ps.t0, ps.fill0,
                    ps.fill0 > 0 ? (uint32_t)((uint64_t)ps.fill0 * 1000 / ps.fb / player.rate) : 0,
-                   audio.ring_ur - ps.ur0, audio.ring_lost - ps.lost0);
+                   audio.ur_all - ps.ur0, audio.lost_all - ps.lost0);
     }
     if (!ps.full && audio_fill() >= (int32_t)(audio.ring_size - 8192)) {
         ps.full = 1;                            /* from here, the steady-state minimum fill */
@@ -694,6 +695,7 @@ int player_service(void)
                    (ticks() - ps.t_play) / 1000, out_avail());
         if (!ps.kept)
             audio_reset_stats();
+        audio.min_fill = 0x7fffffff;            /* a chained track too: its own minimum */
     }
     /* frames heard: written by core B minus what is still in the two rings */
     uint32_t queued = (out_avail() + (uint32_t)(audio_fill() > 0 ? audio_fill() : 0)) / ps.fb;
@@ -740,12 +742,36 @@ void player_close(int stopped)
                "times, %u loops; DAC ring %u KiB: underruns %u (%u bytes), i2s %u, min fill %d%s",
                stopped ? "stopped" : (player.error ? "failed" : "finished"), c->frames,
                player.time_ms, player.read_bytes, player.reads, c->wakeups, c->work_loops,
-               audio.ring_size / 1024, audio.ring_ur, audio.ring_lost, audio.i2s_ur,
+               audio.ring_size / 1024, audio.ur_all - ps.ur0, audio.lost_all - ps.lost0,
+               audio.i2s_all - ps.i2s0,
                audio.min_fill, ps.full ? " (since full)" : " (never full)");
     gov_report(own_file.name);
+    if (c->synth_gran || c->synth_soft)
+        log_printf("synth: %s: %u granules on SYNTH, %u timeouts (software for the rest)",
+                   own_file.name, c->synth_gran, c->synth_soft);
+#if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
+    if (c->fft_blocks || c->fft_soft)
+        log_printf("fft: %s: %u IMDCT blocks on HIFIACC, %u in software after a timeout",
+                   own_file.name, c->fft_blocks, c->fft_soft);
+#endif
+#ifdef ECHO_HWTEST
+    if (c->hwf.magic == HWT_MAGIC && c->hwf.blocks)  /* test build: FFT against Tremor (§74) */
+        log_printf("hwf: %s: %u IMDCT blocks (%u short), %u samples: %u exact, %u within 1, "
+                   "max %u LSB; hw %u us, Tremor %u us in all; %u timeouts", own_file.name,
+                   c->hwf.blocks, c->hwf.short_blocks, c->hwf.samples, c->hwf.exact,
+                   c->hwf.within1, c->hwf.max, c->hwf.hw_ticks / 24, c->hwf.sw_ticks / 24,
+                   c->hwf.timeouts);
+#endif
     if (c->hacc_sub || c->hacc_soft)
         log_printf("hifiacc: %s: %u LPC subframes on HIFIACC, %u in software after a timeout",
                    own_file.name, c->hacc_sub, c->hacc_soft);
+#ifdef ECHO_HWSYN
+    if (c->hws.magic == HWT_MAGIC && c->hws.p_cmp)   /* test build: SYNTH plays (§71) */
+        log_printf("hwp: %s: %u samples compared: %u exact, %u within 1, max %u; synth %u us "
+                   "(%u polled, %u timeouts)", own_file.name, c->hws.p_cmp, c->hws.p_exact,
+                   c->hws.p_within1, c->hws.p_max, c->hws.p_hw_ticks / 24, c->hws.p_polled,
+                   c->hws.p_timeouts);
+#endif
 #ifdef ECHO_HWTEST
     if (c->hwt.magic == HWT_MAGIC) {            /* test build: HIFIACC against dr_flac (§66) */
         log_printf("hwt: %s: %u LPC subframes: %u exact, %u differ, %u timeouts, %u skipped; "
@@ -772,6 +798,40 @@ void player_close(int stopped)
                        c->hwt.o1_hw[0], c->hwt.o1_hw[1], c->hwt.o1_hw[2], c->hwt.o1_hw[3],
                        c->hwt.o1_hw[4], c->hwt.o1_hw[5]);
         c->hwt.magic = 0;
+    }
+    if (c->hws.magic == HWT_MAGIC && c->hws.slots) {    /* test build: SYNTH against pvmp3dec */
+        log_printf("hws: %s: trial %u shift %d: %u slots (%u polled, %u timeouts); direct: %u "
+                   "exact, %u within 1, %u within 4, max %u; reversed: %u exact, %u within 4",
+                   own_file.name, c->hws.trial, c->hws.shift, c->hws.slots, c->hws.polled,
+                   c->hws.timeouts, c->hws.exact, c->hws.within1, c->hws.within4, c->hws.max_err,
+                   c->hws.r_exact, c->hws.r_within4);
+        log_printf("hws: sum |sw| %u, |hw| %u (x1000), dot %d (x1e6); first: x %d %d %d %d, "
+                   "sw %d %d %d %d, hw %d %d %d %d; +0x80c %x then %x",
+                   (uint32_t)(c->hws.sum_sw / 1000), (uint32_t)(c->hws.sum_hw / 1000),
+                   (int32_t)(c->hws.dot / 1000000), c->hws.x[0], c->hws.x[1], c->hws.x[2],
+                   c->hws.x[3], c->hws.sw[0], c->hws.sw[1], c->hws.sw[2], c->hws.sw[3],
+                   c->hws.hw[0], c->hws.hw[1], c->hws.hw[2], c->hws.hw[3], c->hws.st_before,
+                   c->hws.st_after);
+        if (c->hws.syn_timed)
+            log_printf("hws: synth time: hw %u us, sw %u us over %u calls (18 slots each)",
+                       c->hws.syn_hw_ticks / 24, c->hws.syn_sw_ticks / 24, c->hws.syn_timed);
+        if (c->hws.im_calls) {
+            log_printf("hwi: mode %u shift %d: %u transforms (%u polled, %u timeouts); hw %u us, "
+                       "mdct_18 %u us; sum |ref| %u, |hw| %u (x1000); dot %d (x1e6)",
+                       c->hws.im_mode, c->hws.im_shift, c->hws.im_calls, c->hws.im_polled,
+                       c->hws.im_timeouts, c->hws.im_hw_ticks / 24, c->hws.im_sw_ticks / 24,
+                       (uint32_t)(c->hws.im_sum_ref / 1000), (uint32_t)(c->hws.im_sum_hw / 1000),
+                       (int32_t)(c->hws.im_dot / 1000000));
+            for (int e = 0; e < 17; e++)
+                if (c->hws.im_within1[e] > c->hws.im_calls * 36 / 20)
+                    log_printf("hwi: scale 2^%d: %u exact, %u within 1 (of %u)", e - 8,
+                               c->hws.im_exact[e], c->hws.im_within1[e], c->hws.im_calls * 36);
+            log_printf("hwi: first: x %d %d %d, ref %d %d %d, hw %d %d %d", c->hws.im_x[0],
+                       c->hws.im_x[1], c->hws.im_x[2], c->hws.im_ref[0], c->hws.im_ref[1],
+                       c->hws.im_ref[2], c->hws.im_hw[0], c->hws.im_hw[1], c->hws.im_hw[2]);
+        }
+        c->hws.slots = 0;
+        c->hws.trial++;                         /* the next track tries the next shift */
     }
 #endif
     command(HP_CMD_STOP);

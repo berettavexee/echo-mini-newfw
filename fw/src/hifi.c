@@ -184,8 +184,14 @@ int hifi_load_own(uint32_t codec)
 int hifi_start_own(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
+#ifdef ECHO_HWTEST
+    uint32_t trial = c->hws.trial;              /* the SYNTH bench's trial, kept (§69) */
+#endif
     for (unsigned i = 0; i < sizeof *c / 4; i++)
         ((volatile uint32_t *)c)[i] = 0;
+#ifdef ECHO_HWTEST
+    c->hws.trial = trial;
+#endif
     c->in_end = 0xffffffffu;
     REG(MBOX + 0x04) = 0xf;
     REG(B2A_STATUS) = 0xf;

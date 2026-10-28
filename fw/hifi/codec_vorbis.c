@@ -16,6 +16,7 @@
 #include "oggpage.h"
 #include "ivorbiscodec.h"
 #include "codec_internal.h"
+#include "hififft.c"
 
 #define MAX_PACKET   16384              /* setup header ~4 KB, audio packets < 2 KB */
 #define BLOCK_FRAMES 512
@@ -192,6 +193,13 @@ int codec_open(void)
         return -HP_ERR_UNSUPPORTED;
     uint64_t g = ctl->end_granule_lo | (uint64_t)ctl->end_granule_hi << 32;
     ctl->rate = (uint32_t)vi.rate;
+#if !defined(ECHO_NO_HWFFT) || defined(ECHO_HWTEST)
+    ctl->fft_blocks = ctl->fft_soft = 0;
+#endif
+#ifdef ECHO_HWTEST
+    for (uint32_t i = 0; i < sizeof ctl->hwf / 4; i++)
+        ((volatile uint32_t *)&ctl->hwf)[i] = 0;
+#endif
     ctl->channels = (uint32_t)vi.channels;
     ctl->bits = 16;
     ctl->frame_bytes = 4;

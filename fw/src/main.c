@@ -21,6 +21,9 @@
 #include "version.h"
 #include "sys.h"
 #include "keys.h"
+#ifdef ECHO_PROBE
+#include "probe.h"
+#endif
 #include "ui.h"
 
 extern uint32_t boot_regs[4], boot_tag;
@@ -444,6 +447,9 @@ static void usb_mode(int writable)
     }
     log_printf("usb: %s disk, sectors %x + %u", writable ? "read/write" : "read only", vol.base,
                total - vol.base);
+#ifdef ECHO_PROBE
+    probe_attach(vol.base);                     /* before the host owns the volume */
+#endif
     log_detach();                               /* the host owns the volume from here */
     usb_start();
     uint32_t t_draw = 0, t_key = 0, t_eject = 0, t0 = millis(), configured_at = 0;
@@ -492,6 +498,9 @@ static void usb_mode(int writable)
                "%u resets, %u setups", why, (millis() - t0) / 1000, msc.commands, msc.read_sectors,
                msc.written_sectors, msc.errors, usb.resets, usb.setups);
     volume_init();                              /* the host may have changed everything */
+#ifdef ECHO_PROBE
+    probe_after_usb();
+#endif
 }
 
 /* ---- for the user interface (sys.h) ---- */
