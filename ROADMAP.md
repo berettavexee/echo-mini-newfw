@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-28, version 0.88.
+Last update: 2026-10-28, version 0.89.
 
 ## Done, validated on the device
 
@@ -140,6 +140,10 @@ Last update: 2026-10-28, version 0.88.
   `docs/HIFIACC.md`): about 34 % less core B load (34-35 MHz on whole tracks, from about 50);
   one night (1.9 million blocks) without a timeout. Underrun counters per track (no longer carried
   over chained tracks). First session on the device fine (Vorbis album, chains between codecs).
+- 0.89: faster seek in Ogg files (§75): playback starts at the page before the target (up to a
+  page early, about 0.5 s on average), so nothing is decoded for nothing; the page found by an
+  exact search in fewer reads, past the cover picture. Silence after a seek on the device: 166 to
+  204 ms in Vorbis, 310 to 339 ms in Opus (450 to 830 ms in 0.88); 52 seeks, no error.
 
 ## To do
 
@@ -151,10 +155,6 @@ New formats, in this order (agreed 2026-10-24):
 
 Other items:
 
-- Seek in Ogg files (Vorbis and Opus): a seek leaves 490 to 830 ms without sound, 87 to 157 KB of
-  DAC ring underrun (log of 0.88, 2026-10-28; the open reads 1 to 3 MB of the file first). Not
-  due to the hardware FFT: Opus does the same. To measure (bisection reads, time per step) and
-  shorten; compare with 0.87 on the same gesture.
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64).
 - Document every HIFIACC function (`docs/HIFIACC.md`; LPC for FLAC done, §66): map the
   registers of the ALAC filter (variable coefficients, memory at `0x01069000`, used by the stock
@@ -256,6 +256,10 @@ Other items:
   codec_aac.c reading the file directly (frames found by their headers, as codec_mp3.c does),
   the `.aac` extension, ID3v2 tags, a length estimated from the bitrate, an approximate seek, no
   gapless (ADTS has no encoder delay), a fuzzing target. None in the library.
+- Ogg seek, a distant prospect (§75): core A passes the granule of the page it found to core B,
+  which starts on the target's page without decoding the page before for nothing (some 100 ms
+  less in Vorbis); Opus keeps an 80 ms pre-roll (RFC 7845). Also: fill the DAC ring with silence
+  at a seek, so that the short gap is silence and not a repeat of the old sound.
 - Optional codecs built on Helix MP3 and Helix AAC (RealNetworks, RPSL/RCSL licence), a distant
   prospect: about 22 % (MP3) and 12 % (AAC) fewer instructions and 1 to 2 LSB of error instead of
   5 to 7 on the QEMU bench (ETUDE §19.9, §54); PacketVideo stays the default for its licence.

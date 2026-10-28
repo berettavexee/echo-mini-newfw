@@ -11,7 +11,7 @@ A from-scratch firmware for the main core of the SNOWSKY ECHO MINI digital audio
 by studying the official firmware V3.9.0; no code of it, of the Rockchip SDK, of ReChord or
 of RECHO is included.
 
-Status (version 0.88): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A),
+Status (version 0.89): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A),
 Musepack, gapless,
 at any sample rate from 8 to 192 kHz, with
 non-blocking sample-rate changes; folder browser with long names (FAT32 internal memory,

@@ -110,8 +110,9 @@ a target as a mark on the bar, and how far it is from the current position:
 | **BACK** | cancel, the music goes on where it was |
 | no key for 2 s | go to the target |
 
-The track is opened again once, at the target, whatever the number of steps. With Opus files,
-the music stops for about half a second while it opens again.
+The track is opened again once, at the target, whatever the number of steps. With Ogg files
+(Vorbis and Opus), playback starts up to about a second before the target (the start of an Ogg
+page), after a short silence: about 0.2 s (Vorbis) or 0.3 s (Opus).
 
 ### Pauses
 

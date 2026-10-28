@@ -175,21 +175,38 @@ static uint32_t ogg_rate(const struct fat_file *f)
     return 0;
 }
 
-/* Ogg, for a seek: offset of the last page whose granule is <= target, by bisection on the
- * file (the first page with a granule after the middle of the range); 0 when none is found */
-static uint32_t ogg_page_before(const struct fat_file *f, uint64_t target)
+/* Ogg, for a seek: offset of the last page whose granule is <= target (playback starts there,
+ * up to a page before the target), 0 when none is found. The range [lo, hi) of the offsets to
+ * read from shrinks around it, from 'start' (the page where the comment header ends, past a
+ * cover picture: no granule there, 0 when unknown): a guess in proportion to the granules at its
+ * ends (end: the last granule of the file, 0 when unknown), the middle whenever a guess did not
+ * halve the range; each step reads from there to the first page with a granule. Exact: it stops
+ * once the first such page after the best one is past the target. *reads: the reads done. */
+static uint32_t ogg_page_before(const struct fat_file *f, uint64_t target, uint64_t end,
+                                uint32_t start, uint32_t *reads)
 {
-    static uint8_t b[4096 + 27];
+    static uint8_t b[8192 + 27];
     struct fat_cursor c = { 0, 0 };
-    uint32_t lo = 0, hi = f->size, best = 0;
-    for (int it = 0; it < 32 && hi > lo + 4096; it++) {
-        uint32_t mid = lo + (hi - lo) / 2, at = mid, keep = 0;
+    uint32_t lo = start < f->size ? start : 0, hi = f->size, best = 0;
+    uint64_t glo = 0, ghi = end;
+    int guess = end > 0;
+    for (int it = 0; it < 40 && hi > lo; it++) {
+        uint32_t mid = lo + (hi - lo) / 2, span = hi - lo;
+        if (guess && ghi > glo && target >= glo) {
+            uint64_t d = (uint64_t)(hi - lo) * (target - glo) / (ghi - glo);
+            d = d > 8192 ? d - 8192 : 0;        /* a little before: the page before the target */
+            mid = lo + (uint32_t)d;
+            if (mid > hi - 1)
+                mid = hi - 1;
+        }
+        uint32_t at = mid, keep = 0;
         int found = 0;
         /* the first page after mid that ends a packet: pages are up to 64 KiB, read on */
         while (!found && at < f->size && at - mid < 72 * 1024) {
-            uint32_t n = f->size - at < 4096 ? f->size - at : 4096;
+            uint32_t n = f->size - at < 8192 ? f->size - at : 8192;
             if (fat_pread(f, &c, at, b + keep, n) != (int)n)
                 return best;
+            (*reads)++;
             uint32_t total = keep + n, i;
             for (i = 0; i + 27 <= total; i++) {
                 const uint8_t *h = b + i;
@@ -200,11 +217,15 @@ static uint32_t ogg_page_before(const struct fat_file *f, uint64_t target)
                 if (lo32 == 0xffffffffu && hi32 == 0xffffffffu)
                     continue;                   /* no packet ends on this page */
                 uint32_t page = at - keep + i;
-                if ((lo32 | (uint64_t)hi32 << 32) <= target) {
+                uint64_t gp = lo32 | (uint64_t)hi32 << 32;
+                if (gp <= target) {
                     best = page;
                     lo = page + 27;
-                } else
+                    glo = gp;
+                } else {
                     hi = mid;
+                    ghi = gp;                   /* that of a page after mid: an upper bound */
+                }
                 found = 1;
                 break;
             }
@@ -217,6 +238,7 @@ static uint32_t ogg_page_before(const struct fat_file *f, uint64_t target)
         }
         if (!found)
             hi = mid;
+        guess = found && (hi - lo) * 2 <= span;
     }
     return best;
 }
@@ -550,25 +572,29 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     c->comment_end_seg = cseg;
     c->seek_ms = seek;
     c->seek_offset = 0;
-    if (seek && (codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS)) {
-        uint32_t rate = ogg_rate(f);
-        uint64_t g = (uint64_t)seek * rate / 1000;
-        if (rate && g > rate)                   /* a second before: room to converge */
-            c->seek_offset = ogg_page_before(f, g - rate);
-        cur.index = cur.cluster = 0;
-    }
-    if (seek)
-        log_printf("player: start at %u ms (Ogg page at %u)", seek, c->seek_offset);
     if (c->comment_end_page)
         log_printf("player: comment header ends at page %u, segment %u", c->comment_end_page,
                    c->comment_end_seg);
+    uint64_t end_g = 0;
     if (codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS) {
-        uint64_t g = ogg_end_granule(file);
-        c->end_granule_lo = (uint32_t)g;
-        c->end_granule_hi = (uint32_t)(g >> 32);
+        end_g = ogg_end_granule(file);
+        c->end_granule_lo = (uint32_t)end_g;
+        c->end_granule_hi = (uint32_t)(end_g >> 32);
         cur.index = cur.cluster = 0;
-        log_printf("player: last Ogg granule %u", (uint32_t)g);
+        log_printf("player: last Ogg granule %u", (uint32_t)end_g);
     }
+    if (seek && (codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS)) {
+        /* the page before the target: playback starts up to a page early, nothing decoded for
+         * nothing (§75) */
+        uint32_t rate = ogg_rate(f), reads = 0, t_seek = ticks();
+        uint64_t g = (uint64_t)seek * rate / 1000;
+        if (rate && g)
+            c->seek_offset = ogg_page_before(f, g, end_g, cpage, &reads);
+        cur.index = cur.cluster = 0;
+        log_printf("player: start at %u ms: Ogg page at %u, %u reads in %u us", seek,
+                   c->seek_offset, reads, ticks() - t_seek);
+    } else if (seek)
+        log_printf("player: start at %u ms", seek);
     feed();
     command(HP_CMD_OPEN);
     player.state = ST_OPEN;

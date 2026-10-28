@@ -3394,3 +3394,28 @@ Séquence qui marche : `+0x24` = `taille << 29 | options` (64 → 0, 128 → 1, 
 
 **0.88 (2026-10-28)** : la FFT par défaut (`-DECHO_NO_HWFFT` pour s'en passer, `-DECHO_HWTEST` pour le banc) ; compteurs de manques par piste, par différence avec des totaux jamais remis à zéro (`audio.ur_all`, `lost_all`, `i2s_all`), et le minimum de remplissage propre à chaque piste, enchaînée ou non. Image `work/images/NEWFW088.IMG` (CRC `0xc865b73a`). **Sur l'appareil** (`work/hwlog/1028_088/`, 22 min, 29 pistes) : 4 pistes Vorbis entières enchaînées à **34,0-34,7 MHz, 0 manque**, ≈ 153 000 blocs, 0 repli ; compteurs à 0 après chaque enchaînement, plus de « 4294967295 ». Restent des manques de 1,6 à 9 Ko aux sauts de piste (13 ms dans l'anneau au moment du saut) et de **87 à 157 Ko après une recherche de position dans un fichier Ogg** (son rendu après 490 à 830 ms), aussi en **Opus** : la recherche de position Ogg, pas la FFT (ROADMAP, à faire).
 
+## 75. Recherche de position dans les fichiers Ogg (0.89, 2026-10-28)
+
+**Constat (0.88, `work/hwlog/1028_088/`)** : après une recherche, 450 à 500 ms de silence en Vorbis, 640 à 830 ms en Opus (87 à 157 Ko de manques), contre 28 à 44 ms pour un saut de piste. Pas la FFT : l'Opus fait pareil. Le nombre affiché dans la ligne « chain: » (« open … (1 123 012 bytes) ») est la position de lecture dans le fichier, pas une quantité lue. Deux causes : le cœur A cherchait par bisection la page d'**une seconde avant** la cible (lectures de 4 Ko, arrêt quand l'intervalle passait sous 4 Ko), puis le cœur B **décodait et jetait** cette seconde (et la page) jusqu'à la cible, même au palier de 200 MHz.
+
+**Choix (avec l'utilisateur)** : pas de position exacte à l'échantillon ; le son repart au début de la page qui précède la cible (inaudible pour l'usage).
+
+**0.89** :
+- cœur A (`ogg_page_before`, `fw/src/player.c`) : la dernière page dont le granule est ≤ cible ; l'intervalle part de la page de fin du commentaire (après la couverture, connue du lecteur d'étiquettes) ; une estimation proportionnelle aux granules des bornes (le dernier granule du fichier, lu avant), la moitié dès qu'une estimation n'a pas réduit l'intervalle de moitié ; lectures de 8 Ko ; arrêt **exact** (la première page à granule après la meilleure dépasse la cible). Ligne de journal « player: start at … ms: Ogg page at …, N reads in … us » ;
+- cœur B (`codec_vorbis.c`, `codec_opus.c`) : saut sur cette page, sortie jetée jusqu'au premier granule (la page elle-même : le pré-décodage d'Opus), puis lecture ; plus de rejet jusqu'à la cible. La position affichée vient du granule.
+
+**Banc sur PC** (60 fichiers Ogg de la bibliothèque, 600 recherches, simulation de l'algorithme) : la première version (arrêt à 4 Ko, départ à 0) trouvait une mauvaise page 7 fois (cible proche du début : couvertures de 150 à 300 Ko sans granule, jusqu'à 126 lectures) ; la version finale : **0 erreur, 8 lectures en moyenne, 20 au plus**. Les pages de ces fichiers font 14 à 23 Ko (environ 1 s) : le son repart en moyenne 0,47 s avant la cible, 1,02 s au plus.
+
+**Émulateur** (version finale, deux fichiers à couverture de 150 à 300 Ko, recherche de +57 s par le mode recherche) : Vorbis 9 lectures, Opus 6, la page attendue dans les deux cas (0,83 s et 0,19 s avant la cible), lecture jusqu'à la fin sans faute.
+
+**Sur l'appareil** (`work/hwlog/1028_089/`, première version ; `1028_089b/`, version finale ; 52 recherches, aucune erreur) :
+
+| | 0.88 | 0.89 (1re) | 0.89 finale |
+|---|---|---|---|
+| Vorbis : lectures, bisection | — | 10-19, 17-47 ms | 5-11, 15-41 ms |
+| Vorbis : silence | 450-500 ms | 160-233 ms | **166-204 ms** |
+| Opus : lectures, bisection | — | 9-20, 16-35 ms | 4-12, 11-42 ms |
+| Opus : silence | 640-830 ms | 278-333 ms | **310-339 ms** |
+
+Il reste surtout le décodage de la page qui précède la cible (environ 150 ms en Vorbis, 280 ms en Opus) : piste en prospective (ROADMAP) : le granule de cette page transmis au cœur B, qui démarrerait sur la page de la cible (Opus : 80 ms de pré-décodage, RFC 7845) ; et de l'anneau rempli de silence au moment de la recherche, pour que le court manque ne rejoue pas l'ancien son.
+

@@ -63,7 +63,7 @@ static vorbis_dsp_state *vd;
 static int64_t packetno;
 static int errors, eos, last;           /* last: the packet of the last page went in */
 static int resync;                      /* after a seek: position unknown until a page granule */
-static int64_t vpos, discard;           /* position of the next frame out; dropped before discard */
+static int64_t vpos;                    /* position of the next frame out */
 static int64_t gshift;                  /* added to the granules given to Tremor */
 
 /* Empty comment header given to Tremor in place of the file's own */
@@ -206,20 +206,18 @@ int codec_open(void)
     ctl->total_frames = (uint32_t)g;
     ctl->error_info = heap_peak | vorbis_cache_hits << 31;
     resync = 0;
-    vpos = discard = gshift = 0;
+    vpos = gshift = 0;
     if (ctl->seek_ms && g && ctl->in_end != 0xffffffffu) {
-        /* a byte in proportion to the stream a second before the target, then the next page;
-         * synthesis restarted, output dropped until a granule gives the position, then up to
-         * the target */
-        uint64_t want = (uint64_t)ctl->seek_ms * vi.rate / 1000, aim = want > (uint64_t)vi.rate ?
-                        want - (uint64_t)vi.rate : 0;
+        /* the page before the target (core A's), or a byte in proportion to the stream, then
+         * the next page; synthesis restarted, output dropped until a granule gives the
+         * position, played from there: up to a page before the target (§75) */
+        uint64_t want = (uint64_t)ctl->seek_ms * vi.rate / 1000;
         uint32_t data = ctl->in_rd;
         uint32_t off = ctl->seek_offset ? ctl->seek_offset :   /* core A found the page */
-                       data + (uint32_t)((uint64_t)(ctl->in_end - data) * aim / g);
+                       data + (uint32_t)((uint64_t)(ctl->in_end - data) * want / g);
         if (want < g && ctl->in_end > data && !pg_jump(off)) {
             vorbis_dsp_restart(vd);
             packetno += 2;                      /* a discontinuity for Tremor's granule tracking */
-            discard = (int64_t)want;
             resync = 1;
         }
     }
@@ -257,7 +255,7 @@ static int feed(void)
     if (resync && op.granulepos != -1) {        /* the frames now available end at the granule */
         vpos = pg.granule - vorbis_dsp_pcmout(vd, 0, 0);
         resync = 0;
-        ctl->start_frame = (uint32_t)(vpos > discard ? vpos : discard);
+        ctl->start_frame = (uint32_t)(vpos > 0 ? vpos : 0);
     }
     return 1;
 }
@@ -276,8 +274,8 @@ int codec_run(void)
         vorbis_dsp_read(vd, n);
         return 1;
     }
-    if (vpos < discard) {                       /* seek: up to the target */
-        int d = discard - vpos < n ? (int)(discard - vpos) : n;
+    if (vpos < 0) {                             /* start trimming: up to position 0 */
+        int d = -vpos < n ? (int)-vpos : n;
         vorbis_dsp_read(vd, d);
         vpos += d;
         return 1;

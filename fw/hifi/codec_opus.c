@@ -63,16 +63,15 @@ int codec_open(void)
     ctl->total_frames = g > pre_skip ? (uint32_t)(g - pre_skip) : 0;
     discard = pre_skip;
     if (ctl->seek_ms && ctl->total_frames && ctl->in_end != 0xffffffffu) {
-        /* a byte in proportion to the stream a second before the target, then the next page;
-         * decoded and dropped until a page granule gives the position, then up to the target */
+        /* the page before the target (core A's), or a byte in proportion to the stream, then
+         * the next page; decoded and dropped until a page granule gives the position (that page:
+         * the decoder's pre-roll), played from there: up to a page before the target (§75) */
         uint64_t want = (uint64_t)ctl->seek_ms * 48, total = ctl->total_frames;
-        uint64_t aim = want > 48000 ? want - 48000 : 0;
         uint32_t data = ctl->in_rd;
         uint32_t off = ctl->seek_offset ? ctl->seek_offset :   /* core A found the page */
-                       data + (uint32_t)((uint64_t)(ctl->in_end - data) * aim / total);
+                       data + (uint32_t)((uint64_t)(ctl->in_end - data) * want / total);
         if (want < total && ctl->in_end > data && !pg_jump(off)) {
             opus_decoder_ctl(dec, OPUS_RESET_STATE);
-            discard = want + pre_skip;
             resync = 1;
         }
     }
