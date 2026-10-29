@@ -85,8 +85,8 @@ From top to bottom:
 |---|---|
 | **PLAY** | pause / play |
 | **PLAY held** | next track. On the last track (play mode "in order"), it stops; PLAY then plays that last track again from its start |
-| **BACK** | back to the start of the track; within its first 3 s, the track before |
-| **BACK held** | next play mode: in order → repeat all → repeat one → shuffle → in order |
+| **BACK** | back to the start of the track; within its first 3 s, the track before (in shuffle: the one heard before) |
+| **BACK held** | next play mode: in order → repeat all → repeat one → shuffle → in order. Shuffle plays every track of the queue once, in a random order, then another order |
 | **VOL+** / **VOL-** | volume up / down, 1 dB a step (held: repeats) |
 | **VOL+ held, then VOL-** | seek mode (below) |
 | **MENU** | to the folder browser; the music goes on |
@@ -146,8 +146,9 @@ greyed. While a track plays, the browser shows its progress bar at the bottom.
 | **MENU** | to the play screen |
 | **MENU held** | main menu |
 
-The play queue holds 400 tracks. PLAY held on a large tree, such as the whole card, only
-takes the first 400.
+PLAY held takes the whole tree, up to 4,000 folders with tracks and 8 levels of folders (a
+folder of more than about 550 tracks is cut). After a power off, the player resumes a track
+played from a folder (PLAY on a file), not a queue made by PLAY held.
 
 ## The main menu (MENU held)
 

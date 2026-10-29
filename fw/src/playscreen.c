@@ -155,7 +155,7 @@ void draw_playing(int full)
         lcd_text_clip_x(4, 18, l1, LCD_W - 4, FG, BG, 2);
         lcd_text_clip_x(4, 50, s, LCD_W - 4, FG, BG, 2);
         marquee_set(&mq[0], 86, tg.artist, TITLE_FG);
-        marquee_set(&mq[1], 102, tg.album[0] ? tg.album : q.folder, DIR_FG);
+        marquee_set(&mq[1], 102, tg.album[0] ? tg.album : q_folder, DIR_FG);
     }
     if (sk_on) {                                /* the target, how far, what the keys do */
         p = put_str(b, "go to ");
@@ -175,7 +175,7 @@ void draw_playing(int full)
     *p = 0;
     lcd_text_clip(4, 122, b, LCD_W, FG, BG);
     progress_bar(140, 5, now_ms(), player_heard.length_ms);
-    p = put_str(b, codec_name(q.e[q_cur].flags & F_CODEC));
+    p = put_str(b, codec_name(q_ent(q_cur) ? q_ent(q_cur)->flags & F_CODEC : 0));
     p = put_str(p, "  ");
     p = put_dec(p, player_heard.rate / 1000);
     if (player_heard.rate % 1000) {
@@ -243,14 +243,17 @@ int play_key(const struct key_ev *e)
         }
     } else if (k == KEY_BACK && ev == EV_PRESS) {
         if (q_n) {
-            if (player_heard.time_ms > 3000 || q_cur == 0)
+            int prev = q_prev_index(q_cur);     /* shuffle: the one played before */
+            if (player_heard.time_ms > 3000 || prev < 0)
                 play_index(q_cur);              /* back to the start of the track */
             else
-                play_step(q_cur - 1, -1);
+                play_step(prev, -1);
         }
     } else if (k == KEY_BACK && ev == EV_LONG) {
         play_mode = (play_mode + 1) % MODE_COUNT;
         rnd ^= ticks();
+        if (play_mode == MODE_SHUFFLE)
+            q_shuffle_new();
         resume_save();
     }
     return UI_QUICK;                            /* the bands redrawn, not the title: a new track */

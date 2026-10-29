@@ -3478,3 +3478,28 @@ Image : `work/images/NEWFW092.IMG` (CRC `0x1851a67c`).
 - `playback.c` : `fail_text()` donne les deux lignes ; l'écran montre la raison de la piste choisie, pas celle de la dernière essayée de la file ; journal : `error: <fichier>: <message> (code, why)`.
 
 **Essais** : sept fichiers synthétiques (`work/testsets/errors/` : WAV ADPCM, WAV flottant, FLAC 5.1, M4A HE-AAC par l'octet de configuration, FLAC à l'en-tête abîmé, MP3 aléatoire, fichier vide), scénarios `err-*` de l'émulateur, puis sur l'appareil (`work/hwlog/1028_094/`, dossier `errors_msg`) : les sept messages attendus, 0 faute.
+
+## 79. File de lecture par dossiers (0.95, 2026-10-29)
+
+**Constat** : la file tenait dans 32 Kio (`.queuebuf`) : 400 entrées de 12 octets et surtout 20 Kio de noms ; PLAY maintenu sur la carte n'en prenait que le début (et 64 sous-dossiers par niveau).
+
+**Ailleurs** : Rockbox garde en mémoire 4 octets par morceau (la position du chemin dans un fichier de liste ou de contrôle sur le disque) et relit les noms au besoin ; le firmware d'origine et les lecteurs commerciaux passent par une médiathèque indexée sur le disque.
+
+**Choix (avec l'utilisateur)** : une file **par dossiers** ; aléatoire = **permutation globale** de tous les morceaux ; 4 000 dossiers au plus.
+
+**Code** (`fw/src/queue.c`) :
+- table des dossiers `qd[]` en **PMU-SRAM** (`0x03090000`, 48 000 octets sur les 48 Kio libres sous l'anneau du journal, section `.pmusram`) : 12 octets par dossier (cluster, taille, nombre de morceaux, volume, contigu, niveau) ;
+- le morceau n° k : par les nombres de morceaux, puis son dossier relu dans la liste propre à la file (`.queuebuf` : 600 entrées et 23,8 Kio de noms), dans l'ordre du navigateur (le code de liste de `browser.c` est devenu générique : `struct listing`, `list_load`) ; quatre emplacements gardent l'entrée et le nom des morceaux utilisés récemment (entendu, décodé, navigateur) ;
+- PLAY maintenu : parcours en profondeur, chaque dossier lu remplacé dans la table par ses sous-dossiers insérés juste après lui (ce qui donne l'ordre en profondeur), gardé seulement s'il a des morceaux ; 8 niveaux ;
+- aléatoire : réseau de Feistel à 4 tours sur la puissance de 4 suivante, ramené à [0, N) par marche de cycle ; son inverse donne la position du morceau courant : suivant = position + 1, BACK = position − 1 ; une nouvelle graine à chaque tour complet et à chaque passage en aléatoire. Vérifié sur PC : bijection et inverse exacts de N = 2 à 20 000 ;
+- deux pièges trouvés dans l'émulateur : un **débordement de pile** (la lecture d'un dossier rend la main à l'interface, qui redemandait le nom du morceau, donc la même lecture) et une fausse « Read error » (la boucle de lecture ouvrait un morceau pendant la lecture d'un dossier) : la recherche d'un morceau lit son dossier sans rendre la main (`listing.quiet`, quelques ms), avec une garde contre la réentrance ; le parcours complet garde l'interface et la musique.
+
+**Émulateur** : scénario `queue-big` (540 morceaux en 45 dossiers, `mkdisk.py` crée les sous-dossiers) : file construite, suivant, aléatoire sans répétition sur toute la file, 0 faute.
+
+**Sur l'appareil** (`work/hwlog/1029_095/`) : carte entière **515 morceaux en 35 dossiers en 57 à 67 ms** (le montage de la carte : 271 ms) ; mémoire interne 287 morceaux en 26 dossiers en 19 ms ; suivant d'un dossier à l'autre, ouverture d'un morceau 25 à 67 ms dossier relu compris ; aléatoire sur toute la file, BACK revenant bien au morceau entendu avant ; 0 faute. Reste (ROADMAP) : la reprise après extinction d'une file faite par PLAY maintenu.
+
+## 80. Un émulateur plus rapide (2026-10-29)
+
+**Mesure** (cProfile, scénario MP3 de 5 s puis repos, 418 s simulées) : près de **90 % du temps en Python** — le modèle SYNTH (28 %, environ 15 ms par tranche sous profileur), les appels des périphériques (18,4 millions d'accès, environ 50 %) — et 12 % seulement dans Unicorn lui-même. Comptage par adresse (`EMU_COUNT=1`) : l'écran octet par octet (`VOP_DATA`, 4,5 M), le convertisseur des touches et de la batterie (environ 9 M : le bit « occupé » n'était pas simulé, le firmware attendait 200 µs à chaque conversion), une boucle principale qui ne dormait jamais (`cpu_wait` remplacé par un retour : 2 200 tours par seconde simulée au lieu de 1 000).
+
+**Corrections** (`fw/tools/emu_fw.py`, `tools/emu_host.py`) : SYNTH en numpy (72 µs par tranche, même résultat) ; `cpu_wait` avance l'horloge au tic de 1 ms suivant et fait tourner le cœur B pendant ce temps ; le bit « occupé » du convertisseur lu une fois par conversion ; `lcd_fill` dessiné d'un coup dans le modèle de l'écran (`--no-fast-fill` pour s'en passer ; captures identiques au bit près) ; `--ms` arrête à un temps simulé, `scenarios.py` le déduit des touches et des captures. Résultat : **environ 2,5 fois plus de temps simulé par seconde de calcul** (1 010 s en 67 s, contre 418 s en 69 s). Reste coûteux : le texte glyphe par glyphe et les accès de la boucle principale ; ensuite, un mode « cœur B rapide » ou un portage en C sur l'API C d'Unicorn (le moteur ne pèse que 12 %).

@@ -70,12 +70,12 @@ static uint32_t codec_of(const char *name)
     return 0;
 }
 
-/* ---- directory listing (in .dirbuf) ---- */
-#define NAME_KEEP 72                            /* bytes of a name kept (the screen shows ~40) */
+/* ---- directory listings: the folder shown (in .dirbuf), and the queue's (queue.c) ---- */
 static struct dir_buf dir __attribute__((section(".dirbuf")));
+static struct listing dir_l = { dir.e, dir.order, dir.pool, DIR_MAX, sizeof dir.pool, 0, 0, 0, 0,
+                                0 };
 int dir_n;
 static int dir_full;
-static uint32_t dir_pool_used;
 
 const char *ent_name(int i)
 {
@@ -88,36 +88,37 @@ const struct entry *ent(int i)
 }
 
 /* An entry at the end of the listing, its name (len bytes) into the pool; 0 when it is full */
-static int dir_add(const char *name, uint32_t len, uint32_t cluster, uint32_t size, uint16_t flags)
+static int list_add(struct listing *l, const char *name, uint32_t len, uint32_t cluster,
+                    uint32_t size, uint16_t flags)
 {
-    if (dir_pool_used + len + 1 > sizeof dir.pool) {
-        dir_full = 1;
+    if (l->used + len + 1 > l->pool_size) {
+        l->full = 1;
         return 0;
     }
-    struct entry *e = &dir.e[dir_n];
+    struct entry *e = &l->e[l->n];
     e->cluster = cluster;
     e->size = size;
-    e->name = (uint16_t)dir_pool_used;
+    e->name = (uint16_t)l->used;
     e->flags = flags;
     for (uint32_t i = 0; i < len; i++)
-        dir.pool[dir_pool_used + i] = name[i];
-    dir.pool[dir_pool_used + len] = 0;
-    dir_pool_used += len + 1;
-    dir.order[dir_n] = (uint16_t)dir_n;
-    dir_n++;
+        l->pool[l->used + i] = name[i];
+    l->pool[l->used + len] = 0;
+    l->used += len + 1;
+    l->order[l->n] = (uint16_t)l->n;
+    l->n++;
     return 1;
 }
 
 static int collect(const struct fat_dirent *d, void *ctx)
 {
-    (void)ctx;
+    struct listing *l = ctx;
     uint32_t codec = d->attr & FAT_ATTR_DIR ? 0 : codec_of(d->name);
-    if (!(d->attr & FAT_ATTR_DIR) && !codec)
-        return 0;                               /* not something we play */
-    /* a big folder: files stop at DIR_MAX - 50, the last places are kept for folders, and the
+    if (!(d->attr & FAT_ATTR_DIR) && (!codec || (l->skip_empty && !d->size)))
+        return 0;                               /* not something we play (the queue: empty) */
+    /* a big folder: files stop at max - 50, the last places are kept for folders, and the
      * whole directory is still read so that no folder goes missing */
-    if (dir_n >= (d->attr & FAT_ATTR_DIR ? DIR_MAX : DIR_MAX - 50)) {
-        dir_full = 1;
+    if (l->n >= (int)(d->attr & FAT_ATTR_DIR ? l->max : l->max - 50)) {
+        l->full = 1;
         return 0;
     }
     uint32_t len = 0;
@@ -128,37 +129,50 @@ static int collect(const struct fat_dirent *d, void *ctx)
         while (len && ((uint8_t)d->name[len] & 0xc0) == 0x80)
             len--;
     }
-    if (!dir_add(d->name, len, d->cluster, d->size,
-                 (uint16_t)((d->attr & FAT_ATTR_DIR ? F_DIR : codec) |
-                            (d->vol == FAT_VOL_SD ? F_SD : 0) | (d->contig ? F_CONTIG : 0))))
+    if (!list_add(l, d->name, len, d->cluster, d->size,
+                  (uint16_t)((d->attr & FAT_ATTR_DIR ? F_DIR : codec) |
+                             (d->vol == FAT_VOL_SD ? F_SD : 0) | (d->contig ? F_CONTIG : 0))))
         return 0;
-    if (!(dir_n & 31))
+    if (!(l->n & 31) && !l->quiet)
         ui_background();                        /* keep the music going while we read */
     return 0;
 }
 
-static int before(int a, int b)                 /* entries a, b by index in dir.e */
+static int before(const struct listing *l, int a, int b)     /* entries a, b by index in l->e */
 {
-    int da = dir.e[a].flags & F_DIR, db = dir.e[b].flags & F_DIR;
+    int da = l->e[a].flags & F_DIR, db = l->e[b].flags & F_DIR;
     if (da != db)
         return da > db;
-    return name_cmp(dir.pool + dir.e[a].name, dir.pool + dir.e[b].name) < 0;
+    return name_cmp(l->pool + l->e[a].name, l->pool + l->e[b].name) < 0;
 }
 
-static void dir_sort(void)
+static void list_sort(struct listing *l)
 {
     static const int gaps[] = { 701, 301, 132, 57, 23, 10, 4, 1 };  /* Ciura */
     for (unsigned g = 0; g < sizeof gaps / sizeof *gaps; g++) {
         int gap = gaps[g];
-        for (int i = gap; i < dir_n; i++) {
-            uint16_t t = dir.order[i];
+        for (int i = gap; i < l->n; i++) {
+            uint16_t t = l->order[i];
             int j = i;
-            for (; j >= gap && before(t, dir.order[j - gap]); j -= gap)
-                dir.order[j] = dir.order[j - gap];
-            dir.order[j] = t;
+            for (; j >= gap && before(l, t, l->order[j - gap]); j -= gap)
+                l->order[j] = l->order[j - gap];
+            l->order[j] = t;
         }
-        ui_background();
+        if (!l->quiet)
+            ui_background();
     }
+}
+
+/* A folder of a volume into l, sorted (folders first, then natural order): < 0 on a read error */
+int list_load(struct listing *l, const struct fat_dir *d)
+{
+    l->n = l->full = 0;
+    l->used = 0;
+    if (d->vol == FAT_VOL_SD && sd_open())
+        return -1;
+    int r = fat_list(d, collect, l);
+    list_sort(l);
+    return r;
 }
 
 /* The top level (ETUDE §38): the internal volume, then the card when one is in */
@@ -169,33 +183,32 @@ static void top_entry(const char *name, uint16_t flags)
     uint32_t len = 0;
     while (name[len])
         len++;
-    dir_add(name, len, 0, 0, (uint16_t)(F_DIR | F_VOLROOT | flags));
+    list_add(&dir_l, name, len, 0, 0, (uint16_t)(F_DIR | F_VOLROOT | flags));
 }
 
 int dir_load(const struct fat_dir *d)
 {
     uint32_t t0 = ticks();
-    dir_n = dir_full = 0;
-    dir_pool_used = 0;
+    int r = 0;
     if (d->vol == VOL_TOP) {
+        dir_l.n = dir_l.full = 0;
+        dir_l.used = 0;
         top_entry("Internal", 0);
         if (sd_present())
             top_entry(sd_bad ? "SD card (not readable)" : "SD card", F_SD);
-        return 0;
+    } else {
+        r = list_load(&dir_l, d);
+        if (r < 0 && d->vol == FAT_VOL_SD) {    /* a read error: mounted again at the next */
+            log_printf("ui: card read failed"); /* access, "not readable" meanwhile */
+            sd_forget();
+            sd_bad = 1;
+        }
     }
-    if (d->vol == FAT_VOL_SD && sd_open())
-        return -1;
-    int r = fat_list(d, collect, 0);
-    if (r < 0 && d->vol == FAT_VOL_SD) {        /* a read error: mounted again at the next */
-        log_printf("ui: card read failed");     /* access, "not readable" meanwhile */
-        sd_forget();
-        sd_bad = 1;
-    }
-    uint32_t t1 = ticks();
-    dir_sort();
-    log_printf("ui: folder %s%x: %d entries%s, read %u ms, sorted %u ms",
-               d->vol == FAT_VOL_SD ? "sd:" : "", d->cluster, dir_n,
-               dir_full ? " (more not shown)" : "", (t1 - t0) / 1000, (ticks() - t1) / 1000);
+    dir_n = dir_l.n;
+    dir_full = dir_l.full;
+    if (d->vol != VOL_TOP)
+        log_printf("ui: folder %s%x: %d entries%s in %u ms", d->vol == FAT_VOL_SD ? "sd:" : "",
+                   d->cluster, dir_n, dir_full ? " (more not shown)" : "", (ticks() - t0) / 1000);
     return r;
 }
 
@@ -234,10 +247,11 @@ static int b_sel = -1, b_top = -1, b_mark = -1;
 
 static int playing_index(void)                  /* the row of the track that plays, or -1 */
 {
-    if (!q_playing || q_cur >= q_n)
+    const struct entry *qe = q_playing && q_cur < q_n ? q_ent(q_cur) : 0;
+    if (!qe)
         return -1;
     for (int i = 0; i < dir_n; i++)
-        if (!(ent(i)->flags & F_DIR) && same_file(ent(i), &q.e[q_cur]))
+        if (!(ent(i)->flags & F_DIR) && same_file(ent(i), qe))
             return i;
     return -1;
 }
@@ -433,12 +447,11 @@ int sd_watch(void)
     sd_forget();
     sd_bad = 0;
     int stopped = 0;
-    if (!in && q_n && (q.e[0].flags & F_SD)) {
+    if (!in && q_on_sd()) {
         if (q_playing || player_is_open())
             play_stop(STOP_NOW);
         parked = 0;
-        q_n = 0;
-        q_cur = 0;
+        q_clear();
         stopped = 1;
     }
     if (!in && depth && path[1].dir.vol == FAT_VOL_SD)
@@ -489,7 +502,7 @@ int browser_key(const struct key_ev *e)
         } else if (ev == EV_PRESS && !ent(sel)->size) {
             play_failed(ent_name(sel), Q_EEMPTY); /* empty (grey): not played, the queue kept */
         } else if (ev == EV_PRESS) {
-            if (parked && q_cur < q_n && same_file(ent(sel), &q.e[q_cur]))
+            if (parked && q_cur < q_n && q_ent(q_cur) && same_file(ent(sel), q_ent(q_cur)))
                 player_seek_hint(parked_ms);    /* the parked track: where it was */
             q_from_dir(sel);
             play_index(q_cur);

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run a newfw image under Unicorn, loaded the way the IDB loader does it.
 
-  emu_fw.py IMG [--steps N] [--png OUT.png] [--adc1 V] [--power 0|1] [--sel 0|1] [--fast 0|1]
+  emu_fw.py IMG [--steps N] [--ms MS] [--png OUT.png] [--adc1 V] [--power 0|1] [--sel 0|1] [--fast 0|1]
             [--trace-lcd] [--elf build/fw.elf] [--disk DISK.IMG] [--keys MS:KEY,...]
             [--shots MS:OUT.png,...] [--expect-fw FILE]
 
@@ -11,7 +11,12 @@ vector table at the start of the data of entry 0, r0 = table, r1 = SP, r2 = rese
 Models: CRU (PLL locked), SARADC (value per channel), GPIO inputs (Power key, panel variant
 pin), VOP (8-bit bus decoded as ST7789 commands into a 320x170 framebuffer), eMMC (dw_mmc
 PIO model over a disk image; writes kept in memory, never written back, and checked against
-the firmware area), time (ticks() replaced by a counter advancing 50 us per call).
+the firmware area), time (ticks() replaced by a counter advancing 50 us per call; cpu_wait()
+goes on to the next 1 ms tick, as its WFI on the device, with core B run meanwhile).
+Shortcuts (most of the time went into Python callbacks, ETUDE §80): lcd_fill() drawn into the
+model at once (--no-fast-fill: through VOP_DATA), the SARADC busy bit read once per conversion.
+--ms stops at a simulated time (--steps stays a bound). EMU_COUNT=1 counts the MMIO accesses by
+address and lists the busiest at the end.
 --keys holds a key from a simulated time on (VOL-, VOL+, PLAY, MENU, BACK, NONE), --shots
 saves the screen at given times, --expect-fw checks FW1 (and FW2 when it fits) against a file,
 --pcm saves core B's output, --dac what the DMA reads from the DAC ring (what is heard).
@@ -20,8 +25,8 @@ import os
 import struct
 import sys
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_BLOCK
-from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_SP,
-                               UC_ARM_REG_PC)
+from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
+                               UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR)
 
 
 def opt(flag, default):
@@ -104,6 +109,19 @@ class Panel:
             self.x0, self.x1 = self.args[0] << 8 | self.args[1], self.args[2] << 8 | self.args[3]
         if self.cmd == 0x2b and len(self.args) == 4:
             self.y0, self.y1 = self.args[0] << 8 | self.args[1], self.args[2] << 8 | self.args[3]
+
+    def fill(self, x, y, w, h, color):
+        """lcd_fill() at once (emu_fw's hook): the same window, command and pixels"""
+        self.flush()
+        self.cmds += [(0x2a, [x >> 8, x & 255, (x + w - 1) >> 8, (x + w - 1) & 255]),
+                      (0x2b, [(y + 35) >> 8, (y + 35) & 255, (y + h + 34) >> 8, (y + h + 34) & 255]),
+                      (0x2c, [f"{w * h} px"])]
+        self.cmd = None
+        self.x0, self.x1, self.y0, self.y1 = x, x + w - 1, y + 35, y + h + 34
+        for r in range(max(y, 0), min(y + h, 170)):
+            row = self.fb[r]
+            lo, hi = max(x, 0), min(x + w, 320)
+            row[lo:hi] = [color] * max(hi - lo, 0)
 
     def png(self, path, scale=2):
         import zlib
@@ -270,12 +288,14 @@ def main():
     d = open(img, "rb").read()
     sym = symbols(opt("--elf", img.rsplit("/", 1)[0] + "/fw.elf"))
     steps = int(opt("--steps", "60000000"))
+    stop_us = int(opt("--ms", "0")) * 1000                      # --ms: stop at this simulated time
     adc = {0: 820, 1: int(opt("--adc1", "1023")), 2: 300, 3: 300}
     gpio_in = {(2, 5): int(opt("--power", "0")), (2, 9): int(opt("--sel", "0")),
                (0, 13): 0, (2, 8): 1, (0, 11): 0 if opt("--sd", None) else 1}
 
     u = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
     from emu_coreb import Shared, CoreB                           # core B on demand (step 5c)
+    import emu_host                                               # (on the path set by emu_coreb)
     from unicorn import UC_PROT_ALL
     sh = Shared()
     u.mem_map_ptr(0x03000000, 0xA0000, UC_PROT_ALL, sh.sram)      # SRAM, PMU-SRAM (B sees it)
@@ -338,6 +358,35 @@ def main():
             capture()
     u.hook_add(UC_HOOK_BLOCK, coreb_tick, begin=t, end=t + 4)
     panel, log, regs = Panel(), [], {}
+
+    # cpu_wait (a return here, no SysTick): the time goes on to the next 1 ms tick, as the WFI
+    # waits on the device, and core B runs for it (100 instructions a microsecond)
+    def idle_tick(uc, addr, size, _):
+        now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
+        nxt = (now // 1000 + 1) * 1000
+        uc.mem_write(CLOCK, struct.pack("<I", nxt))
+        if stop_us and nxt >= stop_us:
+            uc.emu_stop()
+        if sh.b and not sh.b.sleeping:
+            sh.b.step((nxt - now) * 100)
+        if pcm_out and sh.b:
+            capture()
+    if "cpu_wait" in sym:
+        w = sym["cpu_wait"] & ~1
+        u.hook_add(UC_HOOK_BLOCK, idle_tick, begin=w, end=w + 1)
+
+    # lcd_fill(x, y, w, h, color): drawn into the panel model in one go, then a return (the
+    # pixels one by one through VOP_DATA cost most of the emulation time)
+    def fill_hook(uc, addr, size, _):
+        x, y, w, h = (struct.unpack("<i", struct.pack("<I", uc.reg_read(r)))[0]
+                      for r in (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3))
+        color = struct.unpack("<H", uc.mem_read(uc.reg_read(UC_ARM_REG_SP), 2))[0]
+        if w > 0 and h > 0:
+            panel.fill(x, y, w, h, color)
+        uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
+    if "lcd_fill" in sym and "--no-fast-fill" not in sys.argv:
+        f = sym["lcd_fill"] & ~1
+        u.hook_add(UC_HOOK_BLOCK, fill_hook, begin=f, end=f + 1)
     state = {"adc_ch": 0}
     keyval = {"VOL-": 1, "VOL+": 126, "PLAY": 270, "MENU": 384, "BACK": 515, "NONE": 1023}
     keys = sorted((int(t), keyval[k] if k in keyval else int(k)) for t, k in (x.split(":") for x in opt("--keys", "").split(",") if x))
@@ -392,8 +441,8 @@ def main():
                 return mmc.read(a - 0x60030000)
             if 0x60020000 <= a < 0x60024000:
                 return sdc.read(a - 0x60020000) if sdc else regs.get(a, 0) & 0x7fffffff
-            if a == 0x400d0004:
-                return 0
+            if a == 0x400d0004:                                  # SARADC STAS (see the write)
+                return state.pop("adc_busy", 0)
             if a == 0x4004001c:                                  # I2C0 IPD: all done, no NAK
                 return 0x3f
             if a == 0x40030020:                                  # I2S1 CLR: done
@@ -469,6 +518,8 @@ def main():
                 sdc.write(a - 0x60020000, val)
             elif a == 0x400d0008:
                 state["adc_ch"] = val & 7
+                if val & 0x10:                                   # a conversion starts: STAS
+                    state["adc_busy"] = 1                        # reads busy once, then done
             elif a == 0x60070028:
                 panel.command(val & 0xff)
             elif a == 0x6007002c:
@@ -503,7 +554,7 @@ def main():
         return rd, wr
 
     for base, size in ((0x40000000, 0x200000), (0x50000000, 0x40000), (0x60000000, 0xC0000)):
-        rd, wr = periph(base)
+        rd, wr = emu_host.counted("A", base, *periph(base))
         u.mmio_map(base, size, rd, None, wr, None)
 
     def st_rd(uc, off, size, _):
@@ -511,6 +562,7 @@ def main():
 
     def st_wr(uc, off, size, val, _):
         regs[0xE000E000 + off] = val
+    st_rd, st_wr = emu_host.counted("A", 0xE0000000, st_rd, st_wr)
     u.mmio_map(0xE0000000, 0x100000, st_rd, None, st_wr, None)
 
     u.reg_write(UC_ARM_REG_SP, sp)
@@ -520,8 +572,13 @@ def main():
     try:
         u.emu_start(pc, 0xffffffff, count=steps)
     except Exception as ex:                                       # noqa: BLE001
-        log.append(f"EXCEPTION {ex} at pc {u.reg_read(UC_ARM_REG_PC):#x}")
+        log.append(f"EXCEPTION {ex} at pc {u.reg_read(UC_ARM_REG_PC):#x}, sp "
+                   f"{u.reg_read(UC_ARM_REG_SP):#x}, lr {u.reg_read(UC_ARM_REG_LR):#x}")
     panel.flush()
+    if emu_host.COUNTS:                                           # EMU_COUNT=1: the busiest
+        top = sorted(emu_host.COUNTS.items(), key=lambda kv: -kv[1])[:25]
+        log.append(f"MMIO accesses: {sum(emu_host.COUNTS.values())} in all, the busiest:")
+        log += [f"  {c} {rw} {a:#010x}: {n}" for (c, rw, a), n in top]
     c = struct.unpack_from("<24I", sh.hr1, 0)
     if c[0] == 0x5452424e:                                       # our runtime's control block
         names = ("magic version codec state error info cmd seq ack in_wr in_rd in_end out_wr "

@@ -47,14 +47,35 @@ REGS = [UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3, UC_ARM_REG_R
         UC_ARM_REG_R10, UC_ARM_REG_R11, UC_ARM_REG_R12, UC_ARM_REG_SP, UC_ARM_REG_LR,
         UC_ARM_REG_PC, UC_ARM_REG_XPSR]
 
+# EMU_COUNT=1: every MMIO access counted by (core, r/w, address), printed at the end (emu_fw.py)
+COUNTS = {} if os.environ.get("EMU_COUNT") else None
+
+
+def counted(core, base, rd, wr):
+    """rd, wr as given, or wrapped to count their calls in COUNTS"""
+    if COUNTS is None:
+        return rd, wr
+
+    def crd(uc, off, size, d):
+        k = (core, "r", base + off)
+        COUNTS[k] = COUNTS.get(k, 0) + 1
+        return rd(uc, off, size, d)
+
+    def cwr(uc, off, size, val, d):
+        k = (core, "w", base + off)
+        COUNTS[k] = COUNTS.get(k, 0) + 1
+        return wr(uc, off, size, val, d)
+    return crd, cwr
+
+
 class Synth:
     """SYNTH, the MPEG polyphase synthesis (ETUDE.md sections 68-71 and 77, docs/MP3ACC.md), seen
     by core B at 0x60050000: +0x804 channel (bit 0) and phase, the 32 subband samples written to
     +0x000..+0x07c (the last one starts the computation), +0x80c nonzero when done (0x11 written
     to acknowledge), the 32 PCM samples read back from +0x000..+0x07c; a write to the history
     (+0x1000..+0x1ffc) clears it. Model: the standard synthesis (matrixing, then the window of
-    libmpcdec's synth_filter.c, read from third_party/), output = round(sum / 2^13), saturated
-    to 16 bits; one history per channel, the phase not checked. Against libmpcdec with the
+    libmpcdec's synth_filter.c, read from third_party/; numpy), output = round(sum / 2^13),
+    saturated to 16 bits; one history per channel, the phase not checked. Against libmpcdec with the
     device's input scale: within 1 LSB (the device: within 1-2 LSB of pvmp3dec and libmpcdec),
     not bit-exact.
     """
@@ -62,31 +83,33 @@ class Synth:
     OFF = (0, 96, 128, 224, 256, 352, 384, 480, 512, 608, 640, 736, 768, 864, 896, 992)
 
     def __init__(self):
-        import math
+        import numpy as np
         import re
+        self.np = np
         src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "third_party", "libmpcdec",
                            "synth_filter.c")
         tab = open(src).read()
         tab = tab[tab.index("Di_opt [32] [16]"):]
         d = [int(v) / 65536 for v in re.findall(r"_\(\s*(-?\d+)\)", tab[:tab.index("};")])]
-        self.win = [list(zip(self.OFF, d[16 * k:16 * k + 16])) for k in range(32)]
-        self.n = [[math.cos((16 + i) * (2 * k + 1) * math.pi / 64) for k in range(32)] for i in range(64)]
+        self.win = np.array(d).reshape(32, 16)                     # window, per output k
+        self.idx = np.arange(32)[:, None] + np.array(self.OFF)[None, :]   # its taps in the history
+        i, k = np.arange(64)[:, None], np.arange(32)[None, :]
+        self.n = np.cos((16 + i) * (2 * k + 1) * np.pi / 64)       # matrixing
         self.io = [0] * 32
         self.reg = {}
         self.clear()
 
     def clear(self):
-        self.v = [[0.0] * 1024, [0.0] * 1024]
+        self.v = [self.np.zeros(1024), self.np.zeros(1024)]
 
     def slot(self):
+        np = self.np
         v = self.v[self.reg.get(0x804, 0) & 1]
-        x = [((s & 0xffffffff) ^ 0x80000000) - 0x80000000 for s in self.io]
-        new = [sum(a * b for a, b in zip(row, x)) for row in self.n]
-        v[64:] = v[:960]
-        v[:64] = new
-        for k in range(32):
-            y = round(sum(v[k + o] * c for o, c in self.win[k]) / 8192)
-            self.io[k] = max(-32768, min(32767, y)) & 0xffffffff
+        x = np.array(self.io, dtype=np.uint32).view(np.int32).astype(float)
+        v[64:] = v[:960].copy()
+        v[:64] = self.n @ x
+        y = np.clip(np.rint((v[self.idx] * self.win).sum(axis=1) / 8192), -32768, 32767)
+        self.io = [int(t) & 0xffffffff for t in y.astype(np.int64)]
         self.reg[0x80c] = 1
 
     def rd(self, uc, off, size, _):

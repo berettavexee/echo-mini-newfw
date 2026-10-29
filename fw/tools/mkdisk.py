@@ -4,6 +4,7 @@ copied anywhere else), our firmware in FW1, an MBR at 0x81000 and a FAT32 volume
 4 KiB, as on the device) at 0x81000 + 64 holding the given files.
 
   mkdisk.py OUT.img FW.IMG [--boot BOOTDUMP.BIN] [--size-mb 300] FILE[=NAME] ...
+  (NAME may hold folders, A/B/C.MP3: they are made)
   (--boot defaults to $ECHO_BOOTDUMP, else BOOTDUMP.BIN in the current directory)
   mkdisk.py OUT.img FW.IMG --vol VOLUME.img        (a FAT32 volume made beforehand)
 """
@@ -20,9 +21,17 @@ def make_volume(t, size, files):
         f.truncate(size << 20)
     subprocess.run(["/usr/sbin/mkfs.fat", "-F", "32", "-s", "8", "-S", "512", "-n", "ECHOTEST", vol],
                    check=True, stdout=subprocess.DEVNULL)
+    made = set()
     for spec in files:
         src, _, name = spec.partition("=")
-        subprocess.run(["mcopy", "-i", vol, src, "::" + (name or os.path.basename(src))], check=True)
+        name = name or os.path.basename(src)
+        parts = name.split("/")[:-1]            # NAME may be in folders: made as needed
+        for k in range(1, len(parts) + 1):
+            d = "/".join(parts[:k])
+            if d not in made:
+                made.add(d)
+                subprocess.run(["mmd", "-i", vol, "::" + d], check=True)
+        subprocess.run(["mcopy", "-i", vol, src, "::" + name], check=True)
     return open(vol, "rb").read()
 
 

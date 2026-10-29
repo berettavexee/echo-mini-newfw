@@ -44,6 +44,7 @@
 #define F_CONTIG  0x2000                        /* exFAT "no FAT chain" */
 #define F_VOLROOT 0x1000                        /* the top level: a volume */
 #define F_CODEC   0x0fff
+#define NAME_KEEP 72                            /* bytes of a name kept (the screen shows ~40) */
 struct entry {
     uint32_t cluster, size;
     uint16_t name;              /* offset in the pool */
@@ -54,6 +55,18 @@ struct dir_buf {
     uint16_t order[DIR_MAX];
     char pool[81920];
 };
+/* A folder listing on a buffer of its own: the folder shown (browser.c), the queue's (queue.c) */
+struct listing {
+    struct entry *e;
+    uint16_t *order;                            /* e by the sort order */
+    char *pool;
+    uint32_t max, pool_size, used;
+    int n, full;
+    int skip_empty;                             /* empty files left out (the queue) */
+    int quiet;                                  /* no ui_background() while reading: a short
+                                                   read from within the playback (the queue) */
+};
+int list_load(struct listing *l, const struct fat_dir *d);
 extern int dir_n;
 const char *ent_name(int i);                    /* the i-th entry shown, sorted */
 const struct entry *ent(int i);
@@ -82,22 +95,24 @@ void draw_browser(void);
 int browser_key(const struct key_ev *e);
 
 /* ---- queue.c ---- */
-#define Q_MAX 400
-struct queue {
-    struct entry e[Q_MAX];
-    char pool[20480];
-    char folder[64];
-};
-extern struct queue q;
+#define Q_DIRS 4000                             /* folders with tracks in the queue (§79) */
 extern int q_n, q_cur, q_playing, q_errors;
+extern char q_folder[64];                       /* the folder played (its name) */
 extern int q_dec;                               /* the track core B decodes; q_cur: the one heard */
 enum { MODE_ORDER, MODE_REPEAT_ALL, MODE_REPEAT_ONE, MODE_SHUFFLE, MODE_COUNT };
 extern int play_mode;
 extern uint32_t rnd;
 int q_next_index(int i, int user);              /* the track after i, or -1: end of the queue */
+int q_prev_index(int i);                        /* the track before i (BACK), or -1 */
+void q_shuffle_new(void);                       /* another shuffled order */
 void q_from_dir(int start);
 void q_from_tree(const struct fat_dir *top, const char *name);
+void q_clear(void);
+int q_on_sd(void);                              /* the queue is on the card */
+/* Track i: its entry and name (read again from its folder when needed; 0 / "" if unreadable) */
+const struct entry *q_ent(int i);
 const char *q_name(int i);
+void q_set_codec(int i, uint32_t codec);
 
 /* ---- playback.c ---- */
 extern struct tags tg;                          /* of the track heard */

@@ -37,7 +37,8 @@ void resume_save(void)
         r->sel[i] = (uint16_t)(i <= depth ? path[i].sel : 0);
         r->top[i] = (uint16_t)(i <= depth ? path[i].top : 0);
     }
-    r->track = (q_playing || parked) && q_cur < q_n ? q.e[q_cur].cluster : 0;
+    const struct entry *qe = (q_playing || parked) && q_cur < q_n ? q_ent(q_cur) : 0;
+    r->track = qe ? qe->cluster : 0;
     r->playing = (uint32_t)(q_playing && !audio_paused);
     r->level = (uint32_t)play_level;
     r->mode = (uint32_t)(play_mode | rg_mode << 8);    /* rg_mode 0 (album) before 0.55 */

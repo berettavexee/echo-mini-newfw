@@ -64,15 +64,18 @@ class CoreB(emu_host.Hifi):
         u.mem_map_ptr(0x01000000, 0x20000, UC_PROT_ALL, sh.hr0)
         u.mem_map_ptr(0x01020000, 0x40000, UC_PROT_ALL, sh.hr1)
         self.acc = emu_host.Accel(u, self)
-        u.mmio_map(0x01060000, 0x20000, self.acc.rd, None, self.acc.wr, None)
+        def mmio(base, size, rd, wr):                               # counted with EMU_COUNT=1
+            r, w = emu_host.counted("B", base, rd, wr)
+            u.mmio_map(base, size, r, None, w, None)
+        mmio(0x01060000, 0x20000, self.acc.rd, self.acc.wr)
         self.irqs = []
         u.mem_map_ptr(0x03000000, 0xA0000, UC_PROT_ALL, sh.sram)  # core A SRAM, shared
         u.mem_map(0x40000000, 0x110000)
-        u.mmio_map(0x40110000, 0x1000, self._rd, None, self._wr, None)
+        mmio(0x40110000, 0x1000, self._rd, self._wr)
         u.mem_map(0x40111000, 0x400000 - 0x111000)
         u.mem_map(0x60000000, 0x50000)                              # DMAC1, IMDCT36, SDMMC, ...: RAM
         self.syn = emu_host.Synth()                                 # SYNTH model
-        u.mmio_map(0x60050000, 0x2000, self.syn.rd, None, self.syn.wr, None)
+        mmio(0x60050000, 0x2000, self.syn.rd, self.syn.wr)
         u.mem_map(0x60052000, 0x100000 - 0x52000)
         u.mem_map(0xE0000000, 0x100000)
         code = bytes(sh.hr0)

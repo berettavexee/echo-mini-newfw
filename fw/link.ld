@@ -50,17 +50,22 @@ SECTIONS
     }
     ASSERT(SIZEOF(.dacring) <= 0x30000, "DAC ring larger than 0x03020000-0x0304ffff")
 
-    /* Play queue, 32 KiB above the code, and the directory listing, 96 KiB up to the loader's
+    /* The play queue's listing, 32 KiB above the code, and the directory listing, 96 KiB up to the loader's
      * data and stack and over them (dead once we run): not loaded, not cleared (ETUDE §25) */
     .queuebuf 0x03070000 (NOLOAD) : {
         KEEP(*(.queuebuf))
-        KEEP(*(.queuebuf2))
     }
     ASSERT(SIZEOF(.queuebuf) <= 0x8000, "play queue larger than 32 KiB")
     .dirbuf 0x03078000 (NOLOAD) : {
         KEEP(*(.dirbuf))
     }
     ASSERT(SIZEOF(.dirbuf) <= 0x18000, "directory listing larger than 96 KiB")
+    /* The queue's folders (ETUDE §79), 48 KiB of PMU-SRAM up to the log ring (0x0309c000): not
+     * loaded, not cleared */
+    .pmusram 0x03090000 (NOLOAD) : {
+        KEEP(*(.pmusram))
+    }
+    ASSERT(SIZEOF(.pmusram) <= 0xc000, "queue folders reach the log ring (0x0309c000)")
     ASSERT(_sidata + SIZEOF(.data) <= 0x03070000, "code reaches the play queue (0x03070000)")
 
     /DISCARD/ : { *(.ARM.exidx*) *(.ARM.attributes) *(.comment) }

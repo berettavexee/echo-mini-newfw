@@ -155,29 +155,33 @@ void fail_text(int code, uint32_t why, const char **what, const char **hint)
 static int q_open(int i, int chain)
 {
     struct fat_file f;
-    if (!q.e[i].size)
+    const struct entry *e = q_ent(i);
+    if (!e)
+        return HIFI_EREAD;                      /* its folder not readable (or changed) */
+    if (!e->size)
         return Q_EEMPTY;                        /* not queued since 0.65; kept for safety */
-    if ((q.e[i].flags & F_SD) && sd_open())
+    if ((e->flags & F_SD) && sd_open())
         return HIFI_EREAD;                      /* the card forgotten (USB) and not readable */
+    uint16_t flags = e->flags;
     copy_name(f.name, q_name(i), sizeof f.name);
-    f.vol = q.e[i].flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT;
-    f.contig = (q.e[i].flags & F_CONTIG) != 0;
-    f.cluster = q.e[i].cluster;
-    f.size = q.e[i].size;
+    f.vol = flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT;
+    f.contig = (flags & F_CONTIG) != 0;
+    f.cluster = e->cluster;
+    f.size = e->size;
     fat_open(&f);
     uint32_t t0 = ticks();
-    tags_read(&f, q.e[i].flags & F_CODEC, &tg_next);
+    tags_read(&f, flags & F_CODEC, &tg_next);
     log_printf("ui: tags in %u us: '%s' / '%s' / '%s' / %u", ticks() - t0, tg_next.title,
                tg_next.artist, tg_next.album, tg_next.track);
     int was_on = audio.on;
     (void)chain;
     player_ogg_hint(tg_next.ogg_end_page, tg_next.ogg_end_seg);  /* core B skips the comment header */
-    int r = player_open(&f, q.e[i].flags & F_CODEC, PLAY_CHAIN);
+    int r = player_open(&f, flags & F_CODEC, PLAY_CHAIN);
     if (!r && (!was_on || audio.vol == 0xff))
         fresh = 1;
     log_printf("ui: queue %d/%d: %s (%d)", i + 1, q_n, q_name(i), r);
     if (!r) {
-        q.e[i].flags = (uint16_t)((q.e[i].flags & ~F_CODEC) | player.codec);   /* M4A: AAC or ALAC */
+        q_set_codec(i, player.codec);           /* M4A: AAC or ALAC */
         q_dec = i;
         heard_sync();                           /* at once unless the last one still plays */
     }

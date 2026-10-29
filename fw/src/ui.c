@@ -177,7 +177,7 @@ static void menu_open(int *scr)
         if (m == M_USB_RW || m == M_INSTALL || m == M_USB_RO) {
             path_root(FAT_VOL_INT);             /* the volume may have changed */
             dir_load(&path[1].dir);
-            q_n = 0;
+            q_clear();
         }
     }
 }

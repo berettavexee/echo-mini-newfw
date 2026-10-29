@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-28, version 0.94.
+Last update: 2026-10-29, version 0.95.
 
 ## Done, validated on the device
 
@@ -26,6 +26,7 @@ Last update: 2026-10-28, version 0.94.
 | Flicker-free drawing | 0.60 | §39 |
 | Firmware installer from the main menu | 0.1x | §11 |
 | Low battery: warning, power off, refusal to start; battery gauge from a measured discharge (about 15.5 h of playback) | 0.64, 0.84 | §43, §61, §65 |
+| Play queue by folders: PLAY held on a tree or the whole card (4,000 folders), shuffle as a permutation of all the tracks | 0.95 | §79 |
 | Empty files greyed, damaged files skipped, a "Cannot play" screen: what went wrong (the reason of a refusal) and what to do | 0.65-0.67, 0.94 | §44, §46, §78 |
 | Charging screen (cable in at power on, or Power held with the cable in) | 0.68, 0.69 | §48 |
 | Core B's RAMs without the wait state (about 22 % less load) | 0.73 | §51-§52 |
@@ -75,6 +76,10 @@ One line per version; the measurements are in `ETUDE.md`.
 - 0.93: Musepack synthesis on SYNTH; fix: Musepack files did not open in 0.91 and 0.92 (§77).
 - 0.94: expressive error messages: the reason of a refusal from the codecs and the MP4 reader,
   what to do, an `error:` log line (§78).
+- 0.95: the play queue by folders, no longer 400 tracks: PLAY held on the whole card (515 tracks,
+  35 folders, 60 ms on the device); shuffle as a permutation of all the tracks (§79). The
+  emulator about 2.5 times faster (SYNTH in numpy, the idle loop and lcd_fill shortcuts, --ms)
+  (§80).
 
 ## To do
 
@@ -105,7 +110,9 @@ One line per version; the measurements are in `ETUDE.md`.
   in a pocket or a bag (the combination, what stays active when locked and what the screen
   shows to be proposed and agreed first; the key events of keys.c make it a filter in one
   place).
-- The play queue holds 400 tracks: PLAY held on "SD card" only takes the first folders.
+- Resume a queue made by PLAY held (a tree, the whole card) after a power off: today only a
+  queue of one folder resumes (the top level is shown). To save: the folder held, the shuffle
+  seed and order position, the track (its folder and cluster, to check it is the same).
 - Output and DAC settings (CS43131 registers, little code each):
   - headphone gain low / high (low suits sensitive in-ear monitors);
   - volume limiter (an adjustable ceiling);

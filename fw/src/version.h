@@ -4,12 +4,12 @@
 
 #define FW_NAME    "ECHO MINI newfw"
 #ifdef ECHO_FFTCMP
-#define FW_VERSION "0.94fc"            /* test build: AAC sound from HIFIACC, compared */
+#define FW_VERSION "0.95fc"            /* test build: AAC sound from HIFIACC, compared */
 #elif defined(ECHO_HWTEST)
-#define FW_VERSION "0.94hwt"           /* test build: accelerators against the software */
+#define FW_VERSION "0.95hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.94"
+#define FW_VERSION "0.95"
 #endif
-#define FW_DATE    "2026-10-28"
+#define FW_DATE    "2026-10-29"
 
 #endif
