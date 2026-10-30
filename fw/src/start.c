@@ -33,7 +33,9 @@ void (*const vectors[48])(void) = {
     0,
     Default_Handler,            /* PendSV */
     SysTick_Handler,
-    [16 ... 47] = Default_Handler,
+    [16 ... 20] = Default_Handler,
+    [16 + 5] = OTG_IRQHandler,  /* the USB controller (interrupt mode: usb_irq) */
+    [22 ... 47] = Default_Handler,
 };
 
 __attribute__((naked, noreturn)) void Reset_Handler(void)

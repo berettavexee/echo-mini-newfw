@@ -7,11 +7,11 @@
  * packet is dropped or repeated (until SETTLE_US); the ring is set again on silence when it runs
  * dry or overflows. The host's volume (Feature Unit) and our own (VOL+ and
  * VOL-, kept in the settings, the playback volume until then) add up on the DACs' attenuation,
- * in 0.5 dB steps. Polled: the RX FIFO holds about 3
- * packets, so the loop must come back to usb_service() within 3 ms (the longest gap is logged). */
+ * in 0.5 dB steps. The USB runs from the controller's interrupt (usb_irq): the packets go into the
+ * ring there; what the loop shares with it (the ring when no packet comes, the format, the DMA's
+ * position) is done with the interrupt blocked. */
 #include "ui_priv.h"
 #include "sys_priv.h"
-#include "i2c.h"
 #include "usb.h"
 
 #define TARGET_MS   10
@@ -344,12 +344,15 @@ static void apply_format(void)
     log_printf("uac: stream %u Hz, %u bits", rate, bits16 ? 16 : 24);
 }
 
-/* During a volume ramp: the packets, and silence when none come */
-static void uac_pump(void)
+/* Silence ahead of the DMA when no packet comes (also during a volume ramp) */
+static void uac_idle(void)
 {
-    usb_service();
+    if (st.flowing)
+        return;
+    usb_irq_block(1);
     if (!st.flowing)
         audio_idle();
+    usb_irq_block(0);
 }
 
 /* ---- the screen ---- */
@@ -433,7 +436,9 @@ static void log_stats(const char *what, uint32_t max_gap)
                st.packets, st.dropped, st.repeated, st.realigned, usb.iso_incomplete, st.bad,
                st.fill_min == 0x7fffffff ? 0 : st.fill_min, st.fill_max, st.target, audio.ring_ur,
                max_gap);
+    usb_irq_block(1);
     audio_update();
+    usb_irq_block(0);
     uint32_t dt = ticks() - rate_t0;
     if (rate_t0 && dt > 1000000 && st.frame)
         log_printf("uac: output rate %u.%u Hz over %u ms (nominal %u)",
@@ -446,6 +451,8 @@ static void log_stats(const char *what, uint32_t max_gap)
                "re-aimed %u", fb.sent, (uint32_t)((uint64_t)fb.sent * 10000 >> 14) / 10,
                (uint32_t)((uint64_t)fb.sent * 10000 >> 14) % 10, fb.err, fb.integ / 256,
                usb.iso_in_sent, usb.iso_in_late);
+    log_printf("uac: interrupts %u, the longest %u us", usb.irqs, usb.irq_max_us);
+    usb.irq_max_us = 0;
     log_printf("uac: longest parts, us: usb %u, format %u, volume %u, keys %u, screen line %u, "
                "log %u, idle %u", t_max[T_USB], t_max[T_FORMAT], t_max[T_VOLUME], t_max[T_KEYS],
                t_max[T_SCREEN], t_max[T_LOG], t_max[T_IDLE]);
@@ -486,9 +493,8 @@ void uac_mode(void)
     cur_alt = 1;
     log_printf("uac: start");
     usb_start_class(&uac);
-    lcd_hook = usb_service;                             /* packets served while drawing */
-    i2c_hook = usb_service;                             /* the DACs' registers */
-    ramp_hook = uac_pump;                               /* and the volume ramps */
+    ramp_hook = uac_idle;
+    usb_irq(1);
     uint32_t t0 = millis(), t_draw = 0, t_key = 0, t_log = millis(), last = ticks(), max_gap = 0;
     uint32_t gap_all = 0, configured_at = 0;
     const char *why = "?";
@@ -498,15 +504,15 @@ void uac_mode(void)
         if (now - last > max_gap)
             max_gap = now - last;
         last = now;
-        usb_service();
-        timed(T_USB, now);
         if (usb.configured && !configured_at) {
             configured_at = millis();
             log_printf("uac: configured after %u ms", configured_at - t0);
         }
         if (alt_new >= 0) {
             uint32_t t = ticks();
+            usb_irq_block(1);                           /* the output and the ring change */
             apply_format();
+            usb_irq_block(0);
             timed(T_FORMAT, t);
         }
         if (st.ready && st.flowing && millis() - st.last_ms > STALL_MS) {
@@ -515,7 +521,7 @@ void uac_mode(void)
         }
         if (!st.flowing) {
             uint32_t t = ticks();
-            audio_idle();
+            uac_idle();
             timed(T_IDLE, t);
         }
         if (vol_changed) {
@@ -566,8 +572,7 @@ void uac_mode(void)
     }
     if (max_gap > gap_all)
         gap_all = max_gap;
-    lcd_hook = 0;
-    i2c_hook = 0;
+    usb_irq(0);
     ramp_hook = 0;
     usb_iso_in_close();
     usb_iso_out_close();

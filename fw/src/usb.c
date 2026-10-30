@@ -653,6 +653,44 @@ int usb_in(const void *buf, uint32_t len)
  * emulation of 0x03054fb8; values only): hclk/PHY gates 7 and 6*16+10 on, soft resets 1, 2 and
  * 0 released, GRF USB PHY registers 0x80-0xb8, and three GPIOs (purpose unknown, kept as
  * RECHO has them in that mode). Then a DWC2 core soft reset in device mode. */
+/* ---- interrupt mode: the events usb_service() handles, interrupt 5 of the NVIC ---- */
+#define IRQ_USB 5
+static int irq_on;
+
+void OTG_IRQHandler(void)
+{
+    uint32_t t0 = ticks();
+    if (irq_on)
+        usb_service();
+    else
+        REG(GINTMSK) = 0;
+    usb.irqs++;
+    int32_t d = (int32_t)(ticks() - t0);        /* ticks() may step back by a SysTick pending */
+    if (d > (int32_t)usb.irq_max_us)
+        usb.irq_max_us = (uint32_t)d;
+}
+
+void usb_irq(int on)
+{
+    irq_on = on;
+    if (on) {
+        REG(GINTMSK) = GINT_RXFLVL | GINT_USBSUSP | GINT_USBRST | GINT_ENUMDONE | GINT_IEPINT |
+                       GINT_OEPINT | GINT_IISOIXFR | GINT_INCOMPLP | GINT_WKUP;
+        REG(GAHBCFG) |= 1;                              /* the core's interrupt line */
+        REG(NVIC_ISER) = 1u << IRQ_USB;
+    } else {
+        REG(NVIC_ICER) = 1u << IRQ_USB;
+        REG(GAHBCFG) &= ~1u;
+        REG(GINTMSK) = 0;
+    }
+}
+
+void usb_irq_block(int block)
+{
+    if (irq_on)
+        REG(block ? NVIC_ICER : NVIC_ISER) = 1u << IRQ_USB;
+}
+
 void usb_start(void)
 {
     usb_start_class(0);
@@ -744,6 +782,7 @@ void usb_start_class(const struct usb_class *c)
 
 void usb_stop(void)
 {
+    usb_irq(0);
     REG(DCTL) |= DCTL_SFTDISCON;
     usb.configured = 0;
 }

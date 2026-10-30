@@ -18,8 +18,4 @@ void i2c1_init(void);
 int i2c1_read(uint8_t dev, uint8_t reg, uint8_t *buf, uint32_t n);
 int i2c1_write(uint8_t dev, uint8_t reg, const uint8_t *buf, uint32_t n);
 
-/* Called while waiting for the bus: what must not wait for a whole transfer (the USB sound
- * card's packets, uac.c); 0: none */
-extern void (*i2c_hook)(void);
-
 #endif

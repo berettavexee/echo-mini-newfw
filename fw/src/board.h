@@ -61,6 +61,7 @@ void power_off(void);
 
 /* start.c's vector table: the SysTick interrupt, and the fault screen of main.c */
 void SysTick_Handler(void);
+void OTG_IRQHandler(void);      /* usb.c: interrupt 5 (usbc_int, TRM table 2-1) */
 void fault_screen(const uint32_t *frame, uint32_t exc);
 
 #endif

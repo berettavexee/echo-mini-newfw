@@ -121,7 +121,9 @@ One line per version; the measurements are in `ETUDE.md`.
   2. Done in 0.97 (§85): asynchronous, a feedback endpoint whose value comes from a
      proportional-integral control of the ring's fill (10 ms); bit-perfect on Linux (no sample
      dropped or repeated in 13 minutes); dropping or repeating kept as a fallback.
-  3. UAC2 at high speed (our driver already enumerates at high speed): one packet every 125 us,
+  3. a. Done in 0.97 (§86): the sound card on the USB controller's interrupt (5), the loop only
+     for the screen, keys, volume and log; the same results as step 2.
+     b. UAC2 at high speed (our driver already enumerates at high speed): one packet every 125 us,
      so 192 kHz in 32 bits needs 192 bytes, where full speed hits the RX FIFO (147 words) above
      48 kHz in 24 bits; every rate the DACs play (44.1 to 192 kHz); UAC1 at full speed kept for
      older hosts. First, check the controller's isochronous mode at high speed and the split of

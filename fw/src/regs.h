@@ -75,6 +75,7 @@
 /* Cortex-M system control */
 #define SCB_AIRCR           0xe000ed0cu
 #define SCB_VTOR            0xe000ed08u
+#define NVIC_ISER           0xe000e100u
 #define NVIC_ICER           0xe000e180u
 #define NVIC_ICPR           0xe000e280u
 #define SYST_CSR            0xe000e010u

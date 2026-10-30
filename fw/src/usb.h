@@ -16,6 +16,7 @@ struct usb_state {
     uint32_t suspend_since;     /* ticks() at the suspend */
     uint32_t iso_incomplete;    /* isochronous OUT frames missed (incomplete ISO OUT) */
     uint32_t iso_in_sent, iso_in_late;  /* isochronous IN packets sent, frames re-aimed */
+    uint32_t irqs, irq_max_us;  /* interrupt mode: interrupts taken, the longest, us */
 };
 
 /* A class other than mass storage: its descriptors and requests. setup() gets the class requests
@@ -53,6 +54,10 @@ void usb_iso_in_close(void);
 void usb_iso_in_send(const void *data, uint32_t n);    /* the next packet, n <= mps */
 void usb_stop(void);            /* soft disconnect */
 void usb_service(void);         /* handles pending core events; call often */
+/* Interrupt mode (the USB sound card): usb_service() runs from the controller's interrupt, not
+ * from the caller; what the caller shares with it is guarded by usb_irq_block() */
+void usb_irq(int on);
+void usb_irq_block(int block);
 
 /* Bulk OUT (endpoint 1): arm for up to len bytes, then poll; done when a short packet or len
  * bytes arrived. */
