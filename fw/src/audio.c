@@ -466,6 +466,39 @@ static void fill_silence(void)
     }
 }
 
+/* A stream from outside (the USB sound card, uac.c): the producer is not ahead by a whole ring
+ * of music but by a few milliseconds, so what the DMA would find past it is old sound. */
+static uint32_t zeroed_to;                      /* the ring is zeroed up to there (a byte count) */
+
+/* The write position 'ahead' bytes after the DMA, silence in between */
+void audio_stream_align(uint32_t ahead)
+{
+    if (!audio.on)
+        return;
+    bp.on = bp.mix = 0;
+    audio_update();
+    uint32_t from = audio.rd & ~7u, wr = (audio.rd + ahead) & ~7u;
+    for (uint32_t i = from; (int32_t)(wr - i) > 0; i += 4)
+        ((volatile uint32_t *)audio.ring)[i % audio.ring_size / 4] = 0;
+    audio.wr = zeroed_to = wr;
+}
+
+/* Silence for 'bytes' after the write position: a producer late plays it, not old sound */
+void audio_zero_ahead(uint32_t bytes)
+{
+    uint32_t end = audio.wr + bytes, i = (int32_t)(zeroed_to - audio.wr) > 0 ? zeroed_to : audio.wr;
+    for (; (int32_t)(end - i) > 0; i += 4)
+        ((volatile uint32_t *)audio.ring)[i % audio.ring_size / 4] = 0;
+    zeroed_to = end;
+}
+
+/* No stream: silence ahead of the DMA */
+void audio_idle(void)
+{
+    fill_silence();
+    zeroed_to = audio.wr;
+}
+
 /* PCM_VOL_B and PCM_VOL_A of both DACs; with ramp, steps of 3 dB every 2 ms as RECHO */
 void audio_volume(uint8_t vol, int ramp)
 {

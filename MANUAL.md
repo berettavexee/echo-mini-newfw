@@ -167,6 +167,7 @@ is open, except for the USB and system entries, which stop it.
 | Settings | the settings screen (below) |
 | USB disk, read only | the internal memory as a USB disk; the computer can read it but not write to it |
 | USB disk, read/write | the same, and the computer can write to it (copy music, firmware images) |
+| USB sound card | the player as a USB sound card for a computer (see below) |
 | Install a firmware (.IMG) | the installer (see "Installing") |
 | System screen | hardware state (battery, keys, plugs, clocks); any key returns |
 | USB loader mode (exit: RST) | restarts into the loader's USB mode, for recovery from a computer; leave it with the RST hole |
@@ -176,6 +177,19 @@ is open, except for the USB and system entries, which stop it.
 - After a read/write session, the clock is set from the newest file the computer wrote, when
   the clock was not set or was behind that file.
 - The microSD card is not available over USB yet.
+
+**USB sound card** (0.97, first step): plug the cable, then choose the entry. The computer sees
+a sound card named "ECHO MINI" (USB Audio Class 1, full speed, no driver needed), and its sound
+comes out of the player's headphone outputs.
+- Formats: 16 or 24 bits, 44.1 or 48 kHz, stereo. Other rates are converted by the computer.
+- **VOL+** / **VOL-** set the player's volume, which starts at the playback volume; the
+  computer's volume (and mute) adds to it, in 0.5 dB steps on the DACs.
+- Leave with **BACK held**, or by unplugging the cable.
+- The screen shows the state (waiting for the computer, connected, playing), the format, both
+  volumes, and counters: the fill of the output buffer (about 10 ms), the samples dropped or
+  repeated to follow the computer's clock (a few every minute, not audible), and the packets
+  missed (a few when a stream starts).
+- Tested with Linux. Other systems (Windows, macOS, Android, iOS) are not tested yet.
 
 ### Settings
 

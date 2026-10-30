@@ -190,13 +190,18 @@ static inline void pixel(uint16_t c)
     dat(c);
 }
 
+void (*lcd_hook)(void);
+
 void lcd_fill(int x, int y, int w, int h, uint16_t color)
 {
     if (w <= 0 || h <= 0)
         return;
     window(x, y, x + w - 1, y + h - 1);
-    for (int n = w * h; n; n--)
+    for (int n = w * h; n; n--) {
         pixel(color);
+        if (lcd_hook && !(n & 1023))
+            lcd_hook();
+    }
 }
 
 static int glyph_width(const uint8_t *g)
@@ -214,6 +219,8 @@ static void draw_glyph_cols(int x, int y, const uint8_t *g, uint16_t fg, uint16_
     int bpr = (w + 7) / 8, top = font_ascent - yo - h;  /* row of the glyph's first line */
     int c0 = cl > x ? cl - x : 0, c1 = x + adv * sc > cr ? cr - x : adv * sc;
     const uint8_t *bits = g + 5;
+    if (lcd_hook)
+        lcd_hook();
     if (c1 <= c0)
         return;
     window(x + c0, y, x + c1 - 1, y + FONT_LINE * sc - 1);

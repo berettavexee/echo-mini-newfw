@@ -237,6 +237,8 @@ static void menu_open(int *scr)
         play_stop(STOP_NOW);                    /* the rest needs the audio and core B */
         if (m == M_USB_RO || m == M_USB_RW)
             sys_usb(m == M_USB_RW);
+        else if (m == M_USB_DAC)
+            uac_mode();
         else if (m == M_INSTALL)
             sys_install();
         else if (m == M_SYSTEM)

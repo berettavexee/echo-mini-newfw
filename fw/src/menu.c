@@ -4,7 +4,7 @@
 /* ---- main menu ---- */
 static const char *const m_names[M_COUNT] = {
     "Files", "Now playing", "Settings", "USB disk, read only", "USB disk, read/write",
-    "Install a firmware (.IMG)", "System screen", "USB loader mode (exit: RST)",
+    "USB sound card", "Install a firmware (.IMG)", "System screen", "USB loader mode (exit: RST)",
 };
 
 int main_menu(void)

@@ -46,6 +46,11 @@ enum { BEEP_WARN, BEEP_REMIND, BEEP_OFF };   /* 3 short, 1 short, 2 low */
 void audio_beep(int kind);
 extern void (*ramp_hook)(void); /* keeps the ring fed during volume ramps (else silence) */
 int32_t audio_fill(void);       /* bytes written and not yet read */
+/* A stream from outside (uac.c): the write position 'ahead' bytes after the DMA, silence in
+ * between; silence for 'bytes' after the write position; silence when nothing comes */
+void audio_stream_align(uint32_t ahead);
+void audio_zero_ahead(uint32_t bytes);
+void audio_idle(void);
 void audio_reset_stats(void);
 
 #endif

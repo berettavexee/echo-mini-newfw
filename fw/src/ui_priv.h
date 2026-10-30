@@ -155,10 +155,13 @@ int play_key(const struct key_ev *e);
 int seek_key(const struct key_ev *e);
 
 /* ---- menu.c ---- */
-enum { M_FILES, M_PLAYING, M_SETTINGS, M_USB_RO, M_USB_RW, M_INSTALL, M_SYSTEM, M_LOADER,
-       M_COUNT };
+enum { M_FILES, M_PLAYING, M_SETTINGS, M_USB_RO, M_USB_RW, M_USB_DAC, M_INSTALL, M_SYSTEM,
+       M_LOADER, M_COUNT };
 int main_menu(void);
 void clock_screen(void);
+
+/* ---- uac.c ---- */
+void uac_mode(void);            /* the USB sound card, until BACK held or the cable is out */
 
 /* ---- settings.c ---- */
 enum { START_PLAY, START_PAUSED, START_BROWSER, START_COUNT };

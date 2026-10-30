@@ -17,6 +17,8 @@
 #define GINTSTS    (OTG + 0x014)
 #define GINTMSK    (OTG + 0x018)
 #define GRXSTSP    (OTG + 0x020)
+#define GRXFSIZ    (OTG + 0x024)
+#define GNPTXFSIZ  (OTG + 0x028)
 #define GNPTXSTS   (OTG + 0x02c)
 #define DCFG       (OTG + 0x800)
 #define DCTL       (OTG + 0x804)
@@ -41,15 +43,18 @@
 #define GINT_ENUMDONE (1u << 13)
 #define GINT_IEPINT   (1u << 18)
 #define GINT_OEPINT   (1u << 19)
+#define GINT_INCOMPLP (1u << 21)                /* device mode: incomplete isochronous OUT */
 #define GINT_WKUP     (1u << 31)
 
 #define EP_ENA     (1u << 31)
 #define EP_DIS     (1u << 30)
-#define EP_SD0PID  (1u << 28)
+#define EP_SD0PID  (1u << 28)                   /* isochronous: SetEvenFr */
+#define EP_SODDFR  (1u << 29)
 #define EP_SNAK    (1u << 27)
 #define EP_CNAK    (1u << 26)
 #define EP_STALL   (1u << 21)
 #define EP_BULK    (2u << 18)
+#define EP_ISO     (1u << 18)
 #define EP_ACTIVE  (1u << 15)
 
 #define INT_XFERCOMPL (1u << 0)
@@ -59,8 +64,10 @@
 #define DCTL_CGINAK    (1u << 8)
 
 #define IO_TIMEOUT_US 3000000
+#define FIFO_WORDS    308                       /* hwcfg3: the core's FIFO RAM */
 
 struct usb_state usb;
+static const struct usb_class *cls;             /* 0: mass storage */
 
 /* ---- descriptors (test IDs of pid.codes: private use only) ---- */
 static const uint8_t dev_desc[18] = {
@@ -81,6 +88,12 @@ static uint32_t ep0_buf[64];            /* descriptor being sent */
 static const uint8_t *ep0_ptr;
 static uint32_t ep0_left;
 static int ep0_zlp;
+static uint8_t ep0_rx[64];              /* the data stage of a request from the host */
+static uint32_t ep0_rx_want, ep0_rx_got;
+static uint8_t ep0_rx_setup[8];
+
+/* ---- endpoint 1 isochronous OUT (a class): its packet size, 0 when closed ---- */
+static uint32_t iso_mps;
 
 /* ---- endpoint 1 state ---- */
 static uint8_t *out_buf;
@@ -218,6 +231,53 @@ static uint32_t string_desc(int i, uint8_t *d)
     return n;
 }
 
+/* Endpoint 1 OUT armed for one isochronous packet in the next frame (its parity) */
+static void iso_arm(void)
+{
+    uint32_t fn = (REG(DSTS) >> 8) & 0x3fff;
+    REG(DOEPTSIZ(1)) = 1u << 19 | iso_mps;
+    REG(DOEPCTL(1)) |= EP_ENA | EP_CNAK | ((fn & 1) ? EP_SD0PID : EP_SODDFR);
+}
+
+void usb_iso_out_open(uint32_t mps)
+{
+    iso_mps = mps;
+    REG(DOEPCTL(1)) = EP_ISO | EP_ACTIVE | EP_SNAK | mps;
+    REG(DOEPINT(1)) = 0xff;
+    iso_arm();
+}
+
+void usb_iso_out_close(void)
+{
+    if (REG(DOEPCTL(1)) & EP_ENA)
+        REG(DOEPCTL(1)) |= EP_SNAK | EP_DIS;
+    REG(DOEPCTL(1)) &= ~EP_ACTIVE;
+    iso_mps = 0;
+}
+
+/* A request for the class (or SET_INTERFACE / GET_INTERFACE): its answer, or its data stage */
+static void class_setup(const uint8_t *s, uint8_t *tmp)
+{
+    uint16_t length = s[6] | s[7] << 8;
+    if (!(s[0] & 0x80) && length) {                     /* data from the host: receive it first */
+        for (int i = 0; i < 8; i++)
+            ep0_rx_setup[i] = s[i];
+        ep0_rx_want = length > sizeof ep0_rx ? sizeof ep0_rx : length;
+        ep0_rx_got = 0;
+        REG(DOEPTSIZ(0)) = 1u << 29 | 1u << 19 | ep0_rx_want;
+        REG(DOEPCTL(0)) |= EP_ENA | EP_CNAK;
+        return;
+    }
+    int r = cls->setup(s, tmp);
+    if (r < 0)
+        ep0_stall();
+    else if (r == 0)
+        ep0_status_in();
+    else
+        ep0_send(tmp, (uint32_t)r, length);
+    ep0_out_arm();
+}
+
 static void handle_setup(void)
 {
     const uint8_t *s = (const uint8_t *)setup;
@@ -226,14 +286,23 @@ static void handle_setup(void)
     uint8_t tmp[64];
 
     usb.setups++;
+    if (cls && ((type & 0x60) == 0x20 || ((type & 0x60) == 0 && (req == 10 || req == 11) &&
+                                          (type & 0x1f) == 1))) {
+        class_setup(s, tmp);                            /* class, SET/GET_INTERFACE */
+        return;
+    }
     if ((type & 0x60) == 0x00) {                        /* standard */
         switch (req) {
         case 6:                                         /* GET_DESCRIPTOR */
             switch (value >> 8) {
             case 1:
-                ep0_send(dev_desc, sizeof dev_desc, length);
+                ep0_send(cls ? cls->dev : dev_desc, sizeof dev_desc, length);
                 break;
             case 2:
+                if (cls) {
+                    ep0_send(cls->cfg, cls->cfg_len, length);
+                    break;
+                }
                 cfg_desc[22] = cfg_desc[29] = (uint8_t)usb.mps;
                 cfg_desc[23] = cfg_desc[30] = (uint8_t)(usb.mps >> 8);
                 ep0_send(cfg_desc, sizeof cfg_desc, length);
@@ -244,8 +313,11 @@ static void handle_setup(void)
                 else
                     ep0_stall();
                 break;
-            case 6:
-                ep0_send(qual_desc, sizeof qual_desc, length);
+            case 6:                                     /* a full-speed-only device has none */
+                if (cls && cls->full_speed)
+                    ep0_stall();
+                else
+                    ep0_send(qual_desc, sizeof qual_desc, length);
                 break;
             default:
                 ep0_stall();
@@ -256,7 +328,11 @@ static void handle_setup(void)
             ep0_status_in();
             break;
         case 9:                                         /* SET_CONFIGURATION */
-            if (value == 1) {
+            if (cls) {                                  /* the class opens its endpoints */
+                if (!value)
+                    usb_iso_out_close();
+                usb.configured = value == 1;
+            } else if (value == 1) {
                 ep1_configure();
                 usb.configured = 1;
             } else
@@ -314,10 +390,14 @@ static void bus_reset(void)
     }
     REG(DIEPCTL(1)) = EP_SNAK;
     REG(DOEPCTL(1)) = EP_SNAK;
+    iso_mps = 0;
     flush_fifos();
     ep0_left = 0;
     ep0_zlp = 0;
+    ep0_rx_want = 0;
     ep0_out_arm();
+    if (cls && cls->reset)
+        cls->reset();
 }
 
 static void rx_pop(void)
@@ -330,6 +410,15 @@ static void rx_pop(void)
             uint32_t w = REG(FIFO(0));
             if (i < 2)
                 setup[i] = w;
+        }
+    } else if (kind == 2 && ep == 1 && iso_mps && cls) {   /* isochronous OUT: to the class */
+        cls->iso_out(n);
+    } else if (kind == 2 && ep == 0 && ep0_rx_want) {   /* data stage of a class request */
+        for (uint32_t i = 0; i < words; i++) {
+            uint32_t w = REG(FIFO(0));
+            for (int k = 0; k < 4 && 4 * i + k < n; k++)
+                if (ep0_rx_got < sizeof ep0_rx)
+                    ep0_rx[ep0_rx_got++] = (uint8_t)(w >> (8 * k));
         }
     } else if (kind == 2 && ep == 1 && out_buf && !(((uint32_t)out_buf + out_got) & 3) &&
                out_got + 4 * words <= out_len) {       /* OUT data, aligned: word copy */
@@ -384,14 +473,32 @@ void usb_service(void)
             REG(DOEPINT(0)) = i;
             if (i & INT_SETUP)
                 handle_setup();
-            else if (i & INT_XFERCOMPL)
+            else if ((i & INT_XFERCOMPL) && ep0_rx_want) {  /* the data of a class request */
+                ep0_rx_want = 0;
+                cls->setup_out(ep0_rx_setup, ep0_rx, ep0_rx_got);
+                ep0_status_in();
+                ep0_out_arm();
+            } else if (i & INT_XFERCOMPL)
                 ep0_out_arm();                          /* after a status stage */
         }
         if (d & 1u << 17) {
             uint32_t i = REG(DOEPINT(1));
             REG(DOEPINT(1)) = i;
-            if (i & INT_XFERCOMPL)
+            if ((i & INT_XFERCOMPL) && iso_mps)
+                iso_arm();                              /* the next frame's packet */
+            else if (i & INT_XFERCOMPL)
                 out_done = 1;
+        }
+    }
+    if (g & GINT_INCOMPLP) {                            /* a frame went by without our packet */
+        REG(GINTSTS) = GINT_INCOMPLP;
+        if (iso_mps) {
+            usb.iso_incomplete++;
+            if (REG(DOEPCTL(1)) & EP_ENA) {             /* armed for a frame gone: the next one */
+                uint32_t fn = (REG(DSTS) >> 8) & 0x3fff;
+                REG(DOEPCTL(1)) |= (fn & 1) ? EP_SD0PID : EP_SODDFR;
+            } else
+                iso_arm();
         }
     }
     if (g & GINT_IEPINT) {
@@ -492,6 +599,15 @@ int usb_in(const void *buf, uint32_t len)
  * RECHO has them in that mode). Then a DWC2 core soft reset in device mode. */
 void usb_start(void)
 {
+    usb_start_class(0);
+}
+
+void usb_start_class(const struct usb_class *c)
+{
+    cls = c;
+    iso_mps = 0;
+    ep0_rx_want = 0;
+    usb.iso_incomplete = 0;
     usb.configured = 0;
     usb.suspended = 0;
     usb.mps = 512;
@@ -534,6 +650,20 @@ void usb_start(void)
     REG(PCGCCTL) = 0;
     REG(GAHBCFG) |= 1u << 7;                            /* TX FIFO empty level: completely empty */
     REG(DCFG) &= ~(3u | 0x7f0u);                        /* high speed, address 0 */
+    if (c && c->full_speed)
+        REG(DCFG) |= 1;                                 /* full speed on the UTMI+ PHY */
+    static uint32_t rx_size, nptx_size;                 /* the sizes the core starts with */
+    if (!rx_size) {
+        rx_size = REG(GRXFSIZ);
+        nptx_size = REG(GNPTXFSIZ);
+    }
+    if (c && c->rx_fifo_words) {                        /* the rest: the shared TX FIFO */
+        REG(GRXFSIZ) = c->rx_fifo_words;
+        REG(GNPTXFSIZ) = (uint32_t)(FIFO_WORDS - c->rx_fifo_words) << 16 | c->rx_fifo_words;
+    } else {
+        REG(GRXFSIZ) = rx_size;
+        REG(GNPTXFSIZ) = nptx_size;
+    }
     flush_fifos();
 
     REG(DIEPCTL(0)) = EP_SNAK;

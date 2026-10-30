@@ -21,6 +21,7 @@ Last update: 2026-10-30, version 0.96.
 | Tags and ReplayGain found after a large cover (Ogg, FLAC, ID3v2: up to 16 MiB) and in an APEv2 tag holding a cover | 0.96 | §81 |
 | Settings screen: screen timeout, brightness (backlight PWM), tags or file names, ReplayGain auto and preamp, start-up, sleep timer, power off when idle, swapped volume keys | 0.96 | §81 |
 | Brightness in ten perceptual steps (8 to 100 %, about x1.3 a step) | 0.97 | §82 |
+| USB sound card, step 1: UAC1 at full speed, 16 and 24 bits, 44.1 and 48 kHz, adaptive (tested with Linux) | 0.97 | §84 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
 | USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
@@ -108,13 +109,36 @@ One line per version; the measurements are in `ETUDE.md`.
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
 - USB access to the microSD card (step S5 of §36).
-- USB DAC mode, as in the stock firmware ("USB Connection Options": data copying or "USB Audio
-  Decoding", with its own "UAC Volume"): the player as a USB Audio Class sound card for a
-  computer or a phone. Needs an isochronous OUT endpoint in our USB driver (bulk only today),
-  UAC descriptors and sample rates, a rate feedback (asynchronous) or an adaptive clock, the
-  PCM straight into the DAC ring (core A only). Its choice fits the USB screen above.
-  EchoPod (GPL-3.0, ideas only) has it working at full speed: 44.1 and 48 kHz, 16 and 24 bits,
-  about 20 ms of delay; 88.2 and 96 kHz do not fit the chip's USB buffer at full speed.
+- USB DAC mode: the player as a USB sound card for a computer or a phone, chosen on the USB
+  screen above when the cable comes in (as the stock firmware's "USB Connection Options"). The
+  stock firmware (UAC1, 16 bits, 48 kHz only, adaptive, HID media keys) and EchoPod (UAC1, 16
+  and 24 bits, 44.1 and 48 kHz, adaptive, a sample dropped or repeated against the drift) are
+  compared in §83; neither has a rate feedback or goes over 48 kHz. Plan, in steps:
+  1. Done in 0.97 (§84): UAC1 at full speed, 16 and 24 bits, 44.1 and 48 kHz, the PCM straight
+     into the DAC ring (core A only), the host's volume on the DACs' attenuation; entered from
+     the main menu for now. Left: a volume of its own kept for this mode (it starts at the
+     playback volume), the choice on the USB screen at the cable's coming.
+  2. Asynchronous: the DACs on our own clocks (§60) and a feedback endpoint telling the host how
+     many samples to send, from the ring's fill: bit-perfect, no sample dropped or repeated
+     (dropping or repeating kept as a fallback, counted in the log); a small ring (5-10 ms).
+  3. UAC2 at high speed (our driver already enumerates at high speed): one packet every 125 us,
+     so 192 kHz in 32 bits needs 192 bytes, where full speed hits the RX FIFO (147 words) above
+     48 kHz in 24 bits; every rate the DACs play (44.1 to 192 kHz); UAC1 at full speed kept for
+     older hosts. First, check the controller's isochronous mode at high speed and the split of
+     its FIFOs (308 words) in the TRM.
+  4. Use: HID media keys (play/pause, next, previous, volume to the host or to the DACs), a
+     screen with the format received, the rate fed back, an "untouched stream" mark and a level
+     meter; power saving off in this mode (USB-powered).
+  Power: 500 mA declared with a computer, to charge while playing; a phone powers the bus from
+  its own battery and may refuse a device asking that much (iPhone): 100 mA declared there, the
+  player on its own battery, charging off.
+  How to tell a computer from a phone (to declare 500 or 100 mA) is still open.
+  Tests: the first prototypes on a Linux PC only (ALSA, `aplay -D hw:` for bit-perfect checks,
+  `/proc/asound/card*/stream*`); then Android (USB OTG) and iPhone (USB-C, or the Lightning
+  camera adapter), with the power question above; no Windows host at hand, Windows to be
+  reported by users.
+  Later: DSD over PCM (DoP), if the link to the CS43131 allows it; a composite device, sound card
+  and mass storage at once.
 - A diagnostics, telemetry and remote-control module over the USB link with the PC, to automate
   the tests on the device: read the log and the state live (playback, buffers, core B load,
   battery, keys), send key events and commands (play a file, seek, change a setting), and run

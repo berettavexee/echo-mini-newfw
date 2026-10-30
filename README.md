@@ -17,6 +17,7 @@ with gapless playback and ReplayGain.
   exFAT). Play a whole folder tree, in order or shuffled.
 - **Settings**: brightness, screen timeout, sleep timer, power off when idle, start-up behaviour.
 - Resume where you stopped, seek, clock, USB disk mode, low-battery warning, charging screen.
+- **USB sound card** for a computer: 16 or 24 bits, 44.1 or 48 kHz (first step, tested with Linux).
 - **Not there (yet)**: equaliser, music library by artist or album (folders only), lyrics.
 
 ## Before you install
