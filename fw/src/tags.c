@@ -15,6 +15,7 @@
 
 #define SCAN_MAX (512 * 1024)                   /* never look further into a file (past the */
                                                 /* samples of WAV and AIFF: further than them) */
+#define SKIP_MAX (16u << 20)                    /* ... nor, with the parts skipped, past 16 MiB */
 
 /* ---- reading the file ---- */
 static struct {
@@ -47,6 +48,14 @@ static int rd_at(uint32_t pos, uint32_t n, const uint8_t **p)
     }
     *p = rd.buf + (pos - rd.pos);
     return 0;
+}
+
+/* n bytes skipped by their declared size (cover art), never read: the window goes on that much
+ * further, up to SKIP_MAX (fields after a big picture) */
+static void skipped(uint32_t n)
+{
+    if (rd.lim < SKIP_MAX)
+        rd.lim = n < SKIP_MAX - rd.lim ? rd.lim + n : SKIP_MAX;
 }
 
 static uint32_t syncsafe(const uint8_t *p) { return p[0] << 21 | p[1] << 14 | p[2] << 7 | p[3]; }
@@ -306,7 +315,9 @@ static uint32_t id3v2(struct tags *t, uint32_t base)
             else if (!__builtin_memcmp(id, "TXXX", 4)) trk = 2;
         }
         /* compressed, encrypted or unsynchronised frames are skipped */
-        if ((dst || trk) && size >= 2 && !(fflags & (ver == 4 ? 0x0e : 0xc0))) {
+        if (!(dst || trk) || size < 2 || (fflags & (ver == 4 ? 0x0e : 0xc0)))
+            skipped(size);
+        else {
             uint32_t n = size > 1024 ? 1024 : size;
             const uint8_t *d;
             if (!rd_at(base + pos + hl, n, &d)) {
@@ -377,13 +388,16 @@ static void flac(struct tags *t)
                 if (rd_at(q, 4, &p))
                     return;
                 uint32_t n = le32(p);
-                if (n <= 512 && !rd_at(q + 4, n, &p))
+                if (n > 512)
+                    skipped(n);
+                else if (!rd_at(q + 4, n, &p))
                     vorbis_comment(t, p, n);
                 q += 4 + n;
             }
             return;
         }
         pos = body + len;                       /* cover art: skipped */
+        skipped(len);
     }
 }
 
@@ -432,7 +446,8 @@ static int og_read(uint8_t *out, uint32_t n)
                 out[i] = p[i];
             out += m;
             k = m;
-        }
+        } else
+            skipped(k);
         og.data += k;
         n -= k;
     }
@@ -663,37 +678,40 @@ static void apev2(struct tags *t)
         if (end < 32 || rd_at(end - 32, 32, &p) || __builtin_memcmp(p, "APETAGEX", 8))
             continue;
         uint32_t size = le32(p + 12), n = le32(p + 16);
-        if (size < 32 || size > end || size > sizeof rd.buf - 512)
+        if (size < 32 || size > end || size > SKIP_MAX)
             return;
+        /* item by item: its header and key, then its value when small (cover art: skipped) */
         uint32_t pos = end - size, stop = end - 32;
         for (uint32_t i = 0; i < n && pos + 8 < stop; i++) {
-            if (rd_at(pos, stop - pos, &p))
+            uint32_t h = stop - pos > 264 ? 264 : stop - pos;  /* sizes, flags, a key of 255 */
+            if (rd_at(pos, h, &p))
                 return;
             uint32_t vlen = le32(p), k = 8;
-            while (pos + k < stop && p[k])
+            while (k < h && p[k])
                 k++;                            /* the key, up to its 0 */
-            if (pos + k + 1 + vlen > stop)
+            if (k >= h || vlen > stop - pos - k - 1)
                 return;
-            const uint8_t *key = p + 8, *v = p + k + 1;
-            uint32_t klen = k - 8;
             char kk[32];
-            int ok = rg_key(key, klen, kk, sizeof kk);
-            if (ok && !__builtin_memcmp(kk, "TITLE", 6))
-                set_text(t->title, sizeof t->title, v, vlen, 3);
-            else if (ok && !__builtin_memcmp(kk, "ARTIST", 7))
-                set_text(t->artist, sizeof t->artist, v, vlen, 3);
-            else if (ok && !__builtin_memcmp(kk, "ALBUM", 6))
-                set_text(t->album, sizeof t->album, v, vlen, 3);
-            else if (ok && !__builtin_memcmp(kk, "TRACK", 6)) {
+            int ok = rg_key(p + 8, k - 8, kk, sizeof kk);
+            uint32_t v = pos + k + 1;
+            pos = v + vlen;
+            if (!ok || vlen > 512 || rd_at(v, vlen, &p))
+                continue;
+            if (!__builtin_memcmp(kk, "TITLE", 6))
+                set_text(t->title, sizeof t->title, p, vlen, 3);
+            else if (!__builtin_memcmp(kk, "ARTIST", 7))
+                set_text(t->artist, sizeof t->artist, p, vlen, 3);
+            else if (!__builtin_memcmp(kk, "ALBUM", 6))
+                set_text(t->album, sizeof t->album, p, vlen, 3);
+            else if (!__builtin_memcmp(kk, "TRACK", 6)) {
                 char tv[8];
-                set_text(tv, sizeof tv, v, vlen, 3);
+                set_text(tv, sizeof tv, p, vlen, 3);
                 t->track = num(tv);
-            } else if (ok) {
+            } else {
                 char val[32];
-                set_text(val, sizeof val, v, vlen, 3);
+                set_text(val, sizeof val, p, vlen, 3);
                 rg_field(t, kk, val);
             }
-            pos += k + 1 + vlen;
         }
         return;
     }
