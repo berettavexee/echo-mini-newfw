@@ -8,6 +8,7 @@
 #include "board.h"
 #include "font.h"
 #include "regs.h"
+#include "log.h"
 
 static uint32_t lcd_id;
 static int lcd_variant;
@@ -330,11 +331,52 @@ int lcd_text(int x, int y, const char *s, uint16_t fg, uint16_t bg)
     return x;
 }
 
+/* The backlight: at 100 % (and off) a GPIO, below on PWM0 channel 0 at 10 kHz (pin function 1),
+ * as the stock firmware does (ETUDE §3.3). PCLK is the core clock / 4 (board.c); the screen is
+ * never on while the clocks are on the crystal (sys_screen_set). The steps in the stock
+ * firmware's order (0.96 set the period with the channel stopped: no effect on the device):
+ * clock, reset, channel on, pin; then duty, counter, period, control, the channel running.
+ * DUTY is the time the backlight is off: 0.96b wrote the time on, and 90 % was the dimmest. */
+static int bl_pct = 100, bl_on, pwm_on;
+
 void lcd_backlight(int on)
 {
-    iomux(PIN_BACKLIGHT, 0);                    /* GPIO: full brightness, no PWM yet */
-    gpio_dir(PIN_BACKLIGHT, 1);
-    gpio_set(PIN_BACKLIGHT, on);
+    bl_on = on;
+    if (!on || bl_pct >= 100) {
+        iomux(PIN_BACKLIGHT, 0);
+        gpio_dir(PIN_BACKLIGHT, 1);
+        gpio_set(PIN_BACKLIGHT, on);
+        if (pwm_on) {
+            REG(PWM_CTRL(0)) &= ~1u;
+            clk_gate(9 * 16 + 0, 0);
+            pwm_on = 0;
+        }
+        return;
+    }
+    if (!pwm_on) {
+        clk_gate(9 * 16 + 0, 1);                /* pclk_pwm0 */
+        soft_reset(1 * 16 + 7, 1);
+        udelay(1000);
+        soft_reset(1 * 16 + 7, 0);
+        REG(PWM_CTRL(0)) |= 1;
+        iomux(PIN_BACKLIGHT, 1);
+        gpio_dir(PIN_BACKLIGHT, 1);
+        pwm_on = 1;
+    }
+    uint32_t period = cpu_hz / 4 / 10000;
+    REG(PWM_DUTY(0)) = period * (100u - (uint32_t)bl_pct) / 100;
+    REG(PWM_CNT(0)) = 0;
+    REG(PWM_PERIOD(0)) = period;
+    REG(PWM_CTRL(0)) = PWM_CTRL_ON;
+    log_printf("lcd: backlight %d %%: period %u, duty %u, ctrl %x", bl_pct, REG(PWM_PERIOD(0)),
+               REG(PWM_DUTY(0)), REG(PWM_CTRL(0)));
+}
+
+void lcd_brightness(int pct)
+{
+    bl_pct = pct < 10 ? 10 : pct > 100 ? 100 : pct;
+    if (bl_on)
+        lcd_backlight(1);
 }
 
 /* Panel sleep (ST7789 DISPOFF + SLPIN, then SLPOUT + 120 ms + DISPON): the controller keeps its

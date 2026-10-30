@@ -130,7 +130,7 @@ void draw_playing(int full)
         /* the title (or the file name) at twice the size, on two lines: as much as fits (cut
          * after a space when there is one in the second half), then the rest cut with an
          * ellipsis; then the artist and the album (or the folder) */
-        const char *nm = tg.title[0] ? tg.title : q_name(q_cur), *s = nm, *s_sp = 0;
+        const char *nm = tg.title[0] && !cfg.names ? tg.title : q_name(q_cur), *s = nm, *s_sp = 0;
         char l1[96];
         int w = 0, n = 0, n_sp = 0;
         while (*s) {
@@ -154,8 +154,8 @@ void draw_playing(int full)
         l1[n] = 0;
         lcd_text_clip_x(4, 18, l1, LCD_W - 4, FG, BG, 2);
         lcd_text_clip_x(4, 50, s, LCD_W - 4, FG, BG, 2);
-        marquee_set(&mq[0], 86, tg.artist, TITLE_FG);
-        marquee_set(&mq[1], 102, tg.album[0] ? tg.album : q_folder, DIR_FG);
+        marquee_set(&mq[0], 86, cfg.names ? "" : tg.artist, TITLE_FG);     /* names: the folder */
+        marquee_set(&mq[1], 102, tg.album[0] && !cfg.names ? tg.album : q_folder, DIR_FG);
     }
     if (sk_on) {                                /* the target, how far, what the keys do */
         p = put_str(b, "go to ");
@@ -216,10 +216,8 @@ void draw_playing(int full)
 int play_key(const struct key_ev *e)
 {
     int k = e->key, ev = e->type;
-    if (k == KEY_VOLUP)
-        volume(-2);
-    else if (k == KEY_VOLDOWN)
-        volume(2);
+    if (key_is_vol(k))
+        volume((k == KEY_VOLUP) != !!cfg.swap_vol ? -2 : 2);
     else if (k == KEY_PLAY && ev == EV_PRESS) {
         if (q_playing) {
             audio_pause(!audio_paused);
@@ -253,7 +251,8 @@ int play_key(const struct key_ev *e)
         play_mode = (play_mode + 1) % MODE_COUNT;
         rnd ^= ticks();
         if (play_mode == MODE_SHUFFLE)
-            q_shuffle_new();
+            q_shuffle_new(q_cur);
+        rg_apply();                             /* auto: the album's, the track's in shuffle */
         resume_save();
     }
     return UI_QUICK;                            /* the bands redrawn, not the title: a new track */

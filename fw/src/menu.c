@@ -3,7 +3,7 @@
 
 /* ---- main menu ---- */
 static const char *const m_names[M_COUNT] = {
-    "Files", "Now playing", "Date and time", "ReplayGain: ", "USB disk, read only", "USB disk, read/write",
+    "Files", "Now playing", "Settings", "USB disk, read only", "USB disk, read/write",
     "Install a firmware (.IMG)", "System screen", "USB loader mode (exit: RST)",
 };
 
@@ -18,12 +18,7 @@ int main_menu(void)
                 uint16_t bg = i == sel ? SEL_BG : BG;
                 int y = ROW_Y0 + 16 * (i - top);
                 lcd_fill(0, y, LCD_W, 16, bg);
-                char b[48];
-                char *p = put_str(b, m_names[i]);
-                if (i == M_RG)
-                    p = put_str(p, rg_names[rg_mode]);
-                *p = 0;
-                lcd_text_clip(12, y, b, list_text_end(M_COUNT, ROWS), FG, bg);
+                lcd_text_clip(12, y, m_names[i], list_text_end(M_COUNT, ROWS), FG, bg);
             }
             list_scrollbar(ROW_Y0, ROWS, top, M_COUNT);
             dirty = 0;
@@ -36,12 +31,7 @@ int main_menu(void)
             cpu_wait();
             continue;
         }
-        if (k == KEY_PLAY && ev == EV_PRESS && sel == M_RG) {
-            rg_mode = (rg_mode + 1) % RG_MODES; /* album, track, off: changed in place */
-            rg_apply();
-            resume_save();
-            dirty = 1;
-        } else if (k == KEY_VOLUP && ev != EV_LONG) {
+        if (k == KEY_VOLUP && ev != EV_LONG) {
             list_move(&sel, &top, M_COUNT, ROWS, -1);
             dirty = 1;
         } else if (k == KEY_VOLDOWN && ev != EV_LONG) {

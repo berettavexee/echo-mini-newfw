@@ -5,16 +5,17 @@
 
 /* ---- playback ---- */
 int play_level = 80;                            /* PCM_VOL: attenuation / 2 dB, start at -40 dB */
-struct tags tg;                                 /* of the track heard */
+struct tags tg = { .rg_gain = { RG_NONE, RG_NONE } };    /* of the track heard (none yet) */
 static struct tags tg_next;                     /* of the one opened last */
 static int fresh;                               /* the output was (re)started: fade in once fed */
 static int draining;                            /* end of the queue: the DAC ring plays out */
 uint32_t heard_gen;
 
 /* ReplayGain (ETUDE §35): through the DAC volume (0.5 dB steps, no work on the samples), from the
- * moment the track is heard. Album mode takes the track gain when there is no album gain; no tag:
- * 0 dB; no preamp. Limited by the peak (when tagged) and by 0 dB of attenuation. */
-const char *const rg_names[RG_MODES] = { "album", "track", "off" };
+ * moment the track is heard. Album mode takes the track gain when there is no album gain; auto:
+ * the album's, the track's in shuffle; no tag: 0 dB; the preamp (settings) on tagged tracks only.
+ * Limited by the peak (when tagged) and by 0 dB of attenuation. */
+const char *const rg_names[RG_MODES] = { "album", "track", "off", "auto" };
 int rg_mode;
 int rg_steps;                                   /* applied to the track heard, 0.5 dB (+: louder) */
 int rg_tag = RG_NONE;                           /* its tag, 1/100 dB */
@@ -30,13 +31,15 @@ void rg_apply(void)
 {
     int g = RG_NONE, steps = 0, a = RG_ALBUM;
     uint32_t pk = 0;
-    if (rg_mode != RG_MODE_OFF) {
-        a = rg_mode == RG_MODE_ALBUM && tg.rg_gain[RG_ALBUM] != RG_NONE ? RG_ALBUM : RG_TRACK;
+    int mode = rg_mode != RG_MODE_AUTO ? rg_mode : play_mode == MODE_SHUFFLE ? RG_MODE_TRACK :
+            RG_MODE_ALBUM;
+    if (mode != RG_MODE_OFF) {
+        a = mode == RG_MODE_ALBUM && tg.rg_gain[RG_ALBUM] != RG_NONE ? RG_ALBUM : RG_TRACK;
         g = tg.rg_gain[a];
         pk = tg.rg_peak[a] ? tg.rg_peak[a] : tg.rg_peak[a ^ 1];
     }
     if (g != RG_NONE) {
-        steps = (g >= 0 ? g + 25 : g - 25) / 50;
+        steps = (g >= 0 ? g + 25 : g - 25) / 50 + 2 * cfg.rg_pre;
         if (pk) {                               /* headroom of the peak, 0.5 dB steps */
             uint32_t x = pk;
             int h = 0;

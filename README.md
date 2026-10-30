@@ -17,7 +17,7 @@ Status (version 0.89): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC a
 Musepack, gapless,
 at any sample rate from 8 to 192 kHz, with
 non-blocking sample-rate changes; folder browser with long names (FAT32 internal memory,
-FAT32 or exFAT microSD card); resume, ReplayGain (album / track / off), seek on the bar,
+FAT32 or exFAT microSD card); resume, ReplayGain (album / track / auto / off, preamp), a settings screen (screen timeout, brightness, sleep timer…), seek on the bar,
 play modes, real-time clock, USB mass storage of the internal memory, power saving in
 pause, low-battery warning and power off, charging screen. No equaliser.
 

@@ -11,12 +11,10 @@ enum { SCR_BROWSER, SCR_PLAYING };
 #ifndef PARK_MS
 #define PARK_MS     60000u                      /* a pause this long: the track is parked */
 #endif
-#ifndef AUTO_OFF_MS
-#define AUTO_OFF_MS 600000u                     /* nothing played, no key: power off */
-#endif
 
 /* Power saving while nothing plays (ETUDE §30): parked after PARK_MS of pause; with the screen
- * off, the clocks on the crystal; AUTO_OFF_MS without a key, off (not with USB power) */
+ * off, the clocks on the crystal; nothing played and no key for auto_off_ms() (the settings), off
+ * (not with USB power) */
 static void power_service(uint32_t key_ms)
 {
     uint32_t idle = millis() - key_ms;
@@ -31,8 +29,10 @@ static void power_service(uint32_t key_ms)
     static int off_tried;                       /* still powered after an attempt: wait again */
     static uint32_t t_off;
     int quiet = !q_playing && sys_screen_is_off();
-    if (quiet && !vbus() && idle > AUTO_OFF_MS && (!off_tried || millis() - t_off > AUTO_OFF_MS)) {
-        sys_power_off("no key for 10 min");
+    uint32_t off_ms = auto_off_ms();
+    if (off_ms && !q_playing && !vbus() && idle > off_ms &&
+        (!off_tried || millis() - t_off > off_ms)) {
+        sys_power_off("no key, nothing played");
         off_tried = 1;
         t_off = millis();
     }
@@ -44,6 +44,31 @@ static void power_service(uint32_t key_ms)
         clock_low(0);
         log_printf("ui: clocks back on the PLL, %u MHz", cpu_hz / 1000000);
     }
+}
+
+/* The sleep timer (settings) ended: the music faded out over 5 s, paused, power off (paused
+ * where it was at the next start) */
+static void sleep_service(void)
+{
+    if (!sleep_at || (int32_t)(millis() - sleep_at) < 0)
+        return;
+    sleep_cancel();
+    log_printf("ui: sleep timer ended");
+    if (q_playing && !audio_paused && audio.on && audio.vol != 0xff) {
+        for (uint32_t t0 = millis(), v0 = audio.vol, v = v0; v < 0xfe;) {
+            sys_idle();
+            ui_background();
+            cpu_wait();
+            uint32_t t = millis() - t0 < 5000 ? millis() - t0 : 5000;
+            uint32_t want = v0 + (0xfe - v0) * t / 5000;
+            if (want > v)
+                audio_volume((uint8_t)(v = want), 0);
+        }
+        audio_pause(1);
+        rg_apply();                             /* the volume put back for PLAY */
+        resume_save();
+    }
+    sys_power_off("sleep timer");               /* (returns when the USB cable powers us) */
 }
 
 /* Low battery (ETUDE §43), without USB power: the mean of the last 10 readings (one a second).
@@ -157,8 +182,8 @@ static void menu_open(int *scr)
     int m = main_menu();
     if (m == M_FILES)
         *scr = SCR_BROWSER;
-    else if (m == M_CLOCK)
-        clock_screen();
+    else if (m == M_SETTINGS)
+        settings_screen();
     else if (m == M_PLAYING)
         *scr = SCR_PLAYING;
     else if (m >= M_USB_RO) {
@@ -203,6 +228,7 @@ void ui_main(void)
         ui_background();
         audio_power_service();
         power_service(key_ms);
+        sleep_service();
         int bat = battery_service();
         if (bat == BAT_REDRAW)
             full = b_dirty = 1;
@@ -261,7 +287,7 @@ void ui_main(void)
                 sys_screen_set(1);
                 ev = EV_NONE;
             }
-        } else if (!sys_screen_is_off() && ticks() - t_key > SCREEN_TIMEOUT_US)
+        } else if (!sys_screen_is_off() && ticks() - t_key > screen_timeout_us())
             sys_screen_set(0);
         if (sk_on && (millis() - sk_key_ms > SEEK_IDLE_MS || sk_cur != q_cur ||
                       (!q_playing && !parked))) {

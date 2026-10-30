@@ -36,11 +36,11 @@ pressed in a pocket does not change the track or the volume.
 
 | Action | Result |
 |---|---|
-| Power, player off | starts the player; it resumes where it was (folder, track, position, volume, play mode) |
+| Power, player off | starts the player; it resumes where it was (folder, track, position, volume, play mode), or as set in Settings, "At power on" |
 | Power, short press | switches the screen off or on; the music goes on |
 | Power held 2 s | powers off; the position is saved |
 
-The screen goes off by itself after 30 s without a key.
+The screen goes off by itself after 30 s without a key (Settings: "Screen off after").
 
 **With the USB cable**: plugging the cable into a player that is off shows the **charging
 screen**:
@@ -118,8 +118,8 @@ page), after a short silence: about 0.2 s (Vorbis) or 0.3 s (Opus).
 
 - A pause of 1 min "parks" the track: the DACs and the HiFi core stop to save the battery.
   PLAY starts it again where it was, after a short delay.
-- With nothing playing and the screen off, the player powers off after 10 min without a key,
-  unless the USB cable is in.
+- With nothing playing, the player powers off after 10 min without a key, unless the USB cable
+  is in (Settings: "Power off when idle").
 
 ## The folder browser
 
@@ -161,8 +161,7 @@ is open, except for the USB and system entries, which stop it.
 |---|---|
 | Files | the folder browser |
 | Now playing | the play screen |
-| Date and time | sets the clock (below) |
-| ReplayGain: album / track / off | PLAY changes it in place. **album**: the album gain, or the track gain when the file has no album gain; **track**: the track gain; **off**: no gain. Limited by the peak tag, so that a track never clips |
+| Settings | the settings screen (below) |
 | USB disk, read only | the internal memory as a USB disk; the computer can read it but not write to it |
 | USB disk, read/write | the same, and the computer can write to it (copy music, firmware images) |
 | Install a firmware (.IMG) | the installer (see "Installing") |
@@ -175,7 +174,38 @@ is open, except for the USB and system entries, which stop it.
   the clock was not set or was behind that file.
 - The microSD card is not available over USB yet.
 
+### Settings
+
+![Settings screen](docs/manual/settings.png)
+
+| Key | Action |
+|---|---|
+| **VOL+** / **VOL-** | move up / down |
+| **PLAY** | next value (after the last one, back to the first) |
+| **PLAY held** | previous value |
+| **BACK** or **MENU** | close the screen; the settings are saved |
+
+Each change takes effect at once. The settings are kept with the resume state and survive a
+power off (except the sleep timer).
+
+| Setting | Values | Default |
+|---|---|---|
+| Date and time | shows the date and time; PLAY opens the clock screen (below) | |
+| Screen off after | 10 s, 30 s, 1 min, 2 min, 5 min, never | 30 s |
+| Brightness | 10 % to 100 % | 100 % |
+| Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder | tags |
+| ReplayGain | **album**: the album gain, or the track gain when the file has no album gain; **track**: the track gain; **auto**: album, but track in shuffle; **off**: no gain. Limited by the peak tag, so that a track never clips | album |
+| ReplayGain preamp | -6 dB to +6 dB, added to the gain of tagged tracks (still limited by the peak) | 0 dB |
+| At power on | **resume playing**: the track plays again where it was; **resume paused**: the track waits there, PLAY on the play screen starts it; **browser**: only the folder is shown | resume playing |
+| Sleep timer | off, 15, 30, 45, 60, 90 min; shows the minutes left. At the end the music fades out over 5 s, pauses, and the player powers off (it resumes paused there) | off |
+| Power off when idle | 5, 10, 20, 30 min, never: nothing played and no key for that long (not with the USB cable) | 10 min |
+| Swap VOL+ and VOL- | the volume keys of the play screen swapped (lists and seek unchanged) | no |
+| Restore the defaults | PLAY puts back all the defaults above | |
+
 ### Date and time
+
+Settings, first line, PLAY.
+
 
 ![Date and time screen, the year selected](docs/manual/date-and-time.png)
 

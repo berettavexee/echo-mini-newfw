@@ -18,6 +18,7 @@ Last update: 2026-10-29, version 0.95.
 | Play queue (folder, or everything under a folder), modes: in order, repeat all, repeat one, shuffle | 0.4x | §25 |
 | Resume after power off (folder, track, position, volume, modes), also on the card | 0.4x, 0.58 | §25, §38 |
 | ReplayGain album / track / off (FLAC, Vorbis, Opus R128, MP3 ID3v2, APEv2, iTunes), track gain shown on yellow | 0.55, 0.59 | §35 |
+| Settings screen: screen timeout, brightness (backlight PWM), tags or file names, ReplayGain auto and preamp, start-up, sleep timer, power off when idle, swapped volume keys | 0.96 | §81 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
 | USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
@@ -125,11 +126,10 @@ One line per version; the measurements are in `ETUDE.md`.
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;
   - folder jumping: at the end of a folder, go on with the next one;
-  - key layouts: modes, swapped volume keys, volume on short or double press.
+  - key layouts: modes, volume on short or double press (swapped volume keys: 0.96).
 - Settings and system:
-  - a settings screen: screen timeout or always on, brightness, sleep timer, power off after a
-    pause (10 min today), default play mode;
-  - settings kept in a file of their own, not only in the resume state;
+  - settings: a text file on the internal memory to set them from a computer (they are kept in
+    the resume state's sector today, §81); a default play mode;
   - an information screen: version, supported formats, free space on the internal memory and
     the card;
   - delete a file from the browser (needs writing to FAT32 and exFAT: read only today);
@@ -142,7 +142,6 @@ One line per version; the measurements are in `ETUDE.md`.
 - To check on the device rather than add: the 4.4 mm balanced output (the plug is detected,
   nothing is specific to it; check by ear, and whether the stock firmware sets the DACs
   differently for it).
-- Backlight: always at full brightness, no PWM setting yet.
 
 ## Ideas, not decided
 
@@ -161,7 +160,6 @@ One line per version; the measurements are in `ETUDE.md`.
   - enough for most MODs, the small S3Ms, few ITs.
 - Album covers (skipped today).
 - M3U playlists.
-- ReplayGain preamp (a setting of the settings screen).
 - A spoken "battery low" instead of the beeps: a short recording in the image (15-30 KiB), made
   with a speech synthesiser whose licence lets us ship the sound.
 - ALAC: the predictor (63 % of our decoder's time, §57) on the HIFIACC's adaptive FIR, as the

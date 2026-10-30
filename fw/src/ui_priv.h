@@ -4,7 +4,8 @@
  *   queue.c      play queue and play modes
  *   playback.c   tracks from the queue: open, chain, skip, stop, park, volume, ReplayGain, seek
  *   playscreen.c the play screen and its keys
- *   menu.c       main menu, date and time
+ *   menu.c       main menu, date and time screen
+ *   settings.c   settings: their screen, values and storage (with the resume state)
  *   resume.c     resume state
  *   uidraw.c     drawing helpers */
 #ifndef UI_PRIV_H
@@ -104,7 +105,7 @@ extern int play_mode;
 extern uint32_t rnd;
 int q_next_index(int i, int user);              /* the track after i, or -1: end of the queue */
 int q_prev_index(int i);                        /* the track before i (BACK), or -1 */
-void q_shuffle_new(void);                       /* another shuffled order */
+void q_shuffle_new(int from);                   /* another shuffled order, from track 'from' */
 void q_from_dir(int start);
 void q_from_tree(const struct fat_dir *top, const char *name);
 void q_clear(void);
@@ -117,7 +118,7 @@ void q_set_codec(int i, uint32_t codec);
 /* ---- playback.c ---- */
 extern struct tags tg;                          /* of the track heard */
 extern uint32_t heard_gen;                      /* goes up when the track heard changes */
-enum { RG_MODE_ALBUM, RG_MODE_TRACK, RG_MODE_OFF, RG_MODES };
+enum { RG_MODE_ALBUM, RG_MODE_TRACK, RG_MODE_OFF, RG_MODE_AUTO, RG_MODES };   /* as saved */
 extern const char *const rg_names[RG_MODES];
 extern int rg_mode, rg_steps, rg_tag, rg_src;
 void rg_apply(void);
@@ -152,10 +153,31 @@ int play_key(const struct key_ev *e);
 int seek_key(const struct key_ev *e);
 
 /* ---- menu.c ---- */
-enum { M_FILES, M_PLAYING, M_CLOCK, M_RG, M_USB_RO, M_USB_RW, M_INSTALL, M_SYSTEM, M_LOADER,
+enum { M_FILES, M_PLAYING, M_SETTINGS, M_USB_RO, M_USB_RW, M_INSTALL, M_SYSTEM, M_LOADER,
        M_COUNT };
 int main_menu(void);
 void clock_screen(void);
+
+/* ---- settings.c ---- */
+enum { START_PLAY, START_PAUSED, START_BROWSER, START_COUNT };
+struct settings {
+    uint8_t screen;                             /* screen off after: an index (settings.c) */
+    uint8_t bright;                             /* backlight, 1 to 10 (10 % steps) */
+    uint8_t names;                              /* play screen: the file name, not the tags */
+    uint8_t start;                              /* at power on: START_* */
+    uint8_t auto_off;                           /* power off when idle: an index */
+    uint8_t swap_vol;                           /* VOL+ and VOL- swapped (the volume) */
+    int8_t rg_pre;                              /* ReplayGain preamp, dB */
+    uint8_t spare;
+};
+extern struct settings cfg;
+extern uint32_t sleep_at;                       /* the sleep timer ends (millis), 0: off */
+uint32_t screen_timeout_us(void);               /* 0xffffffff: never */
+uint32_t auto_off_ms(void);                     /* 0: never */
+void sleep_cancel(void);
+void settings_screen(void);
+uint32_t settings_put(uint32_t *w);             /* into the state sector (64 words): its sum */
+void settings_get(const uint32_t *w);           /* from it, when valid; then applied */
 
 /* ---- resume.c ---- */
 void resume_save(void);

@@ -195,9 +195,24 @@ static int perm(int p, int inv)
     return (int)x;
 }
 
-void q_shuffle_new(void)                        /* another shuffled order */
+/* The order is the permutation turned by q_base: track 'from' (the one heard when the shuffle
+ * starts, -1: none) first, then all the others before any comes again */
+static int q_base;
+
+static int shuf_pos(int i)                      /* track -> its place in the shuffled order */
+{
+    return (perm(i, 1) - q_base + q_n) % q_n;
+}
+
+static int shuf_at(int p)                       /* place -> track */
+{
+    return perm((p + q_base) % q_n, 0);
+}
+
+void q_shuffle_new(int from)                    /* another shuffled order, from track 'from' */
 {
     q_seed = rnd_next();
+    q_base = from >= 0 && from < q_n ? perm(from, 1) : 0;
 }
 
 int q_next_index(int i, int user)        /* the track after i, or -1: end of the queue */
@@ -207,12 +222,11 @@ int q_next_index(int i, int user)        /* the track after i, or -1: end of the
     if (play_mode == MODE_REPEAT_ONE && !user)
         return i;
     if (play_mode == MODE_SHUFFLE && q_n > 1) {
-        int p = perm(i, 1) + 1;
+        int p = shuf_pos(i) + 1;
         if (p < q_n)
-            return perm(p, 0);
-        q_shuffle_new();                        /* all played: another order, not i first */
-        int j = perm(0, 0);
-        return j != i ? j : perm(1, 0);
+            return shuf_at(p);
+        q_shuffle_new(i);                       /* all played: another order, after i */
+        return shuf_at(1);
     }
     if (i + 1 < q_n)
         return i + 1;
@@ -222,8 +236,8 @@ int q_next_index(int i, int user)        /* the track after i, or -1: end of the
 int q_prev_index(int i)                  /* the track before i (BACK), or -1 */
 {
     if (play_mode == MODE_SHUFFLE && q_n > 1) {
-        int p = perm(i, 1);
-        return p > 0 ? perm(p - 1, 0) : -1;
+        int p = shuf_pos(i);
+        return p > 0 ? shuf_at(p - 1) : -1;
     }
     return i - 1;
 }
@@ -235,7 +249,7 @@ static void q_done(const char *name, uint32_t t0)
     for (int f = 0; f < qd_n; f++)
         q_n += qd[f].count;
     slots_clear();
-    q_shuffle_new();
+    q_shuffle_new(-1);
     copy_name(q_folder, name, sizeof q_folder);
     log_printf("ui: %d tracks in %d folders under %s, %u ms", q_n, qd_n, name,
                (ticks() - t0) / 1000);
@@ -279,10 +293,12 @@ void q_from_dir(int start)
         for (int k = ql_files; k < ql.n; k++)
             if (ql.e[ql.order[k]].cluster == e->cluster) {
                 q_cur = k - ql_files;
-                return;
+                break;
             }
         break;
     }
+    if (play_mode == MODE_SHUFFLE)
+        q_shuffle_new(q_cur);                   /* the one chosen first, then the others */
 }
 
 /* PLAY held on a folder: everything under it, the files of each folder in order, then its
@@ -328,5 +344,5 @@ void q_from_tree(const struct fat_dir *top, const char *name)
     if (lost)
         log_printf("ui: %d folders left out (%d at most)", lost, Q_DIRS);
     q_done(name, t0);
-    q_cur = 0;
+    q_cur = play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;     /* shuffle: from anywhere */
 }

@@ -48,6 +48,14 @@
 #define SARADC_STAS         (SARADC_BASE + 0x04)  /* bit 0: busy */
 #define SARADC_CTRL         (SARADC_BASE + 0x08)  /* 2:0 channel, 4 power (starts a conversion) */
 
+/* PWM0, channel n at +0x10 n (ETUDE §3.3): the backlight on channel 0 */
+#define PWM0_BASE           0x400f0000u
+#define PWM_CNT(n)          (PWM0_BASE + 0x10 * (n) + 0x0)
+#define PWM_PERIOD(n)       (PWM0_BASE + 0x10 * (n) + 0x4)  /* in PCLK cycles */
+#define PWM_DUTY(n)         (PWM0_BASE + 0x10 * (n) + 0x8)  /* the part on */
+#define PWM_CTRL(n)         (PWM0_BASE + 0x10 * (n) + 0xc)
+#define PWM_CTRL_ON         0x00010003u                     /* the stock firmware's value */
+
 /* Watchdog (DesignWare WDT) */
 #define WDT_BASE            0x40120000u
 #define WDT_CRR             (WDT_BASE + 0x0c)

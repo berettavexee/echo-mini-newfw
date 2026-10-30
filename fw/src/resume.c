@@ -1,5 +1,6 @@
 /* Resume state (ETUDE §25, §38): the folder, the selection and the track (where it was), the
- * volume and the modes, kept in the last sector of the log file (log_state_*) */
+ * volume and the modes, kept in the last sector of the log file (log_state_*), the settings
+ * (settings.c) at word 64 of it */
 #include "ui_priv.h"
 
 #define offsetof(t, m) __builtin_offsetof(t, m)
@@ -44,9 +45,10 @@ void resume_save(void)
     r->mode = (uint32_t)(play_mode | rg_mode << 8);    /* rg_mode 0 (album) before 0.55 */
     r->pos_ms = parked ? parked_ms : q_playing ? player_heard.time_ms : 0;
     r->sum = rs_sum(r);
-    if (r->sum == rs_last_sum)
+    uint32_t sum = r->sum ^ settings_put(rs_buf + 64);
+    if (sum == rs_last_sum)
         return;                                 /* nothing changed: no write */
-    rs_last_sum = r->sum;
+    rs_last_sum = sum;
     log_state_write(rs_buf);
 }
 
@@ -73,13 +75,15 @@ static int find_entry(const struct fat_dirent *d, void *ctx)
 void resume_load(void)
 {
     struct resume *r = (struct resume *)rs_buf;
-    if (log_state_read(rs_buf) || r->sum != rs_sum(r) ||
+    int bad = log_state_read(rs_buf);
+    settings_get(rs_buf + 64);                  /* the defaults when there are none */
+    if (bad || r->sum != rs_sum(r) ||
         (__builtin_memcmp(r->magic, "NEWFWSTATE 3", 12) &&
          __builtin_memcmp(r->magic, "NEWFWSTATE 2", 12)) || (r->depth & 0xff) >= DEPTH_MAX - 1)
         return;
     /* state 2 (before 0.58): no top level, index 0 was the internal root */
     int old = r->magic[11] == '2', saved = (int)(r->depth & 0xff) + old, v = (int)(r->depth >> 8);
-    rs_last_sum = r->sum;
+    rs_last_sum = r->sum ^ settings_put(rs_buf + 64);
     if (r->level <= 0xfe)
         play_level = (int)r->level;
     if ((r->mode & 0xff) < MODE_COUNT)
@@ -118,20 +122,22 @@ void resume_load(void)
     log_printf("ui: resume: %s, depth %d (%d saved), track %x at %u ms, playing %u, -%u dB",
                v == FAT_VOL_SD ? "card" : "internal", depth, saved, r->track, r->pos_ms,
                r->playing, (uint32_t)play_level / 2);
-    if (!r->track || depth != saved)
-        return;
+    if (!r->track || depth != saved || cfg.start == START_BROWSER)
+        return;                                 /* (the setting: the folder only) */
     for (int i = 0; i < dir_n; i++)
         if (!(ent(i)->flags & F_DIR) && ent(i)->cluster == r->track) {
             path[depth].sel = i;
             if (path[depth].sel < path[depth].top || path[depth].sel >= path[depth].top + ROWS)
                 path[depth].top = i > ROWS / 2 ? i - ROWS / 2 : 0;
             q_from_dir(i);
-            if (r->playing) {                   /* where it was, two seconds before */
-                player_seek_hint(r->pos_ms > 2000 ? r->pos_ms - 2000 : 0);
+            uint32_t pos = r->playing && r->pos_ms > 2000 ? r->pos_ms - 2000 : r->playing ? 0 :
+                           r->pos_ms;           /* playing: two seconds before */
+            if (r->playing && cfg.start == START_PLAY) {
+                player_seek_hint(pos);
                 play_index(q_cur);
-            } else if (r->pos_ms) {             /* paused: PLAY goes on from there */
+            } else if (r->playing || pos) {     /* paused: PLAY goes on from there */
                 parked = 1;
-                parked_ms = r->pos_ms;
+                parked_ms = pos;
             }
             return;
         }
