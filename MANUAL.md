@@ -68,7 +68,10 @@ From top to bottom:
    - the play mode, unless it is "in order";
    - the clock;
    - the battery. "CHG" means charging and "USB" means charged, with the cable in. The
-     battery turns red under 3.425 V.
+     percent follows the voltage over about a minute, so it does not jump when a track starts;
+     on battery it only goes down (a pause lets the voltage rise a little: that is not shown),
+     and while charging it stops at 99 % until the charger has finished. The battery turns red
+     under 3.425 V.
 2. **The title**, or the file name when the file has no title tag.
 3. **The artist and the album**, or the folder when the file has no album tag. They scroll when
    too long.
@@ -192,7 +195,7 @@ power off (except the sleep timer).
 |---|---|---|
 | Date and time | shows the date and time; PLAY opens the clock screen (below) | |
 | Screen off after | 10 s, 30 s, 1 min, 2 min, 5 min, never | 30 s |
-| Brightness | 10 % to 100 % | 100 % |
+| Brightness | 10 steps: 8, 12, 17, 23, 30, 39, 50, 63, 80, 100 % (even steps to the eye) | 100 % |
 | Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder | tags |
 | ReplayGain | **album**: the album gain, or the track gain when the file has no album gain; **track**: the track gain; **auto**: album, but track in shuffle; **off**: no gain. Limited by the peak tag, so that a track never clips | album |
 | ReplayGain preamp | -6 dB to +6 dB, added to the gain of tagged tracks (still limited by the peak) | 0 dB |

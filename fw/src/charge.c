@@ -49,7 +49,7 @@ static void draw_level(unsigned pct, int full, int blink)
         lcd_fill(x0 + i * sw, CH_Y + 7, sw - 3, CH_H - 14, on ? CH_FG : BG);
     }
     char b[24], *p = put_str(b, full ? "Charged " : "Charging ");
-    p = put_dec(p, full ? 100 : pct);
+    p = put_dec(p, full ? 100 : pct > 99 ? 99 : pct);     /* 100: when the charger says so */
     p = put_str(p, "%");
     *p = 0;
     lcd_fill(0, 116, LCD_W, 26, BG);

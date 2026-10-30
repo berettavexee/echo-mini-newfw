@@ -374,7 +374,7 @@ void lcd_backlight(int on)
 
 void lcd_brightness(int pct)
 {
-    bl_pct = pct < 10 ? 10 : pct > 100 ? 100 : pct;
+    bl_pct = pct < 1 ? 1 : pct > 100 ? 100 : pct;
     if (bl_on)
         lcd_backlight(1);
 }

@@ -10,6 +10,8 @@ uint32_t sleep_at;
 static const uint16_t screen_s[] = { 10, 30, 60, 120, 300, 0 };     /* 0: never */
 static const uint8_t auto_off_min[] = { 5, 10, 20, 30, 0 };
 static const uint8_t sleep_min[] = { 0, 15, 30, 45, 60, 90 };       /* 0: off */
+/* The backlight of each step, %: about x1.3 a step, even steps to the eye (EchoPod's curve) */
+static const uint8_t bright_pct[10] = { 8, 12, 17, 23, 30, 39, 50, 63, 80, 100 };
 #define N(a) (int)(sizeof(a) / sizeof(a)[0])
 static int sleep_sel;                                               /* in sleep_min */
 
@@ -72,11 +74,11 @@ void settings_get(const uint32_t *w)
         cfg.swap_vol = cfg.swap_vol != 0;
         if (cfg.rg_pre < -6 || cfg.rg_pre > 6)
             cfg.rg_pre = 0;
-        log_printf("ui: settings: screen %u, brightness %u0 %%, %s, RG preamp %d dB, start %u, "
-                   "off %u, swap %u", cfg.screen, cfg.bright, cfg.names ? "names" : "tags",
+        log_printf("ui: settings: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
+                   "off %u, swap %u", cfg.screen, bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags",
                    cfg.rg_pre, cfg.start, cfg.auto_off, cfg.swap_vol);   /* RG mode: resume.c */
     }
-    lcd_brightness(cfg.bright * 10);            /* (ReplayGain: when a track is heard) */
+    lcd_brightness(bright_pct[cfg.bright - 1]); /* (ReplayGain: when a track is heard) */
 }
 
 /* ---- the screen: VOL+/VOL- the line, PLAY the next value, PLAY held the one before,
@@ -142,7 +144,7 @@ static void value_text(int i, char *b)
             p = put_min(p, screen_s[cfg.screen] / 60u);
         break;
     case S_BRIGHT:
-        p = put_dec(p, cfg.bright * 10u);
+        p = put_dec(p, bright_pct[cfg.bright - 1]);
         p = put_str(p, " %");
         break;
     case S_NAMES:
@@ -191,7 +193,7 @@ static void change(int i, int d)
         break;
     case S_BRIGHT:
         cfg.bright = (uint8_t)(step(cfg.bright - 1, 10, d) + 1);
-        lcd_brightness(cfg.bright * 10);
+        lcd_brightness(bright_pct[cfg.bright - 1]);
         break;
     case S_NAMES:
         cfg.names ^= 1;
@@ -228,7 +230,7 @@ static void change(int i, int d)
         cfg = defaults;
         rg_mode = RG_MODE_ALBUM;
         sleep_cancel();
-        lcd_brightness(cfg.bright * 10);
+        lcd_brightness(bright_pct[cfg.bright - 1]);
         rg_apply();
         log_printf("ui: settings: the defaults");
         break;

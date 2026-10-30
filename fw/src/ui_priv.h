@@ -122,6 +122,8 @@ enum { RG_MODE_ALBUM, RG_MODE_TRACK, RG_MODE_OFF, RG_MODE_AUTO, RG_MODES };   /*
 extern const char *const rg_names[RG_MODES];
 extern int rg_mode, rg_steps, rg_tag, rg_src;
 void rg_apply(void);
+unsigned battery_shown(void);                  /* the battery percent shown (ui.c) */
+unsigned battery_avg_mv(void);                 /* its voltage, a mean of about a minute */
 extern int parked;
 extern uint32_t parked_ms;
 enum { STOP_NOW, STOP_SKIP, STOP_DRAIN };
@@ -162,7 +164,7 @@ void clock_screen(void);
 enum { START_PLAY, START_PAUSED, START_BROWSER, START_COUNT };
 struct settings {
     uint8_t screen;                             /* screen off after: an index (settings.c) */
-    uint8_t bright;                             /* backlight, 1 to 10 (10 % steps) */
+    uint8_t bright;                             /* backlight, step 1 to 10 (settings.c) */
     uint8_t names;                              /* play screen: the file name, not the tags */
     uint8_t start;                              /* at power on: START_* */
     uint8_t auto_off;                           /* power off when idle: an index */

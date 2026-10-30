@@ -15,19 +15,14 @@ static void seek_bar(int y, int h, uint32_t pos, uint32_t target, uint32_t len)
     lcd_fill(t - 1, y - 2, 3, h + 5, SK_FG);
 }
 
-/* Battery: the curve measured on the device (board.c) on the voltage (read every 5 s), and the USB plug: "CHG"
- * while charging, "USB" once charged */
+/* Battery: the percent shown (ui.c: a mean of a minute, steady), and the USB plug: "CHG" while
+ * charging, "USB" once charged */
 static int battery_low;                         /* under 3,425 mV without USB: shown in red */
 
 static char *battery_text(char *p)
 {
-    static uint32_t t_read, last_mv;
-    if (!last_mv || ticks() - t_read > 5000000) {
-        t_read = ticks();
-        last_mv = battery_mv();
-        battery_low = !vbus() && last_mv < 3425;   /* = BAT_WARN_MV (ui.c) */
-    }
-    uint32_t v = battery_pct(last_mv);
+    battery_low = !vbus() && battery_avg_mv() < 3425;    /* = BAT_WARN_MV (ui.c) */
+    uint32_t v = battery_shown();
     if (vbus())
         p = put_str(p, charging() ? "CHG " : "USB ");
     p = put_dec(p, v);

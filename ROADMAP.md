@@ -20,6 +20,7 @@ Last update: 2026-10-30, version 0.96.
 | ReplayGain album / track / off (FLAC, Vorbis, Opus R128, MP3 ID3v2, APEv2, iTunes), track gain shown on yellow | 0.55, 0.59 | §35 |
 | Tags and ReplayGain found after a large cover (Ogg, FLAC, ID3v2: up to 16 MiB) and in an APEv2 tag holding a cover | 0.96 | §81 |
 | Settings screen: screen timeout, brightness (backlight PWM), tags or file names, ReplayGain auto and preamp, start-up, sleep timer, power off when idle, swapped volume keys | 0.96 | §81 |
+| Brightness in ten perceptual steps (8 to 100 %, about x1.3 a step) | 0.97 | §82 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
 | USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
@@ -43,7 +44,10 @@ Last update: 2026-10-30, version 0.96.
 
 ## Waiting for a test on the device
 
-Nothing at the moment.
+- A steady battery percent (0.97): the mean of a minute of readings, moving freely only down on
+  battery and up on USB, never 100 % while charging (§82); to check: no jump when a track
+  starts or the screen comes on, nothing odd when plugging and unplugging the cable. A first
+  short session (full battery) showed no regression; a long one, half charged, is still needed.
 
 ## Version history
 
@@ -116,13 +120,9 @@ One line per version; the measurements are in `ETUDE.md`.
   battery, keys), send key events and commands (play a file, seek, change a setting), and run
   scripted test sequences from the PC (a vendor USB interface or a second function beside the
   mass storage, to be designed).
-- Brightness on a non-linear curve: the ten steps are linear today (10 to 100 %), and the low
-  ones look alike to the eye; a perceptual curve such as EchoPod's (8, 12, 17, 23, 30, 39, 50,
-  63, 80, 100 %), the dimmest step checked in the dark.
-- Battery gauge: compare ours (§65) with EchoPod's (an average of the last 64 readings, about a
-  minute, through an 11-point curve from 3,450 to 4,200 mV; 50 mV less while charging and never
-  over 99 %; the shown percent only moves one way on each power source), over a full discharge
-  logged on the device.
+- The charging lift: the voltage read while charging, against the same charge without the
+  cable, over a logged charge, for a correction of the percent shown while charging (EchoPod
+  takes 50 mV off; 0.97 only stops at 99 %).
 - Key lock: a special key combination locks and unlocks the keys, against accidental presses
   in a pocket or a bag (the combination, what stays active when locked and what the screen
   shows to be proposed and agreed first; the key events of keys.c make it a filter in one

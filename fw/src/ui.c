@@ -71,6 +71,51 @@ static void sleep_service(void)
     sys_power_off("sleep timer");               /* (returns when the USB cable powers us) */
 }
 
+/* The battery shown (ETUDE §82): the mean of the last 64 readings, one a second (about a minute:
+ * a track starting, card reads or the backlight do not show), started again from the latest
+ * reading when the USB power comes or goes; then a percent that moves freely one way only, down
+ * on battery and up on USB, and the other way by 10 points or more; while charging, never 100 %
+ * (the charger's current lifts the voltage near full). */
+#define GAUGE_N 64
+static uint16_t gauge_mv[GAUGE_N];
+static uint32_t gauge_sum;
+static int gauge_i, gauge_usb = -1, gauge_shown = -1;
+
+static void gauge_add(uint32_t mv)
+{
+    int usb = vbus();
+    if (usb != gauge_usb) {
+        for (int i = 0; i < GAUGE_N; i++)
+            gauge_mv[i] = (uint16_t)mv;
+        gauge_sum = mv * GAUGE_N;
+        gauge_usb = usb;
+    } else {
+        gauge_sum = gauge_sum - gauge_mv[gauge_i] + mv;
+        gauge_mv[gauge_i] = (uint16_t)mv;
+        gauge_i = (gauge_i + 1) % GAUGE_N;
+    }
+    int pct = (int)battery_pct(gauge_sum / GAUGE_N);
+    if (usb && charging() && pct > 99)
+        pct = 99;
+    if (gauge_shown < 0 || (usb ? pct > gauge_shown || pct <= gauge_shown - 10 :
+                                  pct < gauge_shown || pct >= gauge_shown + 10))
+        gauge_shown = pct;
+}
+
+unsigned battery_avg_mv(void)
+{
+    if (gauge_shown < 0)
+        gauge_add(battery_mv());
+    return gauge_sum / GAUGE_N;
+}
+
+unsigned battery_shown(void)
+{
+    if (gauge_shown < 0)
+        gauge_add(battery_mv());
+    return (unsigned)gauge_shown;
+}
+
 /* Low battery (ETUDE §43), without USB power: the mean of the last 10 readings (one a second).
  * Under BAT_WARN_MV: a warning (banner; with music, three beeps, then one every 5 min), again
  * only once above BAT_REARM_MV. Under BAT_OFF_MV for BAT_OFF_MS: two low beeps, a pause, the
@@ -112,6 +157,8 @@ static int battery_service(void)
     if (millis() - t_read < 1000)
         return BAT_OK;
     t_read = millis();
+    uint32_t now_mv = battery_mv();
+    gauge_add(now_mv);
     if (vbus()) {                               /* charging: the reading means nothing */
         n = warned = beep_due = 0;
         under_ms = 0;
@@ -119,7 +166,7 @@ static int battery_service(void)
     }
     for (int i = 9; i > 0; i--)
         mv[i] = mv[i - 1];
-    mv[0] = battery_mv();
+    mv[0] = now_mv;
     if (n < 10 && ++n < 10)
         return BAT_OK;
     uint32_t sum = 0;

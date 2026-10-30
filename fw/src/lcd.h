@@ -25,7 +25,7 @@ void lcd_text_scroll(int x, int y, const char *s, int xmax, int off, int gap, ui
                      uint16_t bg);  /* s scrolled left by off pixels, then gap, then s again */
 int lcd_text_clip_x(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t bg, int sc);
 void lcd_backlight(int on);
-void lcd_brightness(int pct);   /* 10 to 100 %, applied at once when the backlight is on */
+void lcd_brightness(int pct);   /* 1 to 100 %, applied at once when the backlight is on */
 void lcd_sleep(int on);         /* panel asleep (backlight apart); waking takes 120 ms */
 void lcd_wake_fault(void);
 
