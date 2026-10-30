@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-29, version 0.95.
+Last update: 2026-10-30, version 0.96.
 
 ## Done, validated on the device
 
@@ -18,6 +18,7 @@ Last update: 2026-10-29, version 0.95.
 | Play queue (folder, or everything under a folder), modes: in order, repeat all, repeat one, shuffle | 0.4x | §25 |
 | Resume after power off (folder, track, position, volume, modes), also on the card | 0.4x, 0.58 | §25, §38 |
 | ReplayGain album / track / off (FLAC, Vorbis, Opus R128, MP3 ID3v2, APEv2, iTunes), track gain shown on yellow | 0.55, 0.59 | §35 |
+| Tags and ReplayGain found after a large cover (Ogg, FLAC, ID3v2: up to 16 MiB) and in an APEv2 tag holding a cover | 0.96 | §81 |
 | Settings screen: screen timeout, brightness (backlight PWM), tags or file names, ReplayGain auto and preamp, start-up, sleep timer, power off when idle, swapped volume keys | 0.96 | §81 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
@@ -81,6 +82,12 @@ One line per version; the measurements are in `ETUDE.md`.
   35 folders, 60 ms on the device); shuffle as a permutation of all the tracks (§79). The
   emulator about 2.5 times faster (SYNTH in numpy, the idle loop and lcd_fill shortcuts, --ms)
   (§80).
+- 0.96: the settings screen (screen timeout, brightness by PWM, tags or file names, ReplayGain
+  auto and preamp, start-up, sleep timer, power off when idle, swapped volume keys); shuffle
+  starts from the track chosen; fixes: tags after a cover of 512 KiB or more (Opus whose
+  comments put the picture in the middle) and Musepack tags with a cover were lost (§81). New
+  emulator scenarios: a real album's ReplayGain, a library of 18,260 tracks in 1,396 folders,
+  large covers; two scenarios at a time at most.
 
 ## To do
 
@@ -111,6 +118,10 @@ One line per version; the measurements are in `ETUDE.md`.
   in a pocket or a bag (the combination, what stays active when locked and what the screen
   shows to be proposed and agreed first; the key events of keys.c make it a filter in one
   place).
+- Measure on the device a whole-tree queue on the card with a full library (some 18,000 tracks
+  in 1,400 folders: 3.6 s simulated in the emulator, which does not model the card's speed).
+- The emulator: a virtual FAT disk built on demand from a list of paths, for test libraries
+  larger than the PC's RAM (the disks of `scenarios.py` are made in `/tmp`, in RAM).
 - Resume a queue made by PLAY held (a tree, the whole card) after a power off: today only a
   queue of one folder resumes (the top level is shown). To save: the folder held, the shuffle
   seed and order position, the track (its folder and cluster, to check it is the same).
@@ -191,6 +202,9 @@ One line per version; the measurements are in `ETUDE.md`.
 - Floating-point WAV and AIFF-C (core B has no FPU), and compressed AIFF-C (u-law, A-law) are not
   played.
 - Files of 4 GiB or more are not listed.
+- Tags placed after a large cover take longer to read: about 130 ms for an Opus with a 960 KB
+  picture before its title (Ogg pages of 4 KiB must all be crossed); tags beyond 16 MiB are not
+  read.
 - Ogg Vorbis with floor 0 (libvorbis betas of 2000) or with blocks over 4096 samples (no current
   encoder makes them; Tremor lowmem decodes them wrongly) is refused (§62).
 
