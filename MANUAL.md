@@ -178,17 +178,19 @@ is open, except for the USB and system entries, which stop it.
   the clock was not set or was behind that file.
 - The microSD card is not available over USB yet.
 
-**USB sound card** (0.97, first step): plug the cable, then choose the entry. The computer sees
-a sound card named "ECHO MINI" (USB Audio Class 1, full speed, no driver needed), and its sound
-comes out of the player's headphone outputs.
+**USB sound card** (0.97): plug the cable, then choose the entry. The computer sees a sound card
+named "ECHO MINI" (USB Audio Class 1, full speed, asynchronous, no driver needed), and its sound
+comes out of the player's headphone outputs, sample for sample: the player keeps its own clock
+and tells the computer how many samples to send ("feedback" on the screen).
 - Formats: 16 or 24 bits, 44.1 or 48 kHz, stereo. Other rates are converted by the computer.
-- **VOL+** / **VOL-** set the player's volume, which starts at the playback volume; the
-  computer's volume (and mute) adds to it, in 0.5 dB steps on the DACs.
+- **VOL+** / **VOL-** set the sound card's own volume, kept for the next time (the first time,
+  the playback volume); the computer's volume (and mute) adds to it, in 0.5 dB steps on the
+  DACs.
 - Leave with **BACK held**, or by unplugging the cable.
-- The screen shows the state (waiting for the computer, connected, playing), the format, both
-  volumes, and counters: the fill of the output buffer (about 10 ms), the samples dropped or
-  repeated to follow the computer's clock (a few every minute, not audible), and the packets
-  missed (a few when a stream starts).
+- The screen shows the state (waiting for the computer, connected, playing), the format and the
+  rate asked of the computer, both volumes, and counters: the fill of the output buffer (about
+  10 ms), the samples dropped or repeated (0: they are only a fallback, should the computer not
+  follow), and the packets missed (a few when a stream starts).
 - Tested with Linux. Other systems (Windows, macOS, Android, iOS) are not tested yet.
 
 ### Settings

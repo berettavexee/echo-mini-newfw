@@ -173,7 +173,7 @@ struct settings {
     uint8_t auto_off;                           /* power off when idle: an index */
     uint8_t swap_vol;                           /* VOL+ and VOL- swapped (the volume) */
     int8_t rg_pre;                              /* ReplayGain preamp, dB */
-    uint8_t spare;
+    uint8_t uac_vol;                            /* USB sound card's volume + 1, 0: the playback's */
 };
 extern struct settings cfg;
 extern uint32_t sleep_at;                       /* the sleep timer ends (millis), 0: off */

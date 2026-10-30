@@ -1,22 +1,31 @@
-/* USB sound card (ETUDE §83, step 1 of the ROADMAP's plan): USB Audio Class 1 at full speed, 16
- * or 24 bits, 44.1 or 48 kHz, adaptive (no rate feedback yet). The host's packets go straight
- * into the DACs' ring of core A (audio.c), core B is not used. The host's clock and the DACs'
- * drift apart: the ring is kept about TARGET_MS ahead of the DMA by dropping or repeating one
- * frame per packet while it is more than WINDOW_MS off (until SETTLE_MS), and set again on
- * silence when it runs dry or overflows. The host's volume (Feature Unit) and our own (VOL+ and
- * VOL-) add up on the DACs' attenuation, in 0.5 dB steps. Polled: the RX FIFO holds about 3
+/* USB sound card (ETUDE §83-85, steps 1 and 2 of the ROADMAP's plan): USB Audio Class 1 at full
+ * speed, 16 or 24 bits, 44.1 or 48 kHz, asynchronous. The host's packets go straight into the
+ * DACs' ring of core A (audio.c), core B is not used. The DACs keep their own clock; a feedback
+ * endpoint tells the host how many samples to send per frame (10.14), from the ring's fill: a
+ * proportional-integral control towards TARGET_MS (the integral finds the clocks' difference,
+ * some 40 ppm). Should the fill still go more than WINDOW_US off, one frame per
+ * packet is dropped or repeated (until SETTLE_US); the ring is set again on silence when it runs
+ * dry or overflows. The host's volume (Feature Unit) and our own (VOL+ and
+ * VOL-, kept in the settings, the playback volume until then) add up on the DACs' attenuation,
+ * in 0.5 dB steps. Polled: the RX FIFO holds about 3
  * packets, so the loop must come back to usb_service() within 3 ms (the longest gap is logged). */
 #include "ui_priv.h"
 #include "sys_priv.h"
+#include "i2c.h"
 #include "usb.h"
 
 #define TARGET_MS   10
-#define WINDOW_US   3000                        /* drift corrected beyond this */
+#define WINDOW_US   4000                        /* drift corrected beyond this (a fallback) */
 #define SETTLE_US   500                         /* until back within this */
 #define AHEAD_MS    20                          /* silence written after the last packet */
 #define STALL_MS    50                          /* no packet for so long: the stream stopped */
 #define MPS16       196                         /* 49 frames of 4 bytes (44.1 kHz: 44 or 45) */
 #define MPS24       294                         /* 49 frames of 6 bytes */
+/* The control, per packet (1 ms): the fill averaged over about 64 packets (frames x 16); 10.14
+ * units of feedback: FB_KP per frame of error, and the integral's 1/256 per frame of error per
+ * packet. The fill then follows (feedback - the DACs' rate) / 16384 frames per ms: about 0.5 of
+ * damping, settled in a few seconds. */
+#define FB_KP       8
 
 /* ---- descriptors: test IDs of pid.codes (private use only), bcdDevice 2.00 for this class ---- */
 static const uint8_t dev_desc[18] = {
@@ -24,14 +33,15 @@ static const uint8_t dev_desc[18] = {
 };
 
 #define FORMAT(alt, bytes, bits, mps)                                                          \
-    9, 4, 1, alt, 1, 1, 2, 0, 0,                        /* streaming interface, alternate */   \
+    9, 4, 1, alt, 2, 1, 2, 0, 0,                        /* streaming, alternate, 2 endpoints */ \
     7, 0x24, 1, 1, 1, 0x01, 0x00,                       /* general: terminal 1, PCM */          \
     14, 0x24, 2, 1, 2, bytes, bits, 2, 0x44, 0xac, 0x00, 0x80, 0xbb, 0x00,  /* 44.1, 48 kHz */  \
-    9, 5, 0x01, 0x09, (mps) & 0xff, (mps) >> 8, 1, 0, 0, /* OUT 1, isochronous, adaptive */      \
-    7, 0x25, 1, 0x01, 0, 0, 0                           /* sampling frequency control */
+    9, 5, 0x01, 0x05, (mps) & 0xff, (mps) >> 8, 1, 0, 0x81, /* OUT 1, asynchronous, sync 0x81 */ \
+    7, 0x25, 1, 0x01, 0, 0, 0,                          /* sampling frequency control */        \
+    9, 5, 0x81, 0x01, 3, 0, 1, 1, 0                     /* IN 1: feedback, 3 bytes, 2 ms */
 
 static const uint8_t cfg_desc[] = {
-    9, 2, 159, 0, 2, 1, 0, 0x80, 250,                   /* 2 interfaces, bus powered, 500 mA */
+    9, 2, 177, 0, 2, 1, 0, 0x80, 250,                   /* 2 interfaces, bus powered, 500 mA */
     9, 4, 0, 0, 0, 1, 1, 0, 0,                          /* audio control */
     9, 0x24, 1, 0x00, 0x01, 40, 0, 1, 1,                /* header: UAC 1.00, streaming if 1 */
     12, 0x24, 2, 1, 0x01, 0x01, 0, 2, 0x03, 0x00, 0, 0, /* input terminal 1: USB, L and R */
@@ -49,6 +59,33 @@ static volatile int16_t host_vol;               /* 1/256 dB, -64 dB to 0 */
 static volatile int host_mute, vol_changed = 1;
 
 #define VOL_MIN (-64 * 256)
+
+/* ---- the feedback: samples per frame, 10.14 ---- */
+static struct {
+    int32_t avg;                /* the fill, frames x 16, averaged */
+    int32_t integ;              /* the integral, 1/256 of the 10.14 unit */
+    int32_t err;                /* the last error, frames (the target minus the average) */
+    uint32_t sent;              /* the last value sent */
+    int on;                     /* the control runs (packets flowing) */
+} fb;
+
+static uint32_t fb_nominal(uint32_t hz)
+{
+    return (uint32_t)(((uint64_t)hz << 14) / 1000);
+}
+
+static uint32_t fb_value(void);
+static void fb_control(int32_t fill);
+
+static void fb_send(void)
+{
+    uint8_t b[3];
+    fb.sent = fb_value();
+    b[0] = (uint8_t)fb.sent;
+    b[1] = (uint8_t)(fb.sent >> 8);
+    b[2] = (uint8_t)(fb.sent >> 16);
+    usb_iso_in_send(b, 3);
+}
 
 static int put16(uint8_t *r, int v)
 {
@@ -70,10 +107,14 @@ static int uac_setup(const uint8_t *s, uint8_t *r)
         }
         if (value > 2)
             return -1;
-        if (value)
+        if (value) {
             usb_iso_out_open(value == 1 ? MPS16 : MPS24);
-        else
+            usb_iso_in_open(3);
+            fb_send();
+        } else {
             usb_iso_out_close();
+            usb_iso_in_close();
+        }
         alt = value;
         alt_new = value;
         return 0;
@@ -189,6 +230,7 @@ static void uac_iso_out(uint32_t n)
         st.corr = 0;
         fill = audio_fill();
     }
+    fb_control(fill);
     if (fill < st.fill_min)
         st.fill_min = fill;
     if (fill > st.fill_max)
@@ -213,6 +255,42 @@ static void uac_iso_out(uint32_t n)
     audio_zero_ahead((uint32_t)st.ahead);
 }
 
+/* What to ask of the host: the nominal, plus the control's terms; within 1 % of the nominal */
+static uint32_t fb_value(void)
+{
+    uint32_t nom = fb_nominal(rate), v = nom;
+    if (fb.on)
+        v = (uint32_t)((int32_t)nom + fb.err * FB_KP + fb.integ / 256);
+    if (v > nom + nom / 100)
+        v = nom + nom / 100;
+    if (v < nom - nom / 100)
+        v = nom - nom / 100;
+    return v;
+}
+
+static void uac_iso_in_done(void)
+{
+    fb_send();
+}
+
+/* The control, at each packet: the fill (frames x 16) averaged, the error, the integral */
+static void fb_control(int32_t fill)
+{
+    int32_t f = fill / (int32_t)st.frame * 16, nom = (int32_t)fb_nominal(rate);
+    if (!fb.on) {
+        fb.on = 1;
+        fb.avg = f;
+        fb.integ = 0;
+    }
+    fb.avg += (f - fb.avg) / 64;
+    fb.err = (st.target / (int32_t)st.frame * 16 - fb.avg) / 16;
+    fb.integ += fb.err;
+    if (fb.integ > nom / 100 * 256)
+        fb.integ = nom / 100 * 256;
+    if (fb.integ < -(nom / 100 * 256))
+        fb.integ = -(nom / 100 * 256);
+}
+
 static void uac_reset(void)
 {
     alt = 0;
@@ -220,7 +298,10 @@ static void uac_reset(void)
 }
 
 static const struct usb_class uac = {
-    dev_desc, cfg_desc, sizeof cfg_desc, 1, 276, uac_setup, uac_setup_out, uac_iso_out, uac_reset,
+    .dev = dev_desc, .cfg = cfg_desc, .cfg_len = sizeof cfg_desc, .full_speed = 1,
+    .keep_audio_pins = 1,                               /* toggling them while playing clicks */
+    .rx_fifo_words = 256, .ptx_fifo_words = 16, .setup = uac_setup, .setup_out = uac_setup_out,
+    .iso_out = uac_iso_out, .iso_in_done = uac_iso_in_done, .reset = uac_reset,
 };
 
 /* The output at the host's format: the rate and the ring's frame (16 or 32-bit words) */
@@ -243,7 +324,7 @@ static void apply_format(void)
     }
     int bits16 = a == 1;
     if ((rate != cur_rate || a != cur_alt) && audio_change_rate(rate, bits16) &&
-        audio_start(rate, bits16))
+        audio_start(rate, bits16))              /* muted meanwhile; the volume then ramps up */
         log_printf("uac: output not started");
     cur_rate = rate;
     cur_alt = a;
@@ -255,11 +336,20 @@ static void apply_format(void)
     st.fill_min = 0x7fffffff;
     st.fill_max = 0;
     audio_stream_align((uint32_t)st.target);
+    fb.on = 0;                                          /* the nominal until packets come */
     rate_rd0 = audio.rd;
     rate_t0 = ticks();
     vol_changed = 1;
     st.ready = 1;
     log_printf("uac: stream %u Hz, %u bits", rate, bits16 ? 16 : 24);
+}
+
+/* During a volume ramp: the packets, and silence when none come */
+static void uac_pump(void)
+{
+    usb_service();
+    if (!st.flowing)
+        audio_idle();
 }
 
 /* ---- the screen ---- */
@@ -281,7 +371,11 @@ static void screen(int line, uint32_t max_gap)
         p = put_dec(p, rate / 1000);
         p = put_str(p, rate % 1000 ? ".1 kHz, " : " kHz, ");
         p = put_dec(p, alt == 1 ? 16 : 24);
-        p = put_str(p, " bits");
+        p = put_str(p, " bits, feedback ");
+        uint32_t d = (uint32_t)((uint64_t)fb.sent * 10000 >> 14);
+        p = put_dec(p, d / 10);
+        *p++ = '.';
+        p = put_dec(p, d % 10);
     }
     *p = 0;
     sys_status_line(1, 52, b, FG);
@@ -348,6 +442,10 @@ static void log_stats(const char *what, uint32_t max_gap)
                    dt / 1000, rate);
     rate_rd0 = audio.rd;
     rate_t0 = ticks();
+    log_printf("uac: feedback %u (%u.%u Hz), error %d frames, integral %d; IN sent %u, "
+               "re-aimed %u", fb.sent, (uint32_t)((uint64_t)fb.sent * 10000 >> 14) / 10,
+               (uint32_t)((uint64_t)fb.sent * 10000 >> 14) % 10, fb.err, fb.integ / 256,
+               usb.iso_in_sent, usb.iso_in_late);
     log_printf("uac: longest parts, us: usb %u, format %u, volume %u, keys %u, screen line %u, "
                "log %u, idle %u", t_max[T_USB], t_max[T_FORMAT], t_max[T_VOLUME], t_max[T_KEYS],
                t_max[T_SCREEN], t_max[T_LOG], t_max[T_IDLE]);
@@ -367,7 +465,7 @@ void uac_mode(void)
     }
     sys_line(138, "VOL+ / VOL-: volume", DIM);
     sys_line(154, "BACK held: exit", DIM);
-    level = play_level;
+    level = cfg.uac_vol ? cfg.uac_vol - 1 : play_level;     /* its own, once set */
     rate = 48000;
     alt = 0;
     alt_new = -1;
@@ -375,6 +473,7 @@ void uac_mode(void)
     host_vol = 0;
     host_mute = 0;
     st = (typeof(st)){ 0 };
+    fb = (typeof(fb)){ 0 };
     st.frame = 4;
     audio_stop();                                       /* from scratch: not parked, not paused */
     if (audio_start(rate, 1)) {
@@ -388,8 +487,8 @@ void uac_mode(void)
     log_printf("uac: start");
     usb_start_class(&uac);
     lcd_hook = usb_service;                             /* packets served while drawing */
-    gpio_set(2, 0, 0);          /* usb_start sets them as RECHO's disk mode; the DACs (audio.c) */
-    gpio_set(1, 4, 1);          /* want GPIO2_0 low (high mutes the jacks) and GPIO1_4 high */
+    i2c_hook = usb_service;                             /* the DACs' registers */
+    ramp_hook = uac_pump;                               /* and the volume ramps */
     uint32_t t0 = millis(), t_draw = 0, t_key = 0, t_log = millis(), last = ticks(), max_gap = 0;
     uint32_t gap_all = 0, configured_at = 0;
     const char *why = "?";
@@ -423,7 +522,7 @@ void uac_mode(void)
             uint32_t t = ticks();
             vol_changed = 0;
             int a = level + (-host_vol) / 128;
-            audio_volume(host_mute ? 0xff : (uint8_t)(a > 0xfe ? 0xfe : a), 0);
+            audio_volume(host_mute ? 0xff : (uint8_t)(a > 0xfe ? 0xfe : a), 1);
             timed(T_VOLUME, t);
         }
         if (now - t_key > 10000) {
@@ -433,8 +532,9 @@ void uac_mode(void)
                 break;
             }
             struct key_ev e;
+            uint32_t tk = ticks();
             int ev = key_poll(&e);
-            timed(T_KEYS, now);
+            timed(T_KEYS, tk);
             if ((ev == EV_PRESS || ev == EV_REPEAT) && key_is_vol(e.key)) {
                 int d = (e.key == KEY_VOLUP) != !!cfg.swap_vol ? -2 : 2;
                 level = level + d < 0 ? 0 : level + d > 0xfe ? 0xfe : level + d;
@@ -467,10 +567,17 @@ void uac_mode(void)
     if (max_gap > gap_all)
         gap_all = max_gap;
     lcd_hook = 0;
+    i2c_hook = 0;
+    ramp_hook = 0;
+    usb_iso_in_close();
     usb_iso_out_close();
     usb_stop();
     audio_volume(0xff, 0);
     audio_stop();
+    if (cfg.uac_vol != level + 1) {
+        cfg.uac_vol = (uint8_t)(level + 1);
+        resume_save();                                  /* the settings' block with it */
+    }
     log_stats(why, gap_all);
     log_printf("uac: exit (%s) after %u s", why, (millis() - t0) / 1000);
 }

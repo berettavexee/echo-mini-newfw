@@ -19,6 +19,7 @@
 #define GRXSTSP    (OTG + 0x020)
 #define GRXFSIZ    (OTG + 0x024)
 #define GNPTXFSIZ  (OTG + 0x028)
+#define DPTXFSIZ1  (OTG + 0x104)
 #define GNPTXSTS   (OTG + 0x02c)
 #define DCFG       (OTG + 0x800)
 #define DCTL       (OTG + 0x804)
@@ -44,6 +45,7 @@
 #define GINT_IEPINT   (1u << 18)
 #define GINT_OEPINT   (1u << 19)
 #define GINT_INCOMPLP (1u << 21)                /* device mode: incomplete isochronous OUT */
+#define GINT_IISOIXFR (1u << 20)                /* incomplete isochronous IN */
 #define GINT_WKUP     (1u << 31)
 
 #define EP_ENA     (1u << 31)
@@ -55,6 +57,7 @@
 #define EP_STALL   (1u << 21)
 #define EP_BULK    (2u << 18)
 #define EP_ISO     (1u << 18)
+#define EP_TXFNUM1 (1u << 22)                   /* IN: periodic TX FIFO 1 */
 #define EP_ACTIVE  (1u << 15)
 
 #define INT_XFERCOMPL (1u << 0)
@@ -92,8 +95,8 @@ static uint8_t ep0_rx[64];              /* the data stage of a request from the 
 static uint32_t ep0_rx_want, ep0_rx_got;
 static uint8_t ep0_rx_setup[8];
 
-/* ---- endpoint 1 isochronous OUT (a class): its packet size, 0 when closed ---- */
-static uint32_t iso_mps;
+/* ---- endpoint 1 isochronous OUT and IN (a class): their packet sizes, 0 when closed ---- */
+static uint32_t iso_mps, iso_in_mps;
 
 /* ---- endpoint 1 state ---- */
 static uint8_t *out_buf;
@@ -255,6 +258,49 @@ void usb_iso_out_close(void)
     iso_mps = 0;
 }
 
+/* The parity bit of the frame after the current one */
+static uint32_t next_frame_parity(void)
+{
+    return ((REG(DSTS) >> 8) & 1) ? EP_SD0PID : EP_SODDFR;
+}
+
+static void ptx_flush(void)
+{
+    REG(GRSTCTL) = 1u << 6 | 1u << 5;           /* periodic TX FIFO 1 */
+    wait_reg_clear(GRSTCTL, 1u << 5, 10000);
+}
+
+void usb_iso_in_open(uint32_t mps)
+{
+    iso_in_mps = mps;
+    REG(DIEPCTL(1)) = EP_ISO | EP_ACTIVE | EP_TXFNUM1 | EP_SNAK | mps;
+    REG(DIEPINT(1)) = 0xff;
+    ptx_flush();
+}
+
+void usb_iso_in_close(void)
+{
+    if (REG(DIEPCTL(1)) & EP_ENA)
+        REG(DIEPCTL(1)) |= EP_SNAK | EP_DIS;
+    REG(DIEPCTL(1)) &= ~EP_ACTIVE;
+    iso_in_mps = 0;
+    ptx_flush();
+}
+
+/* One packet for the next frame: the host polls every few frames (bRefresh), so a packet not
+ * taken is aimed again at the next frame (GINT_IISOIXFR), as it stays in the FIFO */
+void usb_iso_in_send(const void *data, uint32_t n)
+{
+    const uint8_t *p = data;
+    if (!iso_in_mps || n > iso_in_mps)
+        return;
+    REG(DIEPTSIZ(1)) = 1u << 29 | 1u << 19 | n;        /* one packet per frame */
+    REG(DIEPCTL(1)) |= EP_ENA | EP_CNAK | next_frame_parity();
+    for (uint32_t i = 0; i < n; i += 4)
+        REG(FIFO(1)) = p[i] | (i + 1 < n ? p[i + 1] << 8 : 0) | (i + 2 < n ? p[i + 2] << 16 : 0) |
+                       (uint32_t)(i + 3 < n ? p[i + 3] : 0) << 24;
+}
+
 /* A request for the class (or SET_INTERFACE / GET_INTERFACE): its answer, or its data stage */
 static void class_setup(const uint8_t *s, uint8_t *tmp)
 {
@@ -390,7 +436,7 @@ static void bus_reset(void)
     }
     REG(DIEPCTL(1)) = EP_SNAK;
     REG(DOEPCTL(1)) = EP_SNAK;
-    iso_mps = 0;
+    iso_mps = iso_in_mps = 0;
     flush_fifos();
     ep0_left = 0;
     ep0_zlp = 0;
@@ -490,6 +536,13 @@ void usb_service(void)
                 out_done = 1;
         }
     }
+    if (g & GINT_IISOIXFR) {                            /* the host did not poll that frame */
+        REG(GINTSTS) = GINT_IISOIXFR;
+        if (iso_in_mps && (REG(DIEPCTL(1)) & EP_ENA)) {
+            usb.iso_in_late++;
+            REG(DIEPCTL(1)) |= next_frame_parity();
+        }
+    }
     if (g & GINT_INCOMPLP) {                            /* a frame went by without our packet */
         REG(GINTSTS) = GINT_INCOMPLP;
         if (iso_mps) {
@@ -512,7 +565,10 @@ void usb_service(void)
         if (d & 2u) {
             uint32_t i = REG(DIEPINT(1));
             REG(DIEPINT(1)) = i;
-            if (i & INT_XFERCOMPL)
+            if ((i & INT_XFERCOMPL) && iso_in_mps) {
+                usb.iso_in_sent++;
+                cls->iso_in_done();
+            } else if (i & INT_XFERCOMPL)
                 in_done = 1;
         }
     }
@@ -605,7 +661,8 @@ void usb_start(void)
 void usb_start_class(const struct usb_class *c)
 {
     cls = c;
-    iso_mps = 0;
+    iso_mps = iso_in_mps = 0;
+    usb.iso_in_sent = usb.iso_in_late = 0;
     ep0_rx_want = 0;
     usb.iso_incomplete = 0;
     usb.configured = 0;
@@ -630,15 +687,17 @@ void usb_start_class(const struct usb_class *c)
     REG(GRF_BASE + 0x84) = 0x1fe00003;
     REG(GRF_BASE + 0x8c) = 0x001c0014;
     REG(GRF_BASE + 0x80) = 0x00070004;
-    iomux(1, 4, 0);
-    gpio_set(1, 4, 0);
-    gpio_dir(1, 4, 1);
-    iomux(2, 0, 0);
-    gpio_set(2, 0, 1);
-    gpio_dir(2, 0, 1);
-    iomux(2, 2, 0);
-    gpio_set(2, 2, 1);
-    gpio_dir(2, 2, 1);
+    if (!c || !c->keep_audio_pins) {    /* the DACs' pins (audio.c): as RECHO's disk mode */
+        iomux(1, 4, 0);
+        gpio_set(1, 4, 0);
+        gpio_dir(1, 4, 1);
+        iomux(2, 0, 0);
+        gpio_set(2, 0, 1);
+        gpio_dir(2, 0, 1);
+        iomux(2, 2, 0);
+        gpio_set(2, 2, 1);
+        gpio_dir(2, 2, 1);
+    }
 
     REG(DCTL) |= DCTL_SFTDISCON;
     for (uint32_t t0 = ticks(); !(REG(GRSTCTL) & 1u << 31) && ticks() - t0 < 10000;)
@@ -657,9 +716,12 @@ void usb_start_class(const struct usb_class *c)
         rx_size = REG(GRXFSIZ);
         nptx_size = REG(GNPTXFSIZ);
     }
-    if (c && c->rx_fifo_words) {                        /* the rest: the shared TX FIFO */
+    if (c && c->rx_fifo_words) {        /* the rest: the shared TX FIFO, then the periodic one */
+        uint32_t np = FIFO_WORDS - c->rx_fifo_words - c->ptx_fifo_words;
         REG(GRXFSIZ) = c->rx_fifo_words;
-        REG(GNPTXFSIZ) = (uint32_t)(FIFO_WORDS - c->rx_fifo_words) << 16 | c->rx_fifo_words;
+        REG(GNPTXFSIZ) = np << 16 | c->rx_fifo_words;
+        if (c->ptx_fifo_words)
+            REG(DPTXFSIZ1) = (uint32_t)c->ptx_fifo_words << 16 | (c->rx_fifo_words + np);
     } else {
         REG(GRXFSIZ) = rx_size;
         REG(GNPTXFSIZ) = nptx_size;

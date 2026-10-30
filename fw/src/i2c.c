@@ -41,10 +41,14 @@ static uint32_t bus = I2C0;                     /* the controller of the current
 
 uint32_t i2c_errors;
 
+void (*i2c_hook)(void);
+
 static int wait_ipd(uint32_t bit)
 {
     uint32_t t0 = ticks();
     for (;;) {
+        if (i2c_hook)
+            i2c_hook();
         uint32_t p = REG(IPD);
         if (p & IPD_NAK)
             return I2C_ENAK;

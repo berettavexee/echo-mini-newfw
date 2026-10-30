@@ -15,6 +15,7 @@ struct usb_state {
     int suspended;              /* no bus activity (host gone, port off, or asleep) */
     uint32_t suspend_since;     /* ticks() at the suspend */
     uint32_t iso_incomplete;    /* isochronous OUT frames missed (incomplete ISO OUT) */
+    uint32_t iso_in_sent, iso_in_late;  /* isochronous IN packets sent, frames re-aimed */
 };
 
 /* A class other than mass storage: its descriptors and requests. setup() gets the class requests
@@ -26,10 +27,13 @@ struct usb_class {
     const uint8_t *dev, *cfg;   /* device and configuration descriptors */
     uint16_t cfg_len;
     int full_speed;             /* enumerate at full speed */
+    int keep_audio_pins;        /* leave GPIO1_4, 2_0, 2_2 to the DACs (audio.c) */
     uint16_t rx_fifo_words;     /* RX FIFO size (0: the default, 147 of the 308 words) */
+    uint16_t ptx_fifo_words;    /* periodic TX FIFO 1 (an isochronous IN endpoint), 0: none */
     int (*setup)(const uint8_t *s, uint8_t *reply);
     void (*setup_out)(const uint8_t *s, const uint8_t *data, uint32_t n);
     void (*iso_out)(uint32_t n);
+    void (*iso_in_done)(void);  /* the isochronous IN packet went: usb_iso_in_send() the next */
     void (*reset)(void);        /* a bus reset: the stream stops */
 };
 
@@ -44,6 +48,9 @@ void usb_start(void);           /* clocks, PHY, core reset, then connect */
 void usb_start_class(const struct usb_class *c);    /* the same for another class */
 void usb_iso_out_open(uint32_t mps);    /* endpoint 1 OUT, isochronous, every frame */
 void usb_iso_out_close(void);
+void usb_iso_in_open(uint32_t mps);     /* endpoint 1 IN, isochronous, periodic TX FIFO 1 */
+void usb_iso_in_close(void);
+void usb_iso_in_send(const void *data, uint32_t n);    /* the next packet, n <= mps */
 void usb_stop(void);            /* soft disconnect */
 void usb_service(void);         /* handles pending core events; call often */
 

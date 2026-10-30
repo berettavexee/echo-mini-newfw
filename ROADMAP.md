@@ -21,7 +21,7 @@ Last update: 2026-10-30, version 0.96.
 | Tags and ReplayGain found after a large cover (Ogg, FLAC, ID3v2: up to 16 MiB) and in an APEv2 tag holding a cover | 0.96 | §81 |
 | Settings screen: screen timeout, brightness (backlight PWM), tags or file names, ReplayGain auto and preamp, start-up, sleep timer, power off when idle, swapped volume keys | 0.96 | §81 |
 | Brightness in ten perceptual steps (8 to 100 %, about x1.3 a step) | 0.97 | §82 |
-| USB sound card, step 1: UAC1 at full speed, 16 and 24 bits, 44.1 and 48 kHz, adaptive (tested with Linux) | 0.97 | §84 |
+| USB sound card: UAC1 at full speed, 16 and 24 bits, 44.1 and 48 kHz, asynchronous with a rate feedback, bit-perfect (tested with Linux) | 0.97 | §84-§85 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
 | USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
@@ -116,11 +116,11 @@ One line per version; the measurements are in `ETUDE.md`.
   compared in §83; neither has a rate feedback or goes over 48 kHz. Plan, in steps:
   1. Done in 0.97 (§84): UAC1 at full speed, 16 and 24 bits, 44.1 and 48 kHz, the PCM straight
      into the DAC ring (core A only), the host's volume on the DACs' attenuation; entered from
-     the main menu for now. Left: a volume of its own kept for this mode (it starts at the
-     playback volume), the choice on the USB screen at the cable's coming.
-  2. Asynchronous: the DACs on our own clocks (§60) and a feedback endpoint telling the host how
-     many samples to send, from the ring's fill: bit-perfect, no sample dropped or repeated
-     (dropping or repeating kept as a fallback, counted in the log); a small ring (5-10 ms).
+     the main menu for now; its own volume, kept in the settings. Left: the choice on the USB
+     screen at the cable's coming.
+  2. Done in 0.97 (§85): asynchronous, a feedback endpoint whose value comes from a
+     proportional-integral control of the ring's fill (10 ms); bit-perfect on Linux (no sample
+     dropped or repeated in 13 minutes); dropping or repeating kept as a fallback.
   3. UAC2 at high speed (our driver already enumerates at high speed): one packet every 125 us,
      so 192 kHz in 32 bits needs 192 bytes, where full speed hits the RX FIFO (147 words) above
      48 kHz in 24 bits; every rate the DACs play (44.1 to 192 kHz); UAC1 at full speed kept for
