@@ -2,26 +2,44 @@
 
 [![check](https://github.com/berettavexee/echo-mini-newfw/actions/workflows/check.yml/badge.svg)](https://github.com/berettavexee/echo-mini-newfw/actions/workflows/check.yml)
 
-> The interface is minimalist and rough around the edges; the primary aim is to test codec
-> addition, gapless playback and ReplayGain. These are things I couldn’t do by patching the
-> official firmware.
-> This project should be seen as a test platform that has grown in scope. If you’re looking for
-> a more polished experience, take a look at [Recho](https://recho.atzkey.workers.dev/).
+**An alternative firmware for the SNOWSKY ECHO MINI music player**, written from scratch.
+It plays more formats than the stock firmware — Opus, Ogg Vorbis, Musepack, ALAC and more —
+with gapless playback and ReplayGain.
 
-A from-scratch firmware for the main core of the SNOWSKY ECHO MINI digital audio player
-(Rockchip RKNanoD, 8 GB model), with our own decoders on the HiFi core (core B). It is built
-by studying the official firmware V3.9.0; no code of it, of the Rockchip SDK, of ReChord or
-of RECHO is included.
+![The play screen](docs/manual/play-screen.png)
 
-Status (version 0.89): playback of WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A),
-Musepack, gapless,
-at any sample rate from 8 to 192 kHz, with
-non-blocking sample-rate changes; folder browser with long names (FAT32 internal memory,
-FAT32 or exFAT microSD card); resume, ReplayGain (album / track / auto / off, preamp), a settings screen (screen timeout, brightness, sleep timer…), seek on the bar,
-play modes, real-time clock, USB mass storage of the internal memory, power saving in
-pause, low-battery warning and power off, charging screen. No equaliser.
+## What it does
 
-**New users: see [`MANUAL.md`](MANUAL.md)** for the keys on each screen and how to install.
+- **Formats**: WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A), Musepack;
+  any sample rate from 8 to 192 kHz, played as it is.
+- **Gapless playback** and **ReplayGain** (album, track or auto, with a preamp).
+- **Folder browser** with long names, on the internal memory and the microSD card (FAT32 or
+  exFAT). Play a whole folder tree, in order or shuffled.
+- **Settings**: brightness, screen timeout, sleep timer, power off when idle, start-up behaviour.
+- Resume where you stopped, seek, clock, USB disk mode, low-battery warning, charging screen.
+- **Not there (yet)**: equaliser, music library by artist or album (folders only), lyrics.
+
+## Before you install
+
+- This is **unofficial**: install at your own risk. Keep a stock image on the player and
+  learn the recovery mode first (see the manual).
+- It is made and tested for the **8 GB model** only (the 512 MB model is not supported).
+- The interface is plain. The project began as a test bench for codecs, gapless playback and
+  ReplayGain, which could not be added by patching the stock firmware. For a more polished
+  custom firmware, look at [RECHO](https://recho.atzkey.workers.dev/).
+
+## Getting started
+
+1. Download `NEWFW096.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
+2. Follow [Installing](MANUAL.md#installing) in the manual.
+3. The [manual](MANUAL.md) shows the keys of each screen.
+
+## How it is made
+
+The firmware runs on the main core of the player's chip (Rockchip RKNanoD), with our own
+audio decoders on its second core, the HiFi core ("core B"). It was built by studying the
+official firmware V3.9.0, and contains no code from it, from the Rockchip SDK, from ReChord
+or from RECHO. The full study, in French, is in [`ETUDE.md`](ETUDE.md).
 
 ## Supported formats and core B load
 
