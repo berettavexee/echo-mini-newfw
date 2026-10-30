@@ -109,11 +109,20 @@ One line per version; the measurements are in `ETUDE.md`.
   computer or a phone. Needs an isochronous OUT endpoint in our USB driver (bulk only today),
   UAC descriptors and sample rates, a rate feedback (asynchronous) or an adaptive clock, the
   PCM straight into the DAC ring (core A only). Its choice fits the USB screen above.
+  EchoPod (GPL-3.0, ideas only) has it working at full speed: 44.1 and 48 kHz, 16 and 24 bits,
+  about 20 ms of delay; 88.2 and 96 kHz do not fit the chip's USB buffer at full speed.
 - A diagnostics, telemetry and remote-control module over the USB link with the PC, to automate
   the tests on the device: read the log and the state live (playback, buffers, core B load,
   battery, keys), send key events and commands (play a file, seek, change a setting), and run
   scripted test sequences from the PC (a vendor USB interface or a second function beside the
   mass storage, to be designed).
+- Brightness on a non-linear curve: the ten steps are linear today (10 to 100 %), and the low
+  ones look alike to the eye; a perceptual curve such as EchoPod's (8, 12, 17, 23, 30, 39, 50,
+  63, 80, 100 %), the dimmest step checked in the dark.
+- Battery gauge: compare ours (§65) with EchoPod's (an average of the last 64 readings, about a
+  minute, through an 11-point curve from 3,450 to 4,200 mV; 50 mV less while charging and never
+  over 99 %; the shown percent only moves one way on each power source), over a full discharge
+  logged on the device.
 - Key lock: a special key combination locks and unlocks the keys, against accidental presses
   in a pocket or a bag (the combination, what stays active when locked and what the screen
   shows to be proposed and agreed first; the key events of keys.c make it a filter in one
@@ -190,6 +199,11 @@ One line per version; the measurements are in `ETUDE.md`.
   which starts on the target's page without decoding the page before for nothing (some 100 ms
   less in Vorbis); Opus keeps an 80 ms pre-roll (RFC 7845). Also: fill the DAC ring with silence
   at a seek, so that the short gap is silence and not a repeat of the old sound.
+- Bluetooth output, a prospect: the 8 GB model has a Bluetooth module with its own stack,
+  powered from GPIO2.7 and driven over UART1 at 115,200 baud with short ASCII commands; GPIO2.0
+  and GPIO2.14 route the sound (EchoPod streams to headphones this way, and found that the
+  routing pins fake jack plug events). Needs a UART driver, the module's command set, pairing
+  screens and the routing of the DAC output.
 - Optional codecs built on Helix MP3 and Helix AAC (RealNetworks, RPSL/RCSL licence), a distant
   prospect: about 22 % (MP3) and 12 % (AAC) fewer instructions and 1 to 2 LSB of error instead of
   5 to 7 on the QEMU bench (ETUDE §19.9, §54); PacketVideo stays the default for its licence.
@@ -212,6 +226,6 @@ One line per version; the measurements are in `ETUDE.md`.
 
 - Equaliser.
 - The extras of the stock firmware's generic Rockchip SDK base (e-book reader, photos, video,
-  dictionary, calculator, FM radio, recording, Bluetooth): mostly absent from this hardware
-  (no radio, microphone or Bluetooth as far as known).
+  dictionary, calculator, FM radio, recording): mostly absent from this hardware (no radio or
+  microphone as far as known). Bluetooth exists, see the ideas above.
 - Any dependency on the stock firmware image.

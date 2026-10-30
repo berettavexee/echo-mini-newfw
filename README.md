@@ -97,11 +97,15 @@ More ambitious custom firmware projects exist for this player, and are worth a l
   MINI (gapless playback, improved navigation, files in name order).
 - **[ReChord](https://github.com/brnomt/ReChord)**: a from-source custom firmware for the ECHO
   MINI, in progress.
+- **[EchoPod](https://github.com/BasilSkyWalk/echopod)** by BasilSkyWalk: a replacement firmware
+  built around a music library made on the player (iPod-style Cover Flow, favourites, M3U
+  playlists, Up Next), with Bluetooth output and a USB DAC mode.
 
-This project is independent from both and shares no code with them (but I will be happy to share).
+This project is independent from all three and shares no code with them (but I will be happy to share).
 
 ## Licenses
 
-Our code: see the headers. Third-party code keeps its license: libopus (BSD, `third_party/opus/COPYING`),
-Tremor (BSD, `third_party/tremor-lowmem/COPYING`), pvmp3dec (Apache-2.0,
-`third_party/pvmp3dec/NOTICE`, `third_party/pvaacdec/NOTICE`), Apple ALAC decoder (Apache-2.0, `third_party/alac/LICENSE`), libmpcdec (BSD, `third_party/libmpcdec/COPYING`), dr_flac (public domain / MIT-0), Fusion Pixel font (SIL OFL 1.1).
+Our code is under the [MIT License](LICENSE). The third-party code and the font it includes keep
+their own licenses (BSD-3-Clause, Apache-2.0, public domain / MIT-0, SIL OFL 1.1): see
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), which lists them with their copyright holders
+and where to find each license text.
