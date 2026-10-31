@@ -72,7 +72,10 @@ static const struct rate {
     { 48000, { 0x00, 0x30, 0x19, 0x0a }, 0x00033f3f, 2 },
     { 88200, { 0x06, 0x24, 0x19, 0x03 }, 0x00013f3f, 3 },
     { 96000, { 0x00, 0x30, 0x19, 0x09 }, 0x00033f3f, 4 },
-    { 176400, { 0x04, 0x49, 0x19, 0x03 }, 0x00013f3f, 5 },
+    /* 176.4 kHz: the stock firmware's 04 49 19 03 (and RECHO's) puts the PLL's VCO at 564.48 MHz,
+     * above what it holds: 175 912 Hz measured (0.28 % low, ETUDE §88). The 44.1 kHz PLL (VCO
+     * 282.24 MHz) instead, MCLK = SCLK (64 fs) */
+    { 176400, { 0x06, 0x24, 0x19, 0x03 }, 0x00003f3f, 5 },
     { 192000, { 0x00, 0x30, 0x19, 0x09 }, 0x00013f3f, 6 },
     /* The other rates of the stock firmware (ETUDE §60), checked on the device with NEWFWRT2: its
      * ACODEC PLL tables (HIFIEC39 0x48c8c) and DAC index (function 0x0306185e: 0 for the 8 kHz
@@ -90,6 +93,11 @@ static const struct rate {
     { 128000, { 0x00, 0x30, 0x19, 0x09 }, 0x00023f3f, 0 },    /* 122.88 MHz, MCLK 192 fs */
 };
 static const struct rate *cur_rate = &rates[0];
+
+/* The output's real rate, from the DMA's progress while it runs at one rate (logged at a
+ * change of rate, a pause or the stop; every 30 min at most, ticks() wrapping in 71) */
+static uint32_t meas_rd, meas_t;
+static int meas_on;
 static int standby;                             /* paused, headphone stage and ASP powered down */
 
 static uint32_t sysram_ring[0x30000 / 4] __attribute__((section(".dacring"), aligned(32)));
@@ -335,6 +343,28 @@ void audio_reset_stats(void)
     audio.min_fill = 0x7fffffff;
 }
 
+static void meas_start(void)
+{
+    audio_update();
+    meas_rd = audio.rd;
+    meas_t = ticks();
+    meas_on = 1;
+}
+
+static void meas_end(void)
+{
+    if (!meas_on)
+        return;
+    meas_on = 0;
+    audio_update();
+    uint32_t dt = ticks() - meas_t;
+    if (dt < 2000000 || !audio.frame_bytes)
+        return;
+    uint32_t r10 = (uint32_t)((uint64_t)(audio.rd - meas_rd) * 10000000 / audio.frame_bytes / dt);
+    log_printf("audio: output rate %u.%u Hz over %u ms (nominal %u)", r10 / 10, r10 % 10,
+               dt / 1000, audio.rate);
+}
+
 int32_t audio_fill(void)
 {
     return (int32_t)(audio.wr - audio.rd);
@@ -563,6 +593,7 @@ int audio_start(uint32_t rate, int bits16)
                i2c_errors - e0);
     audio.i2c_errors = i2c_errors - e0;
     audio.on = 1;
+    meas_start();
     return audio.i2c_errors ? -1 : 0;
 }
 
@@ -572,6 +603,7 @@ void audio_stop(void)
 {
     if (!audio.on)
         return;
+    meas_end();
     audio_volume(0xff, 1);
     gpio_set(2, 0, 1);
     REG(I2S_XFER) = 0;
@@ -592,6 +624,7 @@ int audio_change_rate(uint32_t rate, int bits16)
 {
     if (!audio.on)
         return -1;
+    meas_end();
     uint32_t t0 = ticks(), e0 = i2c_errors;
     uint8_t vol = audio.vol;
     both(0x090001, 0xff);                       /* mute */
@@ -625,6 +658,7 @@ int audio_change_rate(uint32_t rate, int bits16)
     both(0x090001, vol);
     both(0x090002, vol);
     audio.vol = vol;
+    meas_start();
     log_printf("audio: rate changed to %u Hz, %u-bit frames in %u us (mute %u, pll+i2s+dac %u, "
                "ring+dma %u us), %u i2c errors", audio.rate, bits16 ? 16 : 32, ticks() - t0,
                t1 - t0, t2 - t1, t3 - t2, i2c_errors - e0);
@@ -667,6 +701,10 @@ void audio_power_service(void)
 {
     if (audio.on && audio_paused && !standby && ticks() - t_paused > 10000000)
         dac_standby(1);
+    if (audio.on && meas_on && ticks() - meas_t > 1800000000u) {
+        meas_end();
+        meas_start();
+    }
 }
 
 void audio_pause(int on)
@@ -675,6 +713,7 @@ void audio_pause(int on)
         return;
     uint8_t vol = audio.vol;
     if (on) {
+        meas_end();
         t_paused = ticks();
         both(0x090001, 0xff);
         both(0x090002, 0xff);
@@ -688,6 +727,7 @@ void audio_pause(int on)
         gpio_set(2, 0, 0);
         both(0x090001, vol);
         both(0x090002, vol);
+        meas_start();
     }
     audio.vol = vol;
     audio_paused = on;

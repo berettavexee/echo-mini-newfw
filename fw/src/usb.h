@@ -17,19 +17,25 @@ struct usb_state {
     uint32_t iso_incomplete;    /* isochronous OUT frames missed (incomplete ISO OUT) */
     uint32_t iso_in_sent, iso_in_late;  /* isochronous IN packets sent, frames re-aimed */
     uint32_t irqs, irq_max_us;  /* interrupt mode: interrupts taken, the longest, us */
+    uint32_t rx_fifo;           /* GRXFSIZ read back after the set-up, words */
 };
 
 /* A class other than mass storage: its descriptors and requests. setup() gets the class requests
  * and SET_INTERFACE / GET_INTERFACE: it returns -1 to stall, 0 for no data, or the number of
- * bytes to send from 'reply' (at most 64); a request with data from the host (SET_CUR) comes to
+ * bytes to send from 'reply' (at most USB_REPLY_MAX); a request with data from the host (SET_CUR) comes to
  * setup_out() once the data is in. iso_out() gets each packet of the isochronous OUT endpoint: n
  * bytes to read from usb_rx_word(), (n + 3) / 4 words, all of them. */
+#define USB_REPLY_MAX 128
+
 struct usb_class {
-    const uint8_t *dev, *cfg;   /* device and configuration descriptors */
+    const uint8_t *dev, *cfg;   /* device and configuration descriptors (full speed) */
     uint16_t cfg_len;
+    const uint8_t *dev_hs, *cfg_hs;     /* at high speed, when not 0 */
+    uint16_t cfg_hs_len;
     int full_speed;             /* enumerate at full speed */
     int keep_audio_pins;        /* leave GPIO1_4, 2_0, 2_2 to the DACs (audio.c) */
-    uint16_t rx_fifo_words;     /* RX FIFO size (0: the default, 147 of the 308 words) */
+    uint16_t rx_fifo_words;     /* RX FIFO size asked (0: the default); the core keeps its 147
+                                 * words (no dynamic FIFO sizing, ETUDE §87) */
     uint16_t ptx_fifo_words;    /* periodic TX FIFO 1 (an isochronous IN endpoint), 0: none */
     int (*setup)(const uint8_t *s, uint8_t *reply);
     void (*setup_out)(const uint8_t *s, const uint8_t *data, uint32_t n);
@@ -47,9 +53,11 @@ enum { USB_EABORT = -20, USB_ETIMEOUT = -21 };
 
 void usb_start(void);           /* clocks, PHY, core reset, then connect */
 void usb_start_class(const struct usb_class *c);    /* the same for another class */
-void usb_iso_out_open(uint32_t mps);    /* endpoint 1 OUT, isochronous, every frame */
+void usb_iso_out_open(uint32_t mps, uint32_t every);   /* endpoint 1 OUT, isochronous; every:
+                                * its interval in frames (1) or microframes (an even number) */
 void usb_iso_out_close(void);
-void usb_iso_in_open(uint32_t mps);     /* endpoint 1 IN, isochronous, periodic TX FIFO 1 */
+void usb_iso_in_open(uint32_t mps, uint32_t every);    /* endpoint 1 IN, periodic TX FIFO 1 */
+void usb_iso_watch(void);       /* high speed: a parity turned over after 2 ms with nothing */
 void usb_iso_in_close(void);
 void usb_iso_in_send(const void *data, uint32_t n);    /* the next packet, n <= mps */
 void usb_stop(void);            /* soft disconnect */

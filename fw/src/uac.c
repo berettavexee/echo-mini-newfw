@@ -29,7 +29,7 @@
 
 /* ---- descriptors: test IDs of pid.codes (private use only), bcdDevice 2.00 for this class ---- */
 static const uint8_t dev_desc[18] = {
-    18, 1, 0x10, 0x01, 0, 0, 0, 64, 0x09, 0x12, 0x01, 0x00, 0x00, 0x02, 1, 2, 3, 1,
+    18, 1, 0x00, 0x02, 0, 0, 0, 64, 0x09, 0x12, 0x01, 0x00, 0x00, 0x02, 1, 2, 3, 1,
 };
 
 #define FORMAT(alt, bytes, bits, mps)                                                          \
@@ -52,6 +52,47 @@ static const uint8_t cfg_desc[] = {
     FORMAT(2, 3, 24, MPS24),
 };
 
+/* ---- at high speed: USB Audio Class 2 (an interface association, class 0xEF), every rate the
+ * DACs play from 44.1 to 96 kHz, 16 bits, 24 bits in 4 bytes (the ring's format), 32 bits; a
+ * packet every 4 microframes (500 us: a packet every microframe, re-armed from the interrupt,
+ * missed one in two in 97Q), the feedback (16.16, samples per microframe) every 8 (1 ms) ---- */
+static const uint8_t dev_hs[18] = {
+    18, 1, 0x00, 0x02, 0xef, 0x02, 0x01, 64, 0x09, 0x12, 0x01, 0x00, 0x00, 0x02, 1, 2, 3, 1,
+};
+
+/* 176.4 and 192 kHz left out: their 24-bit packets (776 bytes) do not fit in the RX FIFO, fixed
+ * at 147 words (hwcfg2: no dynamic FIFO sizing, GRXFSIZ stays), and UAC2 rates are the clock's,
+ * the same for every format */
+#define MPS2_16     196                         /* 49 frames of 4 bytes (96 kHz: 48) */
+#define MPS2_32     392                         /* 49 frames of 8 bytes */
+#define CLOCK_ID    0x10
+static const uint32_t rates2[] = { 44100, 48000, 88200, 96000 };
+#define N_RATES2 (int)(sizeof rates2 / sizeof *rates2)
+
+#define FORMAT2(alt, sub, bits, mps)                                                           \
+    9, 4, 1, alt, 2, 1, 2, 0x20, 0,                     /* streaming, alternate, 2 endpoints */ \
+    16, 0x24, 1, 1, 0, 1, 1, 0, 0, 0, 2, 3, 0, 0, 0, 0, /* general: terminal 1, PCM, L and R */ \
+    6, 0x24, 2, 1, sub, bits,                           /* type I: subslot, bits */             \
+    7, 5, 0x01, 0x05, (mps) & 0xff, (mps) >> 8, 3,      /* OUT 1, asynchronous, 500 us */       \
+    8, 0x25, 1, 0, 0, 0, 0, 0,                                                                   \
+    7, 5, 0x81, 0x11, 4, 0, 4                           /* IN 1: feedback, 1 ms */
+
+static const uint8_t cfg_hs[] = {
+    9, 2, 258 & 0xff, 258 >> 8, 2, 1, 0, 0x80, 250,     /* 2 interfaces, bus powered, 500 mA */
+    8, 0x0b, 0, 2, 1, 0, 0x20, 0,                       /* association: audio, interfaces 0-1 */
+    9, 4, 0, 0, 0, 1, 1, 0x20, 0,                       /* audio control, UAC 2 */
+    9, 0x24, 1, 0x00, 0x02, 0x01, 64, 0, 0,             /* header: 2.00, desktop speaker */
+    8, 0x24, 0x0a, CLOCK_ID, 0x03, 0x07, 0, 0,          /* clock: internal, programmable */
+    17, 0x24, 2, 1, 0x01, 0x01, 0, CLOCK_ID, 2, 3, 0, 0, 0, 0, 0, 0, 0,     /* input: USB */
+    18, 0x24, 6, 2, 1, 0x0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  /* feature: mute, volume */
+    12, 0x24, 3, 3, 0x02, 0x03, 0, 2, CLOCK_ID, 0, 0, 0,          /* output: headphones */
+    9, 4, 1, 0, 0, 1, 2, 0x20, 0,                       /* streaming, alternate 0: no data */
+    FORMAT2(1, 2, 16, MPS2_16),
+    FORMAT2(2, 4, 24, MPS2_32),
+    FORMAT2(3, 4, 32, MPS2_32),
+};
+_Static_assert(sizeof cfg_hs == 258, "UAC2 configuration length");
+
 /* ---- the host's side ---- */
 static volatile int alt, alt_new = -1;          /* streaming alternate: 0 off, 1 16-bit, 2 24-bit */
 static volatile uint32_t rate = 48000, rate_new;
@@ -60,7 +101,8 @@ static volatile int host_mute, vol_changed = 1;
 
 #define VOL_MIN (-64 * 256)
 
-/* ---- the feedback: samples per frame, 10.14 ---- */
+/* ---- the feedback: samples per frame, 10.14 (at high speed, sent as 16.16 per microframe:
+ * half the value) ---- */
 static struct {
     int32_t avg;                /* the fill, frames x 16, averaged */
     int32_t integ;              /* the integral, 1/256 of the 10.14 unit */
@@ -79,12 +121,23 @@ static void fb_control(int32_t fill);
 
 static void fb_send(void)
 {
-    uint8_t b[3];
+    uint8_t b[4];
     fb.sent = fb_value();
-    b[0] = (uint8_t)fb.sent;
-    b[1] = (uint8_t)(fb.sent >> 8);
-    b[2] = (uint8_t)(fb.sent >> 16);
-    usb_iso_in_send(b, 3);
+    uint32_t v = usb.high_speed ? fb.sent >> 1 : fb.sent;
+    b[0] = (uint8_t)v;
+    b[1] = (uint8_t)(v >> 8);
+    b[2] = (uint8_t)(v >> 16);
+    b[3] = (uint8_t)(v >> 24);
+    usb_iso_in_send(b, usb.high_speed ? 4 : 3);
+}
+
+static int put32(uint8_t *r, uint32_t v)
+{
+    r[0] = (uint8_t)v;
+    r[1] = (uint8_t)(v >> 8);
+    r[2] = (uint8_t)(v >> 16);
+    r[3] = (uint8_t)(v >> 24);
+    return 4;
 }
 
 static int put16(uint8_t *r, int v)
@@ -94,10 +147,48 @@ static int put16(uint8_t *r, int v)
     return 2;
 }
 
+/* UAC2 requests: CUR (1) and RANGE (2) of the clock (its rate, valid) and of the feature unit
+ * (mute, volume), the entity in the high byte of wIndex */
+static int uac2_get(uint8_t req, uint8_t entity, uint8_t cs, uint8_t cn, uint8_t *r)
+{
+    if (entity == CLOCK_ID && cs == 1 && req == 1)
+        return put32(r, rate);
+    if (entity == CLOCK_ID && cs == 1 && req == 2) {    /* the rates: one range each */
+        int n = put16(r, N_RATES2);
+        for (int i = 0; i < N_RATES2; i++) {
+            n += put32(r + n, rates2[i]);
+            n += put32(r + n, rates2[i]);
+            n += put32(r + n, 0);
+        }
+        return n;
+    }
+    if (entity == CLOCK_ID && cs == 2 && req == 1) {    /* valid */
+        r[0] = 1;
+        return 1;
+    }
+    if (entity != 2 || cn != 0)
+        return -1;
+    if (cs == 1 && req == 1) {
+        r[0] = (uint8_t)host_mute;
+        return 1;
+    }
+    if (cs == 2 && req == 1)
+        return put16(r, host_vol);
+    if (cs == 2 && req == 2) {                          /* one range: -64 to 0 dB by 0.5 */
+        int n = put16(r, 1);
+        n += put16(r + n, VOL_MIN);
+        n += put16(r + n, 0);
+        n += put16(r + n, 128);
+        return n;
+    }
+    return -1;
+}
+
 static int uac_setup(const uint8_t *s, uint8_t *r)
 {
     uint8_t type = s[0], req = s[1], cs = s[3];
     uint16_t index = s[4] | s[5] << 8, value = s[2] | s[3] << 8;
+    int hs = usb.high_speed;
     if ((type & 0x60) == 0) {                           /* SET_INTERFACE, GET_INTERFACE */
         if ((index & 0xff) == 0)
             return req == 10 ? (r[0] = 0, 1) : 0;
@@ -105,11 +196,12 @@ static int uac_setup(const uint8_t *s, uint8_t *r)
             r[0] = (uint8_t)alt;
             return 1;
         }
-        if (value > 2)
+        if (value > (hs ? 3 : 2))
             return -1;
         if (value) {
-            usb_iso_out_open(value == 1 ? MPS16 : MPS24);
-            usb_iso_in_open(3);
+            usb_iso_out_open(hs ? (value == 1 ? MPS2_16 : MPS2_32) : value == 1 ? MPS16 : MPS24,
+                             hs ? 4 : 1);
+            usb_iso_in_open(hs ? 4 : 3, hs ? 8 : 1);
             fb_send();
         } else {
             usb_iso_out_close();
@@ -119,6 +211,8 @@ static int uac_setup(const uint8_t *s, uint8_t *r)
         alt_new = value;
         return 0;
     }
+    if (hs)
+        return (type & 0x1f) == 1 ? uac2_get(req, (uint8_t)(index >> 8), cs, s[2], r) : -1;
     if ((type & 0x1f) == 2) {                           /* endpoint: the sampling frequency */
         if ((index & 0x0f) != 1 || cs != 1 || req != 0x81)
             return -1;
@@ -144,21 +238,41 @@ static int uac_setup(const uint8_t *s, uint8_t *r)
     return -1;
 }
 
+/* The host's rate: at once for the feedback (the packet already queued is replaced: the host
+ * reads the first ones to know the feedback's format), with the format for the output */
+static void new_rate(uint32_t f)
+{
+    rate = f;
+    rate_new = f;
+    if (alt) {
+        alt_new = alt;
+        fb.on = 0;
+        usb_iso_in_close();
+        usb_iso_in_open(usb.high_speed ? 4 : 3, usb.high_speed ? 8 : 1);
+        fb_send();
+    }
+}
+
 static void uac_setup_out(const uint8_t *s, const uint8_t *d, uint32_t n)
 {
     uint8_t req = s[1], cs = s[3];
     uint16_t index = s[4] | s[5] << 8;
-    if (req != 0x01)                                    /* SET_CUR only */
+    if (req != 0x01)                                    /* SET_CUR only (UAC2: CUR, also 1) */
         return;
-    if ((s[0] & 0x1f) != 2 && index != 0x0200)          /* not feature unit 2 */
+    if (usb.high_speed && (index >> 8) == CLOCK_ID) {  /* UAC2: the clock's rate */
+        uint32_t f = d[0] | d[1] << 8 | (uint32_t)d[2] << 16 | (uint32_t)d[3] << 24;
+        for (int i = 0; n >= 4 && cs == 1 && i < N_RATES2; i++)
+            if (f == rates2[i])
+                new_rate(f);
+        return;
+    }
+    if (usb.high_speed ? (index >> 8) != 2 || s[2] != 0 :  /* not feature unit 2 */
+        (s[0] & 0x1f) != 2 && index != 0x0200)
         return;
     if ((s[0] & 0x1f) == 2 && cs == 1 && n >= 3) {     /* sampling frequency */
         uint32_t f = d[0] | d[1] << 8 | (uint32_t)d[2] << 16;
-        if (f == 44100 || f == 48000) {
-            rate_new = f;
-            if (alt)
-                alt_new = alt;                          /* applied with the format */
-        }
+        if (f == 44100 || f == 48000)
+            new_rate(f);
     } else if (cs == 1 && n >= 1) {
         host_mute = d[0] != 0;
         vol_changed = 1;
@@ -178,10 +292,11 @@ static struct {
     int32_t target, window, settle, ahead;  /* in ring bytes */
     uint32_t last_ms;           /* millis() of the last packet */
     uint32_t packets, dropped, repeated, realigned, bad;
+    uint32_t per_ms, sub;       /* packets a millisecond: 2 at high speed; the count */
     int32_t fill_min, fill_max;
 } st;
 static uint32_t rate_rd0, rate_t0;                      /* the output's real rate, from the DMA */
-static uint32_t pkt[(MPS24 + 3) / 4], out[2 * 49 + 2];
+static uint32_t pkt[(MPS2_32 + 3) / 4], out[2 * 97 + 2];
 
 static int32_t ms_bytes(uint32_t us)
 {
@@ -203,12 +318,16 @@ static void uac_iso_out(uint32_t n)
     if (!st.ready || !n)
         return;
     st.packets++;
-    /* to the ring's format: 16 bits as they are (left low, right high), 24 bits in the high
-     * bits of a 32-bit word per sample */
+    /* to the ring's format: 16 bits as they are (left low, right high), 24 or 32 bits in the
+     * high bits of a 32-bit word per sample (UAC2: as they come, 4-byte subslots) */
     uint32_t frames, k = 0;
     if (alt == 1) {
         frames = n / 4;
         for (uint32_t i = 0; i < frames; i++)
+            out[k++] = pkt[i];
+    } else if (usb.high_speed) {
+        frames = n / 8;
+        for (uint32_t i = 0; i < 2 * frames; i++)
             out[k++] = pkt[i];
     } else {
         const uint8_t *b = (const uint8_t *)pkt;
@@ -230,7 +349,10 @@ static void uac_iso_out(uint32_t n)
         st.corr = 0;
         fill = audio_fill();
     }
-    fb_control(fill);
+    if (++st.sub >= st.per_ms) {                       /* the control: once a millisecond */
+        st.sub = 0;
+        fb_control(fill);
+    }
     if (fill < st.fill_min)
         st.fill_min = fill;
     if (fill > st.fill_max)
@@ -298,7 +420,8 @@ static void uac_reset(void)
 }
 
 static const struct usb_class uac = {
-    .dev = dev_desc, .cfg = cfg_desc, .cfg_len = sizeof cfg_desc, .full_speed = 1,
+    .dev = dev_desc, .cfg = cfg_desc, .cfg_len = sizeof cfg_desc,
+    .dev_hs = dev_hs, .cfg_hs = cfg_hs, .cfg_hs_len = sizeof cfg_hs,
     .keep_audio_pins = 1,                               /* toggling them while playing clicks */
     .rx_fifo_words = 256, .ptx_fifo_words = 16, .setup = uac_setup, .setup_out = uac_setup_out,
     .iso_out = uac_iso_out, .iso_in_done = uac_iso_in_done, .reset = uac_reset,
@@ -329,6 +452,8 @@ static void apply_format(void)
     cur_rate = rate;
     cur_alt = a;
     st.frame = bits16 ? 4 : 8;
+    st.per_ms = usb.high_speed ? 2 : 1;
+    st.sub = 0;
     st.target = ms_bytes(TARGET_MS * 1000);
     st.window = ms_bytes(WINDOW_US);
     st.settle = ms_bytes(SETTLE_US);
@@ -341,7 +466,8 @@ static void apply_format(void)
     rate_t0 = ticks();
     vol_changed = 1;
     st.ready = 1;
-    log_printf("uac: stream %u Hz, %u bits", rate, bits16 ? 16 : 24);
+    log_printf("uac: stream %u Hz, %u bits, %s speed", rate, a == 1 ? 16 : a == 2 ? 24 : 32,
+               usb.high_speed ? "high" : "full");
 }
 
 /* Silence ahead of the DMA when no packet comes (also during a volume ramp) */
@@ -372,8 +498,12 @@ static void screen(int line, uint32_t max_gap)
     p = b;
     if (alt) {
         p = put_dec(p, rate / 1000);
-        p = put_str(p, rate % 1000 ? ".1 kHz, " : " kHz, ");
-        p = put_dec(p, alt == 1 ? 16 : 24);
+        if (rate % 1000) {
+            *p++ = '.';
+            *p++ = (char)('0' + rate % 1000 / 100);
+        }
+        p = put_str(p, " kHz, ");
+        p = put_dec(p, alt == 1 ? 16 : alt == 2 ? 24 : 32);
         p = put_str(p, " bits, feedback ");
         uint32_t d = (uint32_t)((uint64_t)fb.sent * 10000 >> 14);
         p = put_dec(p, d / 10);
@@ -506,7 +636,8 @@ void uac_mode(void)
         last = now;
         if (usb.configured && !configured_at) {
             configured_at = millis();
-            log_printf("uac: configured after %u ms", configured_at - t0);
+            log_printf("uac: configured after %u ms, rx fifo %u words", configured_at - t0,
+                       usb.rx_fifo);
         }
         if (alt_new >= 0) {
             uint32_t t = ticks();
@@ -514,6 +645,11 @@ void uac_mode(void)
             apply_format();
             usb_irq_block(0);
             timed(T_FORMAT, t);
+        }
+        if (alt && usb.high_speed) {
+            usb_irq_block(1);
+            usb_iso_watch();
+            usb_irq_block(0);
         }
         if (st.ready && st.flowing && millis() - st.last_ms > STALL_MS) {
             st.flowing = 0;                             /* the host stopped sending */

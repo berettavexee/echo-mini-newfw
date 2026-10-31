@@ -178,11 +178,13 @@ is open, except for the USB and system entries, which stop it.
   the clock was not set or was behind that file.
 - The microSD card is not available over USB yet.
 
-**USB sound card** (0.97): plug the cable, then choose the entry. The computer sees a sound card
-named "ECHO MINI" (USB Audio Class 1, full speed, asynchronous, no driver needed), and its sound
-comes out of the player's headphone outputs, sample for sample: the player keeps its own clock
-and tells the computer how many samples to send ("feedback" on the screen).
-- Formats: 16 or 24 bits, 44.1 or 48 kHz, stereo. Other rates are converted by the computer.
+**USB sound card** (0.97, high speed in 0.98): plug the cable, then choose the entry. The computer
+sees a sound card named "ECHO MINI" (USB Audio Class 2 at high speed, or Class 1 on an older
+full-speed port; asynchronous, no driver needed), and its sound comes out of the player's
+headphone outputs, sample for sample: the player keeps its own clock and tells the computer how
+many samples to send ("feedback" on the screen).
+- Formats: 16, 24 or 32 bits, 44.1, 48, 88.2 or 96 kHz, stereo (full speed: 16 or 24 bits, 44.1
+  or 48 kHz). Other rates (176.4 and 192 kHz among them) are converted by the computer.
 - **VOL+** / **VOL-** set the sound card's own volume, kept for the next time (the first time,
   the playback volume); the computer's volume (and mute) adds to it, in 0.5 dB steps on the
   DACs.

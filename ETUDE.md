@@ -3606,3 +3606,57 @@ Restent : une écoute de plusieurs heures, Android et iPhone (avec la question d
 - `uac.c` : la routine d'interruption reçoit les paquets, les écrit dans l'anneau, réarme les endpoints et envoie le retour d'horloge ; la boucle ne fait plus que l'écran, les touches, le volume et le journal ; le silence au repos, le changement de format et la lecture de la position du DMA se font interruption masquée ; les crochets de la 97H (USB servi pendant le dessin et pendant l'I2C) sont retirés.
 
 **Sur l'appareil** (PC Linux, `work/hwlog/1030_097n/`) : sinus avec changement de format et volume de l'hôte modifié pendant la lecture, puis 3,5 minutes de l'album *Vae Vobis* : mêmes résultats qu'à l'étape 2 (aucune trame supprimée ni répétée, aucun recalage, retour d'horloge 44 101,7 Hz, écart 0, intégrale 29) ; environ 1 870 interruptions par seconde, 32 µs au plus. Un paquet manqué pendant la lecture (sans correction déclenchée, inaudible) : à surveiller à l'étape 3b. La mesure de la plus longue interruption lisait une fois une durée négative : `ticks()` peut reculer d'environ 1 ms lu dans une interruption pendant que celle de SysTick attend ; ces mesures sont ignorées.
+
+## 87. Carte son USB, étape 3b : UAC2 en high speed (0.98, 2026-10-31)
+
+**But** : sortir des 44,1 et 48 kHz de l'UAC1 en full speed, où la FIFO de réception (147 mots) borne la taille des paquets ; notre pilote énumère déjà en high speed.
+
+**Réalisation** :
+- `usb.c` : une classe peut donner des descripteurs propres au high speed (`dev_hs`, `cfg_hs`), choisis d'après la vitesse de l'énumération ; réponses de l'endpoint 0 jusqu'à 128 octets ;
+- `uac.c` : en high speed, profil **UAC2** (association d'interfaces, source d'horloge 0x10 programmable, terminal d'entrée, feature unit mute et volume, terminal de sortie casque ; alternates 1 = 16 bits, 2 = 24 bits dans 4 octets, 3 = 32 bits ; configuration de 258 octets) ; l'UAC1 reste servi en full speed. Requêtes UAC2 CUR et RANGE (fréquence, validité de l'horloge, mute, volume) ; un SET_CUR de fréquence est appliqué aussitôt et le paquet de retour déjà en file est remplacé (l'hôte lit les premiers pour connaître le format du retour). Retour d'horloge en 16.16, échantillons par micro-trame ; le régulateur de l'étape 2 tourne une fois par milliseconde ;
+- endpoint audio OUT : un paquet toutes les 4 micro-trames (500 µs) ; la parité de la micro-trame visée vient du champ numéro de trame de `GRXSTSP` du dernier paquet reçu ; les événements « incomplete ISO OUT » des micro-trames intermédiaires sont ignorés ; `usb_iso_watch()` (boucle, interruption masquée) retourne la parité si rien n'est passé en 2 ms (premier paquet visé à tort, compté parmi les manqués) ;
+- endpoint de retour IN : un paquet toutes les 8 micro-trames (1 ms, `bInterval` 4), parité de la micro-trame courante.
+
+**Essais qui ont échoué** : 97O (le retour gardait l'ancienne fréquence après un changement), 97P (Linux ignore un endpoint de retour qui ne répond pas à chaque intervalle : paquets vides, re-visée), 97Q (un paquet audio par micro-trame, réarmé depuis l'interruption : un paquet sur deux manqué ; d'où 500 µs).
+
+**97R** (`work/hwlog/1031_097r/`, sinus en 16 bits) : les 6 fréquences de 44,1 à 192 kHz, aucune trame supprimée ni répétée, environ 6 000 interruptions par seconde, 65 µs au plus.
+
+**97S : aucun paquet en 24 bits** (`work/hwlog/1031_097s/`) : les mêmes essais en 24 bits ne reçoivent rien (0 paquet, 50 708 parités retournées en 263 s) alors que le retour d'horloge passe ; Linux affichait la fréquence nominale, celle que l'appareil renvoie tant qu'aucun paquet n'arrive. Cause : la FIFO de réception reste à **147 mots** quoi qu'on écrive dans `GRXFSIZ` (`hwcfg2` bit 19 à 0 : pas de redimensionnement des FIFO ; la valeur relue est désormais écrite au journal, « rx fifo 147 words », 97T). Un paquet de 776 octets (97 trames de 8 octets) n'y tient pas et le contrôleur le jette sans le signaler ; 388 octets (16 bits) passent. Les mentions « 256 mots en réception » des §84-§85 étaient donc fausses : la FIFO a toujours gardé sa taille d'origine.
+
+**Choix** (avec l'utilisateur) : 44,1 / 48 / 88,2 / 96 kHz en 16, 24 et 32 bits, paquets de 392 octets au plus (49 trames de 8 octets) ; 176,4 et 192 kHz retirés de la carte son. En UAC2, les fréquences sont celles de l'horloge, communes à tous les formats : on ne peut pas garder 192 kHz pour le seul 16 bits. Les sources en 24 bits au-delà de 96 kHz sont rares ; passer à un paquet toutes les 2 micro-trames (250 µs) les permettrait, au prix d'environ deux fois plus d'interruptions.
+
+**97T sur l'appareil** (`work/hwlog/1031_097t/`) : les 4 fréquences en 24 puis en 16 bits, puis des démarrages de flux répétés : son clair et continu, **167 708 paquets, aucune trame supprimée ni répétée, aucun recalage**, aucun manque de l'anneau ; environ un paquet manqué par démarrage de flux (la parité trouvée), avant le son. Un clic entendu au début de chaque son venait des sinus de l'essai, qui commençaient d'un coup : avec 50 ms de montée, plus rien.
+
+## 88. Horloges audio : la PLL de l'ACODEC (0.98, 2026-10-31)
+
+**Constat** : en essayant 176,4 kHz par la carte son (§87), le débit réel des DAC, mesuré par la position du DMA sur 10 s, était de **175 912 Hz**, 0,28 % trop lent (97R, `work/hwlog/1031_097r/`). Le réglage vient des tables du firmware d'origine, comme celui de RECHO. La lecture de fichiers à 176,4 kHz en souffrait depuis la 0.16 : 5 cents trop bas et 0,28 % trop lent, inaudible, et ni l'essai à l'oreille de la 0.79 (§60) ni la durée des pistes (7,0 s pour 7 s) ne pouvaient le voir. La carte son, elle, ne trouve plus d'équilibre : le régulateur réclame moins à l'hôte et Linux supprime des trames (bips).
+
+**Chaîne d'horloge** (TRM, chapitre de l'ACODEC et registres de la CRU) : quartz 24 MHz → PLL de l'ACODEC (`ACODEC_PLLCFG0`-`5`, `+0x200`-`+0x214`) → `clk_acodec_pll` → diviseur de l'I2S1 dans la CRU (`CLKSEL` `+0x20`, réglé à 5) → MCLK → diviseur de l'I2S (`CKR` bits 23:16, + 1) → SCLK = 64 fs. Dans la PLL : fréquence de l'oscillateur (VCO) = 24 MHz × POSDIV / PREDIV, avec POSDIV sur 11 bits, les 8 bits de poids fort dans `PLLCFG2` (deuxième paramètre des tables) et les 3 de poids faible dans les bits 2:0 de `PLLCFG1` (premier paramètre, dont les bits 5:3 choisissent un courant) ; PREDIV dans `PLLCFG3` (troisième) ; puis un diviseur de sortie codé dans les bits 7:4 de `PLLCFG4` (quatrième). Le TRM présente ce champ comme le diviseur lui-même ; les tables d'origine, qui donnent la fréquence de sortie en kHz à côté de chaque entrée (§60), montrent que c'est un code : **3 → 5, 8 → 9, 9 → 3, 10 → 6**.
+
+**Toutes les entrées des tables d'origine** :
+
+| Paramètres | POSDIV / PREDIV | VCO | Sortie annoncée | Résultat sur l'appareil |
+|---|---|---|---|---|
+| `3 18 25 3` | 147 / 25 | 141,12 MHz | 28,224 MHz (11,025 et 22,05 kHz) | pas d'horloge ou presque (0.78, §60) |
+| `0 24 25 10` | 192 / 25 | 184,32 MHz | 30,72 MHz (12, 24 kHz) | juste |
+| `0 48 50 8` | 384 / 50 | 184,32 MHz | 20,48 MHz (8, 16 kHz) | juste |
+| `6 36 25 3` | 294 / 25 | 282,24 MHz | 56,448 MHz (44,1, 88,2 kHz) | juste |
+| `0 48 25 10` | 384 / 25 | 368,64 MHz | 61,44 MHz (48 kHz) | juste |
+| `0 48 25 9` | 384 / 25 | 368,64 MHz | 122,88 MHz (96, 192 kHz) | juste |
+| `0 96 50 8` | 768 / 50 | 368,64 MHz | 40,96 MHz (32 kHz) | juste |
+| `4 73 25 3` | 588 / 25 | **564,48 MHz** | 112,896 MHz (176,4 kHz) | **−0,28 %** |
+| `0 96 25 8` | 768 / 25 | **737,28 MHz** | 81,92 MHz (64, 128 kHz) | beaucoup trop lent (0.78, §60) |
+
+Les trois entrées fausses sont exactement celles dont le VCO sort de **184 à 369 MHz**, la plage de toutes les entrées justes : en dessous (141 MHz), la PLL ne démarre pas ; au-dessus, elle ne tient plus la fréquence demandée, de peu à 564 MHz, de beaucoup à 737 MHz. Les paramètres d'origine sont justes sur le papier : c'est le matériel qui ne suit pas. Le TRM donne d'ailleurs une seule sortie par famille (40,96, 56,448 et 61,44 MHz), les fréquences hautes ne changeant que les diviseurs en aval ; c'est ce que la 0.79 avait fait pour 11,025, 22,05, 64 et 128 kHz (PLL éprouvées, autre rapport MCLK/SCLK) sans en connaître la raison.
+
+**Une fausse correction (97S)** : `0c 48 19 03`, lu comme le double de `06 24`, en prenant le premier paramètre pour une fraction. Selon la formule, c'est POSDIV 580 avec un autre courant de PLL : 175 200 Hz mesurés (−0,68 %), bips par la carte son. Retenu : une entrée se juge à son VCO, et on la mesure.
+
+**Correction (97U)** : 176,4 kHz sur la PLL de 44,1 kHz (`06 24 19 03`, VCO 282,24 MHz, sortie 56,448 MHz), MCLK = SCLK (`CKR` = `0x00003f3f`, 64 fs : les DAC acceptaient déjà de 128 à 1 024 fs). Autre possibilité, non essayée : POSDIV 1 764 / PREDIV 125 et le code 9 (VCO 338,688 MHz, MCLK 128 fs), avec une référence de 0,192 MHz, bien plus basse que toutes les autres.
+
+**Mesure du débit pendant la lecture** (`audio.c`) : à chaque changement de fréquence, pause ou arrêt (et toutes les 30 minutes au plus), le journal donne le débit réel tiré de la progression du DMA, « audio: output rate … Hz over … ms (nominal …) ». Précision d'environ ±0,015 % sur une piste de 7 s, quelques ppm sur une minute.
+
+**97U sur l'appareil** (`work/hwlog/1031_097u/`) :
+- `test_rates/`, les 15 fréquences de 8 à 192 kHz : **toutes justes** (écart le plus grand +0,0125 %, 8 001,0 Hz sur 7 s, dans la précision de la mesure) ; 176,4 kHz : 176 400,4 Hz sur 7 s ;
+- carte son à 176,4 kHz en 16 bits (ajout provisoire, retiré ensuite) : 176 400,1 Hz sur 55 s, retour d'horloge 176 407 Hz (+40 ppm, l'écart des horloges du PC et de l'appareil déjà mesuré à 44,1 kHz), aucune trame supprimée ni répétée sur 59 986 paquets ; son propre à l'écoute.
+
+Plus aucune fréquence de la table ne repose sur un VCO hors de la plage éprouvée.

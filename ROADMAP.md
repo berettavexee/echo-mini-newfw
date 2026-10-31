@@ -22,6 +22,7 @@ Last update: 2026-10-30, version 0.96.
 | Settings screen: screen timeout, brightness (backlight PWM), tags or file names, ReplayGain auto and preamp, start-up, sleep timer, power off when idle, swapped volume keys | 0.96 | §81 |
 | Brightness in ten perceptual steps (8 to 100 %, about x1.3 a step) | 0.97 | §82 |
 | USB sound card: UAC1 at full speed, 16 and 24 bits, 44.1 and 48 kHz, asynchronous with a rate feedback, bit-perfect (tested with Linux) | 0.97 | §84-§85 |
+| USB sound card at high speed: UAC2, 16, 24 and 32 bits, 44.1 to 96 kHz, bit-perfect (tested with Linux); UAC1 kept at full speed | 0.98 | §87 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
 | USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
@@ -37,7 +38,7 @@ Last update: 2026-10-30, version 0.96.
 | AIFF and AIFF-C (uncompressed), in the WAV image; tags after the samples read in WAV and AIFF | 0.74 | §53 |
 | AAC-LC in M4A: PacketVideo decoder, MP4 read on core A, gapless, exact seek, iTunes tags and ReplayGain | 0.75 | §54-§55 |
 | ALAC in M4A (16, 20, 24 bits), on the same MP4 reader; our decoder derived from Apple's (half the load) | 0.76, 0.77 | §56-§57 |
-| Sample rates from 8 to 192 kHz played as they are (the stock firmware's 15 rates, two PLLs corrected); upsampling for unusual rates | 0.78, 0.79 | §59-§60 |
+| Sample rates from 8 to 192 kHz played as they are (the stock firmware's 15 rates, three PLLs corrected: 176.4 kHz was 0.28 % slow until 0.98); upsampling for unusual rates; the real output rate in the log | 0.78, 0.79, 0.98 | §59-§60, §88 |
 | Musepack SV7 and SV8, APEv2 tags, exact seek | 0.80 | §61 |
 | Decoders hardened against damaged files; a fuzzing bench (Ogg, Vorbis, Opus, MP3, AAC, MP4, tags, FAT) | 0.81-0.83, 0.91 | §62-§64 |
 | The chip's accelerators: FLAC LPC (HIFIACC), MP3 synthesis (SYNTH), Vorbis IMDCT (HIFIACC FFT), AAC IMDCT FFTs (HIFIACC), Musepack synthesis (SYNTH): 28 to 65 % less core B load | 0.85-0.93 | §66-§77 |
@@ -93,6 +94,12 @@ One line per version; the measurements are in `ETUDE.md`.
   comments put the picture in the middle) and Musepack tags with a cover were lost (§81). New
   emulator scenarios: a real album's ReplayGain, a library of 18,260 tracks in 1,396 folders,
   large covers; two scenarios at a time at most.
+- 0.97: brightness in perceptual steps, steady battery percent (§82); the USB sound card: UAC1
+  at full speed, asynchronous, then on the USB interrupt (§83-§86).
+- 0.98: the USB sound card in UAC2 at high speed, 44.1 to 96 kHz in 16, 24 and 32 bits (the RX
+  FIFO stays at 147 words: no larger packets) (§87); 176.4 kHz played 0.28 % slow since 0.16
+  (the stock firmware's PLL beyond its VCO's range), now exact; the output rate measured in the
+  log, the 15 rates checked (§88).
 
 ## To do
 
@@ -123,11 +130,10 @@ One line per version; the measurements are in `ETUDE.md`.
      dropped or repeated in 13 minutes); dropping or repeating kept as a fallback.
   3. a. Done in 0.97 (§86): the sound card on the USB controller's interrupt (5), the loop only
      for the screen, keys, volume and log; the same results as step 2.
-     b. UAC2 at high speed (our driver already enumerates at high speed): one packet every 125 us,
-     so 192 kHz in 32 bits needs 192 bytes, where full speed hits the RX FIFO (147 words) above
-     48 kHz in 24 bits; every rate the DACs play (44.1 to 192 kHz); UAC1 at full speed kept for
-     older hosts. First, check the controller's isochronous mode at high speed and the split of
-     its FIFOs (308 words) in the TRM.
+     b. Done in 0.98 (§87): UAC2 at high speed, 44.1 to 96 kHz in 16, 24 and 32 bits, a packet
+     every 500 us; UAC1 at full speed kept for older hosts. The RX FIFO cannot be resized (147
+     words): 176.4 and 192 kHz in 24 bits would need a packet every 250 us (about twice the
+     interrupts); left out, such sources being rare.
   4. Use: HID media keys (play/pause, next, previous, volume to the host or to the DACs), a
      screen with the format received, the rate fed back, an "untouched stream" mark and a level
      meter; power saving off in this mode (USB-powered).

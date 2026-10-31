@@ -87,7 +87,7 @@ static const char *const strings[] = { 0, "newfw", "ECHO MINI", "000000000001" }
 
 /* ---- endpoint 0 state ---- */
 static uint32_t setup[2];
-static uint32_t ep0_buf[64];            /* descriptor being sent */
+static uint32_t ep0_buf[96];            /* descriptor being sent (UAC2: 258 bytes) */
 static const uint8_t *ep0_ptr;
 static uint32_t ep0_left;
 static int ep0_zlp;
@@ -95,8 +95,14 @@ static uint8_t ep0_rx[64];              /* the data stage of a request from the 
 static uint32_t ep0_rx_want, ep0_rx_got;
 static uint8_t ep0_rx_setup[8];
 
-/* ---- endpoint 1 isochronous OUT and IN (a class): their packet sizes, 0 when closed ---- */
-static uint32_t iso_mps, iso_in_mps;
+/* ---- endpoint 1 isochronous OUT and IN (a class): their packet sizes, 0 when closed; their
+ * intervals in (micro)frames. Every frame (full speed): each packet aimed at the frame after the
+ * current one. An even number of microframes (high speed): the host always uses the same
+ * parity, so a packet is aimed at the parity of the last one (the OUT's from its status), the
+ * incomplete-transfer events of the microframes in between are left alone, and usb_iso_watch()
+ * turns the parity over should nothing go through for 2 ms (the first packet) ---- */
+static uint32_t iso_mps, iso_in_mps, iso_every, iso_in_every;
+static uint32_t iso_rx_fn, iso_rx_t, iso_in_t;     /* the last OUT's frame (4 bits), times */
 
 /* ---- endpoint 1 state ---- */
 static uint8_t *out_buf;
@@ -237,14 +243,17 @@ static uint32_t string_desc(int i, uint8_t *d)
 /* Endpoint 1 OUT armed for one isochronous packet in the next frame (its parity) */
 static void iso_arm(void)
 {
-    uint32_t fn = (REG(DSTS) >> 8) & 0x3fff;
+    uint32_t fn = (REG(DSTS) >> 8) & 0x3fff, odd = iso_every > 1 ? iso_rx_fn & 1 : !(fn & 1);
     REG(DOEPTSIZ(1)) = 1u << 19 | iso_mps;
-    REG(DOEPCTL(1)) |= EP_ENA | EP_CNAK | ((fn & 1) ? EP_SD0PID : EP_SODDFR);
+    REG(DOEPCTL(1)) |= EP_ENA | EP_CNAK | (odd ? EP_SODDFR : EP_SD0PID);
 }
 
-void usb_iso_out_open(uint32_t mps)
+void usb_iso_out_open(uint32_t mps, uint32_t every)
 {
     iso_mps = mps;
+    iso_every = every;
+    iso_rx_fn = ((REG(DSTS) >> 8) + 1) & 0xf;
+    iso_rx_t = ticks();
     REG(DOEPCTL(1)) = EP_ISO | EP_ACTIVE | EP_SNAK | mps;
     REG(DOEPINT(1)) = 0xff;
     iso_arm();
@@ -270,9 +279,11 @@ static void ptx_flush(void)
     wait_reg_clear(GRSTCTL, 1u << 5, 10000);
 }
 
-void usb_iso_in_open(uint32_t mps)
+void usb_iso_in_open(uint32_t mps, uint32_t every)
 {
     iso_in_mps = mps;
+    iso_in_every = every;
+    iso_in_t = ticks();
     REG(DIEPCTL(1)) = EP_ISO | EP_ACTIVE | EP_TXFNUM1 | EP_SNAK | mps;
     REG(DIEPINT(1)) = 0xff;
     ptx_flush();
@@ -287,15 +298,18 @@ void usb_iso_in_close(void)
     ptx_flush();
 }
 
-/* One packet for the next frame: the host polls every few frames (bRefresh), so a packet not
- * taken is aimed again at the next frame (GINT_IISOIXFR), as it stays in the FIFO */
+/* One packet: at full speed for the next frame (aimed again at the next one when not taken:
+ * GINT_IISOIXFR); at high speed for the parity of the microframe it is sent from (the last
+ * poll's) */
 void usb_iso_in_send(const void *data, uint32_t n)
 {
     const uint8_t *p = data;
     if (!iso_in_mps || n > iso_in_mps)
         return;
+    uint32_t par = iso_in_every > 1 ? (((REG(DSTS) >> 8) & 1) ? EP_SODDFR : EP_SD0PID) :
+                                      next_frame_parity();
     REG(DIEPTSIZ(1)) = 1u << 29 | 1u << 19 | n;        /* one packet per frame */
-    REG(DIEPCTL(1)) |= EP_ENA | EP_CNAK | next_frame_parity();
+    REG(DIEPCTL(1)) |= EP_ENA | EP_CNAK | par;
     for (uint32_t i = 0; i < n; i += 4)
         REG(FIFO(1)) = p[i] | (i + 1 < n ? p[i + 1] << 8 : 0) | (i + 2 < n ? p[i + 2] << 16 : 0) |
                        (uint32_t)(i + 3 < n ? p[i + 3] : 0) << 24;
@@ -329,7 +343,7 @@ static void handle_setup(void)
     const uint8_t *s = (const uint8_t *)setup;
     uint8_t type = s[0], req = s[1];
     uint16_t value = s[2] | s[3] << 8, index = s[4] | s[5] << 8, length = s[6] | s[7] << 8;
-    uint8_t tmp[64];
+    uint8_t tmp[USB_REPLY_MAX];
 
     usb.setups++;
     if (cls && ((type & 0x60) == 0x20 || ((type & 0x60) == 0 && (req == 10 || req == 11) &&
@@ -342,11 +356,15 @@ static void handle_setup(void)
         case 6:                                         /* GET_DESCRIPTOR */
             switch (value >> 8) {
             case 1:
-                ep0_send(cls ? cls->dev : dev_desc, sizeof dev_desc, length);
+                ep0_send(!cls ? dev_desc : usb.high_speed && cls->dev_hs ? cls->dev_hs : cls->dev,
+                         sizeof dev_desc, length);
                 break;
             case 2:
                 if (cls) {
-                    ep0_send(cls->cfg, cls->cfg_len, length);
+                    if (usb.high_speed && cls->cfg_hs)
+                        ep0_send(cls->cfg_hs, cls->cfg_hs_len, length);
+                    else
+                        ep0_send(cls->cfg, cls->cfg_len, length);
                     break;
                 }
                 cfg_desc[22] = cfg_desc[29] = (uint8_t)usb.mps;
@@ -458,6 +476,8 @@ static void rx_pop(void)
                 setup[i] = w;
         }
     } else if (kind == 2 && ep == 1 && iso_mps && cls) {   /* isochronous OUT: to the class */
+        iso_rx_fn = (st >> 21) & 0xf;
+        iso_rx_t = ticks();
         cls->iso_out(n);
     } else if (kind == 2 && ep == 0 && ep0_rx_want) {   /* data stage of a class request */
         for (uint32_t i = 0; i < words; i++) {
@@ -538,14 +558,14 @@ void usb_service(void)
     }
     if (g & GINT_IISOIXFR) {                            /* the host did not poll that frame */
         REG(GINTSTS) = GINT_IISOIXFR;
-        if (iso_in_mps && (REG(DIEPCTL(1)) & EP_ENA)) {
+        if (iso_in_mps && iso_in_every == 1 && (REG(DIEPCTL(1)) & EP_ENA)) {
             usb.iso_in_late++;
             REG(DIEPCTL(1)) |= next_frame_parity();
         }
     }
     if (g & GINT_INCOMPLP) {                            /* a frame went by without our packet */
         REG(GINTSTS) = GINT_INCOMPLP;
-        if (iso_mps) {
+        if (iso_mps && iso_every == 1) {
             usb.iso_incomplete++;
             if (REG(DOEPCTL(1)) & EP_ENA) {             /* armed for a frame gone: the next one */
                 uint32_t fn = (REG(DSTS) >> 8) & 0x3fff;
@@ -567,6 +587,7 @@ void usb_service(void)
             REG(DIEPINT(1)) = i;
             if ((i & INT_XFERCOMPL) && iso_in_mps) {
                 usb.iso_in_sent++;
+                iso_in_t = ticks();
                 cls->iso_in_done();
             } else if (i & INT_XFERCOMPL)
                 in_done = 1;
@@ -670,6 +691,23 @@ void OTG_IRQHandler(void)
         usb.irq_max_us = (uint32_t)d;
 }
 
+/* High speed: the parity of an isochronous endpoint turned over when nothing went through for
+ * 2 ms (its first packet aimed at the wrong one); counted with the missed ones */
+void usb_iso_watch(void)
+{
+    uint32_t now = ticks();
+    if (iso_mps && iso_every > 1 && now - iso_rx_t > 2000 && (REG(DOEPCTL(1)) & EP_ENA)) {
+        REG(DOEPCTL(1)) |= (REG(DOEPCTL(1)) & 1u << 16) ? EP_SD0PID : EP_SODDFR;
+        iso_rx_t = now;
+        usb.iso_incomplete++;
+    }
+    if (iso_in_mps && iso_in_every > 1 && now - iso_in_t > 2000 && (REG(DIEPCTL(1)) & EP_ENA)) {
+        REG(DIEPCTL(1)) |= (REG(DIEPCTL(1)) & 1u << 16) ? EP_SD0PID : EP_SODDFR;
+        iso_in_t = now;
+        usb.iso_in_late++;
+    }
+}
+
 void usb_irq(int on)
 {
     irq_on = on;
@@ -764,6 +802,7 @@ void usb_start_class(const struct usb_class *c)
         REG(GRXFSIZ) = rx_size;
         REG(GNPTXFSIZ) = nptx_size;
     }
+    usb.rx_fifo = REG(GRXFSIZ) & 0xffff;
     flush_fifos();
 
     REG(DIEPCTL(0)) = EP_SNAK;
