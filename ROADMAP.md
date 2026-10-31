@@ -100,6 +100,9 @@ One line per version; the measurements are in `ETUDE.md`.
   FIFO stays at 147 words: no larger packets) (§87); 176.4 kHz played 0.28 % slow since 0.16
   (the stock firmware's PLL beyond its VCO's range), now exact; the output rate measured in the
   log, the 15 rates checked (§88).
+- After 0.98: the main PLL's VCO moved from 400 MHz, the bottom of its range, to 1.2 GHz (still
+  400 MHz out); the core clock measured against the crystal at boot and after each pause on the
+  crystal; no change seen, 23 minutes in a freezer included (§89).
 
 ## To do
 

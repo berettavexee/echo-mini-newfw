@@ -37,6 +37,7 @@ uint32_t ticks(void);           /* free-running microsecond counter */
  * whatever their clocks; timer24() = low 32 bits of the time since it started (ETUDE §24) */
 #define TIMER1_CUR0 0x400e0028u
 void timer24_init(void);
+uint32_t clock_measure(uint32_t ms);    /* core Hz against the crystal (TIMER1), over ms */
 static inline uint32_t timer24(void)
 {
     return ~*(volatile uint32_t *)TIMER1_CUR0;

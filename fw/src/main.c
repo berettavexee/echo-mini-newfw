@@ -309,8 +309,11 @@ void sys_screen_set(int on)
         return;
     sys_screen_off = !on;
     if (on) {
-        if (clock_is_low)
+        if (clock_is_low) {
             clock_low(0);                       /* the screen at full speed (ui.c power_service) */
+            log_printf("screen: clocks back on the PLL, core %u Hz against the crystal (%u expected)",
+                       clock_measure(50), cpu_hz);
+        }
         lcd_sleep(0);
         lcd_backlight(1);
     } else {
@@ -391,11 +394,7 @@ int main(void)
     log_printf("clock: %u MHz%s, mode %x sel0 %x sel1 %x pll %x, tries %u, adc %u/%u",
                cpu_hz / 1000000, fast ? "" : " (fallback: 24 MHz)", cru_mode, cru_sel0, cru_sel1,
                pll_con1_after & 0xffff, mode_tries, adc_cycles_24m, adc_cycles);
-    {
-        uint32_t t0 = timer24(), u0 = ticks();
-        udelay(1000);
-        log_printf("timer: TIMER1 %u ticks in %u us (24 expected per us)", timer24() - t0, ticks() - u0);
-    }
+    log_printf("clock: core %u Hz against the crystal (%u expected)", clock_measure(50), cpu_hz);
     lcd_init();
     lcd_text(4, 0, "starting...", DIM, BG);
     lcd_backlight(1);

@@ -3660,3 +3660,19 @@ Les trois entrées fausses sont exactement celles dont le VCO sort de **184 à 3
 - carte son à 176,4 kHz en 16 bits (ajout provisoire, retiré ensuite) : 176 400,1 Hz sur 55 s, retour d'horloge 176 407 Hz (+40 ppm, l'écart des horloges du PC et de l'appareil déjà mesuré à 44,1 kHz), aucune trame supprimée ni répétée sur 59 986 paquets ; son propre à l'écoute.
 
 Plus aucune fréquence de la table ne repose sur un VCO hors de la plage éprouvée.
+
+## 89. Horloges : la PLL principale (après la 0.98, 2026-10-31)
+
+**Constat** : en cherchant si le défaut du §88 se retrouvait ailleurs, la PLL principale (cœur, cœur B, bus) s'est révélée réglée au même genre de limite. Jusqu'à la 0.98 : 24 MHz / 6 × 100 = 400 MHz, sortie directe (`PLL_CON0` `0x1064`, `PLL_CON1` `0x1046`, valeurs reprises de RECHO). Le TRM donne pour le VCO de cette PLL une plage de **400 MHz à 1,6 GHz** : on était pile au minimum, là où, selon le même TRM, la PLL rejette le moins bien le bruit d'alimentation et où la gigue est la plus forte. Rien de faux n'avait été vu : l'horloge en millisecondes (`ticks()`, SysTick sur le cœur) servait déjà à mesurer le débit audio, juste, et le contrôle « TIMER1 24003 ticks in 1000 us » du démarrage était bon. Mais `cpu_hz` est déduit des registres, pas mesuré : une PLL verrouillée sur une fréquence un peu fausse (comme l'ACODEC à 564 MHz) n'aurait été vue par rien, et toutes les durées auraient été fausses (horloge en ms, écran `lcd.c`, cœur B `hifi.c`, mesure du débit audio).
+
+**Changement** :
+- VCO au milieu de sa plage : 24 MHz / 2 × 100 = **1,2 GHz**, puis POSTDIV1 = 3 : toujours 400 MHz en sortie, cœur à 200 MHz (`PLL_CON0` `0x3064`, `PLL_CON1` `0x1042`, proche de la valeur de remise à zéro `0x4064`/`0x1042`). Le TRM indique une consommation un peu plus forte avec un VCO plus haut.
+- **Mesure de la fréquence du cœur contre le quartz** (`clock_measure()`, `board.c`) : nombre de coups de TIMER1 (24 MHz, quartz) pendant 50 ms de `ticks()`, environ ±40 ppm (`ticks()` est à la microseconde). Au démarrage (« clock: core … Hz against the crystal (… expected) », à la place du contrôle sur 1 ms) et à chaque retour sur la PLL (`sys_screen_set()` et `ui.c`). Dans l'émulateur, TIMER1 n'est pas modélisé : la mesure y donne 0 Hz, et elle s'appuie sur `ticks()` plutôt que `millis()`, que l'émulateur ne fait avancer qu'aux appels de `ticks()`.
+
+**99A sur l'appareil** (`work/hwlog/1031_099a/`) :
+- démarrage à 200 MHz, sans repli ; **200 000 500 Hz** mesurés (+2,5 ppm) ;
+- `test_rates/` en boucle, dont **23 minutes au congélateur** (dans un sac) : environ 250 mesures du débit sur 40 minutes, écart moyen de −2 à +31 ppm avant, de +15 à +19 ppm au froid, sans dérive ; le plus grand, +125 ppm, toujours à 8 kHz (la résolution de la mesure, 8 001,0 Hz sur 7 s, déjà vue en 97U) ; 176,4 kHz : 176 400,4 Hz ; aucune coupure pendant la lecture (deux, venues d'un saut de piste et de l'arrêt au branchement USB) ; batterie de 4 174 à 4 106 mV en 24 minutes au froid ;
+- carte son, avant le froid : 8 formats de 44,1 à 96 kHz en 16 et 24 bits sur 286 s, aucun paquet supprimé, répété ni réaligné, 18 manqués ; retour d'horloge à +40 ppm comme avant ; depuis le PC, 44,1 à 96 kHz en 16 et 32 bits, retour d'horloge stable ;
+- aucun effet de bord vu (écran, carte SD, cœur B, USB).
+- La mesure au retour sur la PLL manquait : le réveil par l'écran passe par `sys_screen_set()` et pas par `ui.c`. Ajoutée en 99B, pas encore relevée sur l'appareil.
+- Vu au passage : au premier flux de la carte son, la partie « volume » de la boucle a pris 108 ms, comme en 97S (§87) ; une seule fois, sans conséquence.

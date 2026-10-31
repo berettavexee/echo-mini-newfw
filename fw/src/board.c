@@ -56,8 +56,9 @@ void soft_reset(int n, int on)
 /* ---- clocks ---- */
 uint32_t cpu_hz = 24000000;
 
-/* PLL at 400 MHz (24 MHz / 6 * 100), core and HiFi core at PLL / 2 = 200 MHz, PCLK at 50 MHz.
- * Same register values as RECHO 0.10.0, which logs them on this device. A marker in PMU-SRAM
+/* PLL at 400 MHz, core and HiFi core at PLL / 2 = 200 MHz, PCLK at 50 MHz. The VCO at 1.2 GHz
+ * (24 MHz / 2 * 100), then / 3: up to 0.98, 24 / 6 * 100 = 400 MHz straight (RECHO's values),
+ * the VCO at the very bottom of its 400 MHz - 1.6 GHz range (TRM; ETUDE §89). A marker in PMU-SRAM
  * is set during the attempt and cleared by clock_fast_ok() once the firmware runs: if it is
  * still there at boot, the previous 200 MHz boot did not get that far and we stay at 24 MHz. */
 /* Core cycles (SysTick, no interrupt) taken by 32 ADC conversions. The converter has its own
@@ -122,8 +123,8 @@ int clock_init(void)
     REG(CRU_PLL_CON1) = 0x80008000;
     REG(CRU_PLL_CON1) = 0x40004000;             /* PLL powered down while reprogrammed */
     REG(CRU_PLL_CON2) = 0x08000000;
-    REG(CRU_PLL_CON0) = 0xffff1064;
-    REG(CRU_PLL_CON1) = 0x11ff1046;
+    REG(CRU_PLL_CON0) = 0xffff3064;             /* FBDIV 100, POSTDIV1 3 */
+    REG(CRU_PLL_CON1) = 0x11ff1042;             /* REFDIV 2, POSTDIV2 1, integer mode */
     REG(CRU_PLL_CON2) = 0x08000000;
     REG(CRU_PLL_CON1) = 0x40000000;             /* power up */
     for (uint32_t n = 0; !(REG(CRU_PLL_CON1) & PLL_LOCK); n++)
@@ -256,6 +257,21 @@ void udelay(uint32_t us)
     uint32_t t0 = ticks();
     while (ticks() - t0 < us)
         ;
+}
+
+/* The core clock measured against the 24 MHz crystal: TIMER1 ticks over 'ms' of ticks(), which
+ * counts at the core clock (cpu_hz assumed). ticks() is to the microsecond: over 50 ms, 1.2
+ * million crystal ticks and about 40 ppm. */
+uint32_t clock_measure(uint32_t ms)
+{
+    uint32_t u0 = ticks(), u;
+    while ((u = ticks()) == u0)
+        ;
+    uint32_t t0 = timer24();
+    while (ticks() - u < ms * 1000)
+        ;
+    uint32_t d = timer24() - t0;
+    return d ? (uint32_t)((uint64_t)cpu_hz * (24000u * ms) / d) : 0;
 }
 
 void mdelay(uint32_t ms)

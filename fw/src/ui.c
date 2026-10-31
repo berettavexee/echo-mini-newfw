@@ -42,7 +42,8 @@ static void power_service(uint32_t key_ms)
         clock_low(1);
     } else if (clock_is_low && (!quiet || vbus())) {
         clock_low(0);
-        log_printf("ui: clocks back on the PLL, %u MHz", cpu_hz / 1000000);
+        log_printf("ui: clocks back on the PLL, core %u Hz against the crystal (%u expected)",
+                   clock_measure(50), cpu_hz);
     }
 }
 
