@@ -138,8 +138,28 @@ One line per version; the measurements are in `ETUDE.md`.
      words): 176.4 and 192 kHz in 24 bits would need a packet every 250 us (about twice the
      interrupts); left out, such sources being rare.
   4. Use: HID media keys (play/pause, next, previous, volume to the host or to the DACs), a
-     screen with the format received, the rate fed back, an "untouched stream" mark and a level
-     meter; power saving off in this mode (USB-powered).
+     screen with the format received, the rate fed back, an "untouched stream" mark and two VU
+     meters, one per channel (peaks of the samples received, so a silent channel shows at a
+     glance); power saving off in this mode (USB-powered).
+  5. Phones (first tests with 0.99b, log `work/hwlog/1031_099b_phones`):
+     - Android (Pixel 6a), 48 kHz: clean (no packet lost, no ring underrun), but the host
+       ignores the feedback. Diagnostic image (`make EXTRA=-DECHO_UACDIAG`, 99D, §90): every
+       packet is exactly 24 frames although the feedback asks -1 %, while the feedback endpoint
+       is read every millisecond; the phone sends 48,002.7 Hz against our 48,000.3 (about
+       50 ppm), and the fallback drops 152 frames, one a packet, every 70 s (inaudible, not
+       bit-perfect). The Linux PC follows a +/-0.5 % feedback step to the frame.
+       To do: detect such a host (integral saturated, fixed packet size for 10 s), freeze the
+       control and spread the corrections (one frame every 0.4 s or so) instead of bursts;
+       check the offload (`adb shell dumpsys media.audio_flinger`) and try a commercial
+       asynchronous DAC on the Pixel. Reported to Google:
+       https://issuetracker.google.com/issues/579970942 (similar: issue 423658602).
+     - iPhone, 44.1 kHz, 32 bits: sound on the right channel only was the iPhone's Balance
+       setting (all to the right): the diagnostic image read the left channel at exactly 0;
+       centred, both channels play (§90). The iPhone, like the Pixel, ignores the feedback
+       (always 22.05 frames per packet, 44,100 Hz on its own clock). Test image 99G (§90): no
+       change with a +/-0.5 % or +0.05 % step in 16.16 per microframe, nor in 16.16 per ms or
+       10.14 per ms; a 3-byte feedback packet makes it stop the stream. It reads the feedback
+       packets but ignores their value, in any format: not our format's fault.
   Power: 500 mA declared with a computer, to charge while playing; a phone powers the bus from
   its own battery and may refuse a device asking that much (iPhone): 100 mA declared there, the
   player on its own battery, charging off.

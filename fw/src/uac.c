@@ -119,16 +119,126 @@ static uint32_t fb_nominal(uint32_t hz)
 static uint32_t fb_value(void);
 static void fb_control(int32_t fill);
 
+#ifdef ECHO_UACDIAG
+/* Test build (make EXTRA=-DECHO_UACDIAG): what the host does with the stream. The frames it sends
+ * (its real rate, the frames per packet), each channel's peak, its control requests (and the
+ * ones stalled), and feedback steps after 20 s of stream, 20 s each: +0.5 %, -0.5 % and
+ * +0.05 % in 16.16 per microframe (the format of USB 2.0 at high speed), then +0.5 % in 16.16
+ * per ms and in 10.14 per ms (formats a host might read instead), then the control again; a
+ * host that follows the feedback changes its rate with it (ETUDE §90, docs/USB_AUDIO.md). A
+ * 3-byte packet at high speed made an iPhone stop the stream: not tried any more. */
+#define DIAG_SIZES  6
+#define DIAG_REQS   64
+static struct {
+    uint32_t frames;                            /* frames received, before any drop or repeat */
+    uint16_t size[DIAG_SIZES];                  /* frames per packet seen, and their counts */
+    uint32_t count[DIAG_SIZES], other;
+    uint32_t peak_l, peak_r;                    /* of 32767 */
+    volatile int step;                          /* the feedback step forced (1-5), or 0 */
+    uint32_t t0;                                /* millis() when the stream began to flow */
+} diag;
+static struct diag_req {
+    uint8_t s[8], d[4], n, stalled;
+} diag_req[DIAG_REQS];
+static volatile uint32_t diag_head, diag_tail, diag_lost;
+
+static void diag_record(const uint8_t *s, const uint8_t *d, uint32_t n, int stalled)
+{
+    if (diag_head - diag_tail >= DIAG_REQS) {
+        diag_lost++;
+        return;
+    }
+    struct diag_req *q = &diag_req[diag_head % DIAG_REQS];
+    for (int i = 0; i < 8; i++)
+        q->s[i] = s[i];
+    for (uint32_t i = 0; i < 4; i++)
+        q->d[i] = d && i < n ? d[i] : 0;
+    q->n = (uint8_t)n;
+    q->stalled = (uint8_t)stalled;
+    diag_head++;
+}
+
+/* From the loop: the requests recorded by the interrupt */
+static void diag_drain(void)
+{
+    while (diag_tail != diag_head) {
+        const struct diag_req *q = &diag_req[diag_tail % DIAG_REQS];
+        log_printf("uac: req %02x %02x value %04x index %04x length %u%s: %02x %02x %02x %02x%s",
+                   q->s[0], q->s[1], q->s[2] | q->s[3] << 8, q->s[4] | q->s[5] << 8,
+                   q->s[6] | q->s[7] << 8, q->s[0] & 0x80 ? " (in)" : "", q->d[0], q->d[1],
+                   q->d[2], q->d[3], q->stalled ? ", stalled" : "");
+        diag_tail++;
+    }
+    if (diag_lost) {
+        log_printf("uac: req: %u not recorded", diag_lost);
+        diag_lost = 0;
+    }
+}
+
+static void diag_packet(const uint32_t *out, uint32_t frames, int bits16)
+{
+    diag.frames += frames;
+    int i = 0;
+    while (i < DIAG_SIZES && diag.count[i] && diag.size[i] != frames)
+        i++;
+    if (i < DIAG_SIZES) {
+        diag.size[i] = (uint16_t)frames;
+        diag.count[i]++;
+    } else
+        diag.other++;
+    for (uint32_t f = 0; f < frames; f++) {
+        int32_t l, r;
+        if (bits16) {
+            l = (int16_t)out[f];
+            r = (int16_t)(out[f] >> 16);
+        } else {
+            l = (int32_t)out[2 * f] >> 16;
+            r = (int32_t)out[2 * f + 1] >> 16;
+        }
+        uint32_t al = (uint32_t)(l < 0 ? -l : l), ar = (uint32_t)(r < 0 ? -r : r);
+        if (al > diag.peak_l)
+            diag.peak_l = al;
+        if (ar > diag.peak_r)
+            diag.peak_r = ar;
+    }
+}
+
+/* The period's figures, then a new period; dt in us */
+static void diag_log(uint32_t dt)
+{
+    char b[80], *p = b;
+    for (int i = 0; i < DIAG_SIZES && diag.count[i]; i++) {
+        p = put_dec(p, diag.size[i]);
+        *p++ = ':';
+        p = put_dec(p, diag.count[i]);
+        *p++ = ' ';
+    }
+    *p = 0;
+    uint32_t hz10 = dt ? (uint32_t)((uint64_t)diag.frames * 10000000 / dt) : 0;
+    if (dt)
+        log_printf("uac: host %u.%u Hz over %u ms; frames per packet %s(other %u); peaks L %u R %u; "
+               "feedback step %d", hz10 / 10, hz10 % 10, dt / 1000, b, diag.other, diag.peak_l,
+               diag.peak_r, diag.step);
+    diag.frames = diag.other = diag.peak_l = diag.peak_r = 0;
+    for (int i = 0; i < DIAG_SIZES; i++)
+        diag.count[i] = 0;
+}
+#endif
+
 static void fb_send(void)
 {
     uint8_t b[4];
     fb.sent = fb_value();
-    uint32_t v = usb.high_speed ? fb.sent >> 1 : fb.sent;
+    uint32_t v = usb.high_speed ? fb.sent >> 1 : fb.sent, n = usb.high_speed ? 4 : 3;
+#ifdef ECHO_UACDIAG
+    if (usb.high_speed && diag.step >= 4)       /* the step in other formats (10.14 per ms) */
+        v = diag.step == 4 ? fb.sent << 2 : fb.sent;
+#endif
     b[0] = (uint8_t)v;
     b[1] = (uint8_t)(v >> 8);
     b[2] = (uint8_t)(v >> 16);
     b[3] = (uint8_t)(v >> 24);
-    usb_iso_in_send(b, usb.high_speed ? 4 : 3);
+    usb_iso_in_send(b, n);
 }
 
 static int put32(uint8_t *r, uint32_t v)
@@ -290,7 +400,7 @@ static struct {
     int corr;                   /* drift correction: -1 drop, +1 repeat, 0 none */
     uint32_t frame;             /* bytes of a frame in the ring: 4 (16 bits) or 8 (24 bits) */
     int32_t target, window, settle, ahead;  /* in ring bytes */
-    uint32_t last_ms;           /* millis() of the last packet */
+    volatile uint32_t last_ms;  /* millis() of the last packet (set by the interrupt) */
     uint32_t packets, dropped, repeated, realigned, bad;
     uint32_t per_ms, sub;       /* packets a millisecond: 2 at high speed; the count */
     int32_t fill_min, fill_max;
@@ -339,6 +449,9 @@ static void uac_iso_out(uint32_t n)
     }
     if (!frames)
         return;
+#ifdef ECHO_UACDIAG
+    diag_packet(out, frames, alt == 1);
+#endif
     audio_update();
     int32_t fill = audio_fill();
     if (!st.flowing || fill < st.target / 4 || fill > 4 * st.target) {
@@ -383,6 +496,11 @@ static uint32_t fb_value(void)
     uint32_t nom = fb_nominal(rate), v = nom;
     if (fb.on)
         v = (uint32_t)((int32_t)nom + fb.err * FB_KP + fb.integ / 256);
+#ifdef ECHO_UACDIAG
+    if (diag.step)                              /* 2: -0.5 %, 3: +0.05 %, the others +0.5 % */
+        return diag.step == 2 ? nom - nom / 200 : diag.step == 3 ? nom + nom / 2000
+                                                                 : nom + nom / 200;
+#endif
     if (v > nom + nom / 100)
         v = nom + nom / 100;
     if (v < nom - nom / 100)
@@ -418,6 +536,23 @@ static void uac_reset(void)
     alt = 0;
     alt_new = 0;
 }
+
+#ifdef ECHO_UACDIAG
+static int uac_setup_diag(const uint8_t *s, uint8_t *r)
+{
+    int n = uac_setup(s, r);
+    diag_record(s, n > 0 ? r : 0, n > 0 ? (uint32_t)n : 0, n < 0);
+    return n;
+}
+
+static void uac_setup_out_diag(const uint8_t *s, const uint8_t *d, uint32_t n)
+{
+    diag_record(s, d, n, 0);
+    uac_setup_out(s, d, n);
+}
+#define uac_setup uac_setup_diag
+#define uac_setup_out uac_setup_out_diag
+#endif
 
 static const struct usb_class uac = {
     .dev = dev_desc, .cfg = cfg_desc, .cfg_len = sizeof cfg_desc,
@@ -464,6 +599,9 @@ static void apply_format(void)
     fb.on = 0;                                          /* the nominal until packets come */
     rate_rd0 = audio.rd;
     rate_t0 = ticks();
+#ifdef ECHO_UACDIAG
+    diag_log(0);                                        /* a new period */
+#endif
     vol_changed = 1;
     st.ready = 1;
     log_printf("uac: stream %u Hz, %u bits, %s speed", rate, a == 1 ? 16 : a == 2 ? 24 : 32,
@@ -575,6 +713,9 @@ static void log_stats(const char *what, uint32_t max_gap)
                    (uint32_t)((uint64_t)(audio.rd - rate_rd0) * 10000000 / st.frame / dt) / 10,
                    (uint32_t)((uint64_t)(audio.rd - rate_rd0) * 10000000 / st.frame / dt) % 10,
                    dt / 1000, rate);
+#ifdef ECHO_UACDIAG
+    diag_log(dt);
+#endif
     rate_rd0 = audio.rd;
     rate_t0 = ticks();
     log_printf("uac: feedback %u (%u.%u Hz), error %d frames, integral %d; IN sent %u, "
@@ -589,6 +730,35 @@ static void log_stats(const char *what, uint32_t max_gap)
     for (int i = 0; i < T_N; i++)
         t_max[i] = 0;
 }
+
+#ifdef ECHO_UACDIAG
+/* The feedback step, from the time the stream flows: the figures logged at each change */
+static void diag_steps(uint32_t max_gap)
+{
+    if (!st.flowing) {
+        diag.step = 0;
+        diag.t0 = 0;
+        return;
+    }
+    if (!diag.t0)
+        diag.t0 = millis();
+    uint32_t t = millis() - diag.t0;
+    int want = t < 20000 || t >= 120000 ? 0 : 1 + (int)((t - 20000) / 20000);
+    if (want == diag.step)
+        return;
+    log_stats("before a feedback step", max_gap);
+    usb_irq_block(1);
+    diag.step = want;
+    if (!want)
+        fb.on = 0;                                      /* the control from scratch */
+    usb_irq_block(0);
+    static const char *const what[] = {
+        "off", "+0.5 % in 16.16 per microframe", "-0.5 % in 16.16 per microframe",
+        "+0.05 % in 16.16 per microframe", "+0.5 % in 16.16 per ms", "+0.5 % in 10.14 per ms",
+    };
+    log_printf("uac: feedback step %d: %s", want, what[want]);
+}
+#endif
 
 void uac_mode(void)
 {
@@ -651,10 +821,16 @@ void uac_mode(void)
             usb_iso_watch();
             usb_irq_block(0);
         }
-        if (st.ready && st.flowing && millis() - st.last_ms > STALL_MS) {
+        /* read before millis(): a packet coming in between would put it ahead of millis() */
+        uint32_t last_ms = st.last_ms;
+        if (st.ready && st.flowing && millis() - last_ms > STALL_MS) {
             st.flowing = 0;                             /* the host stopped sending */
             log_stats("paused", max_gap);
         }
+#ifdef ECHO_UACDIAG
+        diag_drain();
+        diag_steps(max_gap);
+#endif
         if (!st.flowing) {
             uint32_t t = ticks();
             uac_idle();

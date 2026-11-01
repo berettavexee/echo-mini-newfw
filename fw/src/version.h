@@ -3,7 +3,9 @@
 #define VERSION_H
 
 #define FW_NAME    "ECHO MINI newfw"
-#ifdef ECHO_FFTCMP
+#ifdef ECHO_UACDIAG
+#define FW_VERSION "0.98ud"            /* test build: USB sound card diagnostics */
+#elif defined(ECHO_FFTCMP)
 #define FW_VERSION "0.98fc"            /* test build: AAC sound from HIFIACC, compared */
 #elif defined(ECHO_HWTEST)
 #define FW_VERSION "0.98hwt"           /* test build: accelerators against the software */

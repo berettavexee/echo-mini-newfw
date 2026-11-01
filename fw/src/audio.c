@@ -122,6 +122,35 @@ static void pwdn_clear(uint8_t mask)
     }
 }
 
+/* Sets 'mask' in PWDN_CTL of each DAC */
+static void pwdn_set(uint8_t mask)
+{
+    static const uint8_t dev[2] = { DAC0, DAC1 };
+    for (int i = 0; i < 2; i++) {
+        uint8_t v;
+        if (!i2c_reg_read(dev[i], 0x020000, &v))
+            i2c_reg_write(dev[i], 0x020000, v | mask);
+    }
+}
+
+/* The datasheet's pop-free power-down with an external VCP_FILT (CLASS_H_CTL bit 0, §5.8.1 of
+ * DS1155F2, docs/CS43131.md): both channels muted, 150 ms, the headphone amplifier off, then the
+ * serial port; PWDN_CTL ends at f6. The datasheet waits for PDN_DONE after PDN_HP: these chips
+ * never raise it (not within 1 s, with or without I2S clocks, ETUDE §91), so a fixed 100 ms */
+static void dac_power_down(void)
+{
+    both(0x010010, 0x99);                       /* DXD1: test registers open */
+    both(0x080046, 0x21);
+    both(0x090003, 0xef);                       /* PCM_PATH_CTL_1: both channels muted */
+    mdelay(150);
+    pwdn_set(0x10);                             /* PDN_HP */
+    mdelay(100);
+    pwdn_set(0x40);                             /* PDN_ASP */
+    both(0x090003, 0xec);                       /* unmuted: the volume stays at ff */
+    both(0x080046, 0x20);
+    both(0x010010, 0x00);
+}
+
 static void read_status(const char *what, uint32_t reg)
 {
     uint8_t a = 0, b = 0;
@@ -605,12 +634,12 @@ void audio_stop(void)
         return;
     meas_end();
     audio_volume(0xff, 1);
-    gpio_set(2, 0, 1);
+    if (!standby)
+        dac_standby(1);                         /* the I2S clocks still running */
     REG(I2S_XFER) = 0;
     REG(I2S_DMACR) = 0;
     REG(CH_EN) = 1u << (8 + 5);                 /* channel 5 off */
-    if (!standby)
-        dac_standby(1);                         /* audio_start() sets them up from scratch */
+    gpio_set(2, 0, 1);                          /* audio_start() sets the DACs up from scratch */
     audio.on = 0;
     log_printf("audio: stopped, %u i2c errors in total", i2c_errors);
 }
@@ -672,14 +701,15 @@ int audio_change_rate(uint32_t rate, int bits16)
 int audio_paused;
 static uint32_t t_paused;
 
-/* Headphone amplifier and serial port of both DACs powered down (PWDN_CTL a6 -> f6), or back
- * up with the sequence of dac_setup() (DXD13 around the HP power-up). The I2S stays stopped,
- * the DMA waits in place in the ring: playing goes on exactly where it stopped. */
+/* Headphone amplifier and serial port of both DACs powered down without a pop (PWDN_CTL a6 ->
+ * f6, dac_power_down()), or back up with the sequence of dac_setup() (DXD13 around the HP
+ * power-up). The I2S stays stopped, the DMA waits in place in the ring: playing goes on exactly
+ * where it stopped. */
 static void dac_standby(int on)
 {
     if (on) {
-        gpio_set(2, 0, 1);                      /* as audio_stop() */
-        both(0x020000, 0xf6);
+        dac_power_down();
+        gpio_set(2, 0, 1);                      /* as audio_stop(), the amplifiers off */
     } else {
         both(0x010010, 0x99);
         both(0x180000, 0x45);

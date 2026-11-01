@@ -3676,3 +3676,60 @@ Plus aucune fréquence de la table ne repose sur un VCO hors de la plage éprouv
 - aucun effet de bord vu (écran, carte SD, cœur B, USB).
 - La mesure au retour sur la PLL manquait : le réveil par l'écran passe par `sys_screen_set()` et pas par `ui.c`. Ajoutée en 99B, pas encore relevée sur l'appareil.
 - Vu au passage : au premier flux de la carte son, la partie « volume » de la boucle a pris 108 ms, comme en 97S (§87) ; une seule fois, sans conséquence.
+
+## 90. Carte son USB sur téléphone : Android (Pixel 6a) et iPhone (2026-10-31 / 11-01)
+
+**Premiers essais (99B, `work/hwlog/1031_099b_phones/`)** :
+- **Android (Pixel 6a)**, 48 kHz, 274 s : aucun paquet perdu ni réaligné, aucun sous-remplissage. Mais la valeur de retour reste au plancher (−1 %, 47 520 Hz), l'intégrale saturée, et le niveau de l'anneau monte quand même : le repli supprime 152 trames (une par paquet) toutes les 70 s environ. Inaudible, pas bit-perfect.
+- **iPhone**, 44,1 kHz en 32 bits, quatre branchements : son à droite seulement (rapporté par l'utilisateur). Les compteurs sont propres (aucun paquet perdu ni mauvais, sortie à 44 100 Hz) ; iOS ouvre et ferme l'interface sans cesse (46 « stream off » dans une session) ; la première configuration a pris 24 s (autorisation sur le téléphone, sans doute). Cause inconnue.
+- Recherche : le retour d'horloge ignoré est signalé ailleurs (le pilote UAC2 de Windows, un iPad en 2019) ; la documentation Android ne garantit qu'une partie de l'UAC1 ; beaucoup de téléphones confient le flux USB au processeur audio (offload), non vérifié pour le Tensor. Pour l'iPhone, le cas le plus proche date de 2009 sous macOS (commandes par canal appliquées à un seul canal par Core Audio).
+
+**Image de diagnostic** (`make EXTRA=-DECHO_UACDIAG`, 99C puis 99D, `uac.c`) : toutes les 10 s, le débit réel de l'hôte (trames reçues avant toute suppression ou répétition, sur `ticks()`), l'histogramme des trames par paquet et la crête de chaque canal ; chaque requête de contrôle (et celles rejetées), enregistrée par l'interruption et écrite par la boucle ; un échelon du retour après 20 s de flux, +0,5 % pendant 20 s puis −0,5 % pendant 20 s.
+
+**Référence sur le PC Linux (99C, `work/hwlog/1101_099c_pc/`)** : l'hôte suit à la trame près. Régulation normale : 48 000,6 Hz, 24 trames par paquet à 99,7 % ; +0,5 % : 48 237,6 Hz (24 : 17 604, 25 : 2 397) ; −0,5 % : 47 758,1 Hz (23 : 1 589). Crêtes L 16 384 et R 8 192 pour −6 et −12 dB envoyés : canaux dans l'ordre. Requêtes : horloge, volume et sourdine du canal maître ; rien de rejeté.
+
+**Bug trouvé au passage** : une fausse pause en plein flux. La boucle testait `millis() - st.last_ms > STALL_MS` ; un paquet arrivé entre la lecture de `millis()` et celle de `st.last_ms` mettait celui-ci en avance, la différence non signée devenait énorme, et le flux était déclaré arrêté puis réaligné au paquet suivant (petit accroc possible). Vu une fois en 100 s sur le PC, et un « paused » douteux dans la session iPhone. Correctif (99D, gardé dans le firmware normal) : `st.last_ms` lu avant `millis()`, et déclaré `volatile`.
+
+**Pixel 6a (99D, `work/hwlog/1101_099d_pixel/`)**, 48 kHz, 430 s :
+- **chaque paquet fait exactement 24 trames** (« 24:20003 » par 10 s, sur les 19 rapports conservés), alors que la valeur demandée reste à −1 % : le Pixel **ignore entièrement le retour d'horloge** ;
+- il lit pourtant le point de retour : 409 248 valeurs lues en 430 s (une par milliseconde) ;
+- son débit : 48 002,7 Hz, contre 48 000,3 Hz pour notre sortie, les deux sur notre quartz : son horloge avance d'environ 50 ppm sur la nôtre ; le repli supprime 152 trames toutes les 70 s ;
+- requêtes : l'horloge (96 kHz puis le format joué), volume et sourdine du canal maître ; rien de rejeté ; crêtes équilibrées (L ≈ R ≈ 4 600) ;
+- aucune fausse pause en 7 minutes ;
+- le début de la session (43 à 276 s, dont les deux échelons) manque : pendant la lecture, le journal n'est pas écrit sur la mémoire et son tampon a débordé. Sans effet sur la conclusion : −1 % pendant toute la session est un écart plus grand que l'échelon.
+
+**À suivre** : détecter un hôte qui ignore le retour (intégrale saturée, taille de paquet fixe pendant 10 s), geler la régulation et répartir les corrections (une trame toutes les 0,4 s environ à 50 ppm) au lieu de rafales ; vérifier l'offload (`adb shell dumpsys media.audio_flinger`) et essayer un DAC asynchrone du commerce (NuForce) sur le Pixel ; défaut signalé à Google le 2026-11-01 : https://issuetracker.google.com/issues/579970942 (une issue voisine : 423658602) ; pour l'iPhone, un essai avec la 99D (crêtes et requêtes).
+
+## 91. Les CS43131 comparés au datasheet (2026-11-01)
+
+Datasheet public de Cirrus Logic (DS1155F2) gardé en référence locale (`re/doc_cs43131/`, hors du dépôt, comme le TRM). Page de documentation : `docs/CS43131.md` (câblage, séquence, comparaison des firmwares).
+
+**Constat** : l'origine, RECHO, EchoPod, ReChord et nous appliquons la même séquence, qui est presque mot pour mot l'exemple « I2S en mode mono » du datasheet (§5.13.4) ; le « bloc non documenté » `0x18xxxx` est la séquence d'activation du mode mono (§5.12.1). Écarts relevés :
+- `HP_OUT_CTL_1` : `10` (1 V pleine échelle) chez nous, RECHO et ReChord ; `31` (2 V) à l'origine ; EchoPod propose les deux. **Décision : on reste à 1 V.**
+- `PCM_FILT_OPT` : les cinq valeurs de l'origine (`02`, `42`, `82`, `C2`, `22`) sont les cinq filtres de la puce, sans doute son réglage utilisateur. **Décision : on reste sur `02`** (rapide, faible latence).
+- `CLASS_H_CTL` = `1F` partout (bit 0 : VCP_FILT externe) au lieu de `1E` dans l'exemple : c'est ce mode qui donne la mise hors tension sans claquement du §5.8.1, suivie par personne. L'origine, EchoPod et ReChord écrivent `PWDN_CTL` = `10` à l'arrêt (ce qui remet sous tension quartz, PLL et sortie d'horloge) ; nous écrivions `F6` d'un coup.
+- `ASP_SPRATE` réglé port série actif (le datasheet demande avant) ; 10 ms au lieu de 12 après la mise sous tension du casque. Sans défaut constaté.
+
+**Mise hors tension sans claquement (image de test 99E)** : `dac_power_down()` (`audio.c`), appelée par la pause longue et par `audio_stop()` : clé `0x99` et `0x080046` = `21`, sourdine des deux canaux par `PCM_PATH_CTL_1`, 150 ms, `PDN_DONE` démasqué, `PDN_HP`, attente de `PDN_DONE` (lu par I2C, 100 ms au plus), puis `PDN_ASP`, retour de `PCM_PATH_CTL_1`, `0x080046` et de la clé, `INT_MASK_1` = `87`. GPIO2_0 (sourdine des prises) seulement après ; à l'arrêt, l'I2S tourne jusque-là. Coût : environ 150 ms. Journal : « audio: headphone amplifiers off in … us, pdn_done dac0 … dac1 … ». L'émulateur ne modélise pas `PDN_DONE` (attente de 100 ms). À juger à l'oreille sur l'appareil.
+
+**Suite du §90 : l'iPhone (99D, 2026-11-01, `work/hwlog/1101_099d_iphone/` et `1101_099d_iphone2/`)** :
+- son à droite seulement : `peaks L 0 R ~22 000` pendant toute la session, le canal gauche reçu valait exactement 0 ; requêtes normales (horloge, sourdine, volume du canal maître), rien de rejeté. Cause : le réglage **Balance** de l'iPhone était tout à droite. Recentré : les deux canaux jouent (crêtes L et R de 28 000 à 32 768) ;
+- l'iPhone **ignore lui aussi le retour d'horloge** : toujours 22,05 trames par paquet (22 : 19 002, 23 : 1 000 par 10 s), 44 100 Hz sur son horloge, la valeur bloquée à −1 % ; le repli supprime environ 130 trames toutes les 30 s. Deux téléphones de deux constructeurs : avant d'accuser les deux, vérifier que notre valeur n'est pas acceptée seulement par Linux (qui devine le format) ;
+- le début des sessions manque encore au journal (tampon qui déborde pendant la lecture).
+
+**Suite du §91 : la 99E sur l'appareil** (`work/hwlog/1101_099e_pdn/`) : deux pauses longues et un arrêt ; aucun claquement entendu, ni pendant la série des 15 débits (0 erreur I2C) ; la reprise après pause longue a paru plus douce (sa séquence n'a pas changé : peut-être la piste). Mais **`PDN_DONE` n'est jamais vu** dans les 100 ms, sur aucune des deux puces, y compris à l'arrêt où l'I2S tourne encore : l'attente finit toujours sur son délai. À établir : arrive-t-il plus tard, ou jamais ?
+
+**`PDN_DONE` (99F, `work/hwlog/1101_099f_pdn/` et `1101_099f_pdn2/`)** : attente portée à 1 s, `INT_STATUS_1` lu en continu, cinq coupures : deux pauses longues (I2S arrêté), une fin de liste, un passage en mode carte son et l'arrêt qui suit (I2S en marche). Le bit 0 ne se lève **jamais** (`INT_STATUS_1` = `10`, seulement `XTAL_READY`), alors que `PWDN_CTL` vaut `b6` (`PDN_HP` pris en compte). L'hypothèse des horloges absentes tombe. Remplacé par **un délai fixe de 100 ms** après `PDN_HP` (ce que faisait la 99E en pratique, sans claquement) ; `INT_MASK_1` n'est plus touché. Coupure totale : 250 ms.
+
+**Échelon dans plusieurs formats (99G, iPhone, `work/hwlog/1101_099g_iphone/`)**, deux essais à 44,1 kHz en 32 bits, six phases de 20 s :
+
+| Phase | Valeur envoyée | Débit de l'iPhone |
+|---|---|---|
+| 1 | +0,5 % en 16.16 par micro-trame | 44 100,4 à 44 103,9 Hz, 22 : 19 003 / 23 : 1 000 |
+| 2 | −0,5 %, idem | inchangé |
+| 3 | +0,05 %, idem | inchangé |
+| 4 | +0,5 % en 16.16 par ms | inchangé |
+| 5 | +0,5 % en 10.14 par ms sur 4 octets | inchangé |
+| 6 | +0,5 % en 10.14 par ms sur 3 octets | **flux arrêté en 110 ms** (les deux fois), sans reprise |
+
+L'iPhone lit donc bien chaque paquet du point de retour (un paquet de 3 octets au lieu de 4 lui fait couper le flux), mais **n'utilise la valeur dans aucun format** : il envoie toujours 44 100 Hz selon son horloge. Comme le Pixel. Ce n'est pas notre format qui est en cause ; les deux téléphones ignorent le retour d'horloge et le repli (suppression d'une trame par paquet) reste nécessaire.
