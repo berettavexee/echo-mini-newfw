@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-10-30, version 0.96.
+Last update: 2026-11-01, version 0.99.
 
 ## Done, validated on the device
 
@@ -23,6 +23,8 @@ Last update: 2026-10-30, version 0.96.
 | Brightness in ten perceptual steps (8 to 100 %, about x1.3 a step) | 0.97 | §82 |
 | USB sound card: UAC1 at full speed, 16 and 24 bits, 44.1 and 48 kHz, asynchronous with a rate feedback, bit-perfect (tested with Linux) | 0.97 | §84-§85 |
 | USB sound card at high speed: UAC2, 16, 24 and 32 bits, 44.1 to 96 kHz, bit-perfect (tested with Linux); UAC1 kept at full speed | 0.98 | §87 |
+| USB sound card: 176.4 and 192 kHz in every format (24/32-bit packets every 250 us); phones that ignore the feedback handled with evenly spread corrections; tested with a Pixel 6a and an iPhone | 0.99 | §90, §92, §93 |
+| Pop-free power-down of the DACs (CS43131 datasheet sequence) at the long pause and the stop | 0.99 | §91 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
 | USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
@@ -100,9 +102,11 @@ One line per version; the measurements are in `ETUDE.md`.
   FIFO stays at 147 words: no larger packets) (§87); 176.4 kHz played 0.28 % slow since 0.16
   (the stock firmware's PLL beyond its VCO's range), now exact; the output rate measured in the
   log, the 15 rates checked (§88).
-- After 0.98: the main PLL's VCO moved from 400 MHz, the bottom of its range, to 1.2 GHz (still
-  400 MHz out); the core clock measured against the crystal at boot and after each pause on the
-  crystal; no change seen, 23 minutes in a freezer included (§89).
+- 0.99: the main PLL's VCO moved from 400 MHz, the bottom of its range, to 1.2 GHz (still
+  400 MHz out), the core clock measured against the crystal (§89); the USB sound card on phones:
+  a Pixel 6a and an iPhone ignore the feedback in every format, now detected and corrected one
+  frame at a time (§90, §92); a false pause fixed; 176.4 and 192 kHz in every format, 24/32-bit
+  packets every 250 us (§93); pop-free DAC power-down (§91); docs/USB_AUDIO.md, docs/CS43131.md.
 
 ## To do
 

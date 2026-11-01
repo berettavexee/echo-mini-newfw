@@ -7,7 +7,7 @@ is meant to save time for anyone writing USB audio for this player or for a simi
 USB controller. The study behind it, in French, is `ETUDE.md` §83-§88 and §90; the code is
 `fw/src/uac.c` (the class), `fw/src/usb.c` (the controller) and `fw/src/audio.c` (the DAC ring).
 
-Status (2026-11-01):
+Status (version 0.99, 2026-11-01):
 - **full speed**: USB Audio Class 1, 16 or 24 bits, 44.1 or 48 kHz;
 - **high speed**: USB Audio Class 2, 16, 24 or 32 bits, 44.1, 48, 88.2, 96, 176.4 or 192 kHz;
 - asynchronous, with a feedback endpoint; **bit-perfect with Linux** (no sample dropped or
@@ -66,7 +66,7 @@ RX FIFO, so 392 bytes at most here. At 192 kHz:
 | 250 µs | — | 49 frames, 392 bytes: fits | — |
 | 125 µs | — | 200 bytes, but one packet in two missed (below) | — |
 
-Version 0.98 kept 500 µs everywhere and left 176.4 and 192 kHz out. Test image 99J moved the
+Version 0.98 kept 500 µs everywhere and left 176.4 and 192 kHz out. Version 0.99 moves the
 24- and 32-bit alternates to 250 µs (the interval belongs to each alternate setting, the host
 follows it) and offers all six rates in every format. With an interval of 2 microframes, the
 packets always come on the same parity, which keeps the endpoint's re-arming as simple as at
@@ -108,7 +108,7 @@ endpoint.
   its 1 % limit for 10 s, the feedback goes back to the nominal and the drift is corrected one
   frame at a time, whenever the averaged fill is more than one frame off, at least 100 ms apart
   (about one frame every 0.4 s at 50 ppm), instead of bursts of about 150 frames. Measured on a
-  phone (test image 99J, 48 kHz in 32 bits): the mode engaged after 10 s at the limit, the excess
+  phone (0.99 test image, 48 kHz in 32 bits): the mode engaged after 10 s at the limit, the excess
   fill was worked off at up to 10 frames a second, then about 23 frames per 10 s, evenly.
 
 ## Real time
@@ -170,7 +170,7 @@ controls, nothing is stalled.
 
 ## Diagnostics
 
-**Test build** `make EXTRA=-DECHO_UACDIAG` (version "0.98ud"), on top of the normal log:
+**Test build** `make EXTRA=-DECHO_UACDIAG` (version "0.99ud"), on top of the normal log:
 - every 10 s: the host's real rate (frames received, before any correction, timed on the
   player's crystal), the frames-per-packet histogram (`24:20003`: a host that follows the
   feedback mixes sizes), each channel's peak (`peaks L … R …`, of 32,767);
