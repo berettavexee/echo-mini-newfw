@@ -3733,3 +3733,27 @@ Datasheet public de Cirrus Logic (DS1155F2) gardé en référence locale (`re/do
 | 6 | +0,5 % en 10.14 par ms sur 3 octets | **flux arrêté en 110 ms** (les deux fois), sans reprise |
 
 L'iPhone lit donc bien chaque paquet du point de retour (un paquet de 3 octets au lieu de 4 lui fait couper le flux), mais **n'utilise la valeur dans aucun format** : il envoie toujours 44 100 Hz selon son horloge. Comme le Pixel. Ce n'est pas notre format qui est en cause ; les deux téléphones ignorent le retour d'horloge et le repli (suppression d'une trame par paquet) reste nécessaire.
+
+## 92. Carte son USB : les hôtes qui ignorent le retour d'horloge (image de test 99I, 2026-11-01)
+
+**Constat** (§90) : le Pixel 6a et l'iPhone lisent le point de retour mais n'en utilisent pas la valeur ; le régulateur part en butée (−1 %) et le secours de 4 ms supprime les trames par rafales (environ 150 trames, une par paquet, toutes les 30 à 70 s).
+
+**Changement** (`uac.c`) :
+- détection : l'intégrale reste à sa borne (±1 % du nominal) pendant 10 s d'affilée (`IGNORED_MS`) ; Linux n'y arrive jamais (+40 ppm) ;
+- ensuite, jusqu'à la fin du flux (une pause ou un changement de format repart de zéro) : la valeur envoyée revient au nominal ; la dérive est corrigée **une trame à la fois** dès que le remplissage moyen s'écarte de plus d'une trame de la cible, à 100 ms d'écart au moins (`SPREAD_MS`), soit environ une trame toutes les 0,4 s à 50 ppm ; le secours de 4 ms reste ;
+- au redémarrage du flux après une pause, le régulateur repart de zéro ;
+- journal : « uac: the host ignores the feedback (10 s at its limit): back to the nominal, corrections spread » au passage, et la mention dans la ligne « feedback » des rapports.
+
+À vérifier sur l'appareil : sur le PC, aucun changement (0 trame supprimée, pas de passage dans ce mode) ; sur un téléphone, des suppressions régulières au lieu de rafales.
+
+Documentation de l'ensemble de la carte son, en anglais, pour d'autres développeurs : `docs/USB_AUDIO.md`.
+
+## 93. Carte son USB : 176,4 et 192 kHz en 24 et 32 bits (image de test 99J, 2026-11-01)
+
+**Origine** : RECHO annonce 192 kHz en 24 bits sur la même puce, sans preuve publiée. Recherche sur le contrôleur DWC2 : la FIFO de réception est bien figée (`hwcfg2` bit 19, `GRXFSIZ` en lecture seule ; TRM chap. 14 : 308 mots de 35 bits, pas de DMA interne, 3 endpoints en plus de l'endpoint 0). Mais au §87 nous étions passés d'un paquet par micro-trame (raté) directement à 500 µs, sans essayer **250 µs**. À 192 kHz, un paquet de 250 µs en trames de 8 octets fait 49 × 8 = 392 octets (98 mots + le mot d'état) : il tient. En 16 bits, 192 kHz tient déjà à 500 µs (97 × 4 = 388 octets). Le 24 bits compact (3 octets) tiendrait à 500 µs à un mot près, sans marge.
+
+**Changement** (`uac.c`) : alternates 24 et 32 bits à 250 µs (`bInterval` 2), 16 bits à 500 µs avec des paquets de 392 octets au plus ; 176,4 et 192 kHz ajoutés à l'horloge UAC2 ; régulateur toujours une fois par milliseconde (2 ou 4 paquets). `usb.c` gérait déjà tout intervalle pair (même parité à chaque paquet).
+
+**Sur l'appareil** (`work/hwlog/1101_099j/`) :
+- PC Linux : Linux voit 500 µs pour l'alternate 1 et 250 µs pour les 2 et 3 ; les 6 fréquences en 16 et 32 bits, puis 2 minutes à 192 kHz en 32 bits : **aucune trame supprimée ni répétée, aucun recalage**, un paquet manqué environ par démarrage de flux ; à 192 kHz, environ 12 000 interruptions par 10 s, 65 µs au plus (657 µs une fois, au changement de format) ; retour d'horloge 192 006 à 192 008 Hz (+40 ppm), sortie mesurée 192 000,2 à 192 000,9 Hz. Rien d'audible.
+- Téléphone (48 kHz en 32 bits, donc paquets de 250 µs) : propre ; **le mode du §92 s'enclenche** 10 s après la butée (« the host ignores the feedback »), l'excédent accumulé est résorbé à 10 trames par seconde au plus (78 trames), puis environ 23 trames par 10 s, régulièrement, au lieu des rafales de 150.

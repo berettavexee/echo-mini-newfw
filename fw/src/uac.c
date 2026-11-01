@@ -26,6 +26,12 @@
  * packet. The fill then follows (feedback - the DACs' rate) / 16384 frames per ms: about 0.5 of
  * damping, settled in a few seconds. */
 #define FB_KP       8
+/* A host that ignores the feedback (phones: ETUDE §90): the control stays at its 1 % limit for
+ * IGNORED_MS; the feedback then goes back to the nominal, and the drift is corrected one frame
+ * at a time, whenever the averaged fill is more than one frame off, SPREAD_MS apart at least
+ * (about one every 0.4 s at 50 ppm), instead of bursts at the WINDOW_US fallback */
+#define IGNORED_MS  10000
+#define SPREAD_MS   100
 
 /* ---- descriptors: test IDs of pid.codes (private use only), bcdDevice 2.00 for this class ---- */
 static const uint8_t dev_desc[18] = {
@@ -53,27 +59,28 @@ static const uint8_t cfg_desc[] = {
 };
 
 /* ---- at high speed: USB Audio Class 2 (an interface association, class 0xEF), every rate the
- * DACs play from 44.1 to 96 kHz, 16 bits, 24 bits in 4 bytes (the ring's format), 32 bits; a
- * packet every 4 microframes (500 us: a packet every microframe, re-armed from the interrupt,
- * missed one in two in 97Q), the feedback (16.16, samples per microframe) every 8 (1 ms) ---- */
+ * DACs play from 44.1 to 192 kHz, 16 bits, 24 bits in 4 bytes (the ring's format), 32 bits; a
+ * packet every 4 microframes (500 us) in 16 bits, every 2 (250 us) in 24 and 32 bits (a packet
+ * every microframe, re-armed from the interrupt, missed one in two in 97Q), the feedback (16.16,
+ * samples per microframe) every 8 (1 ms) ---- */
 static const uint8_t dev_hs[18] = {
     18, 1, 0x00, 0x02, 0xef, 0x02, 0x01, 64, 0x09, 0x12, 0x01, 0x00, 0x00, 0x02, 1, 2, 3, 1,
 };
 
-/* 176.4 and 192 kHz left out: their 24-bit packets (776 bytes) do not fit in the RX FIFO, fixed
- * at 147 words (hwcfg2: no dynamic FIFO sizing, GRXFSIZ stays), and UAC2 rates are the clock's,
- * the same for every format */
-#define MPS2_16     196                         /* 49 frames of 4 bytes (96 kHz: 48) */
-#define MPS2_32     392                         /* 49 frames of 8 bytes */
+/* The RX FIFO is fixed at 147 words (hwcfg2: no dynamic FIFO sizing, GRXFSIZ stays): a packet
+ * and its status word must fit, 392 bytes at most here. At 192 kHz that is 500 us of 16-bit
+ * frames, but only 250 us of 8-byte frames (776 bytes in 500 us, dropped by the controller) */
+#define MPS2_16     392                         /* 98 frames of 4 bytes (192 kHz: 96, 500 us) */
+#define MPS2_32     392                         /* 49 frames of 8 bytes (192 kHz: 48, 250 us) */
 #define CLOCK_ID    0x10
-static const uint32_t rates2[] = { 44100, 48000, 88200, 96000 };
+static const uint32_t rates2[] = { 44100, 48000, 88200, 96000, 176400, 192000 };
 #define N_RATES2 (int)(sizeof rates2 / sizeof *rates2)
 
-#define FORMAT2(alt, sub, bits, mps)                                                           \
+#define FORMAT2(alt, sub, bits, mps, interval)                                                 \
     9, 4, 1, alt, 2, 1, 2, 0x20, 0,                     /* streaming, alternate, 2 endpoints */ \
     16, 0x24, 1, 1, 0, 1, 1, 0, 0, 0, 2, 3, 0, 0, 0, 0, /* general: terminal 1, PCM, L and R */ \
     6, 0x24, 2, 1, sub, bits,                           /* type I: subslot, bits */             \
-    7, 5, 0x01, 0x05, (mps) & 0xff, (mps) >> 8, 3,      /* OUT 1, asynchronous, 500 us */       \
+    7, 5, 0x01, 0x05, (mps) & 0xff, (mps) >> 8, interval,   /* OUT 1, asynchronous */           \
     8, 0x25, 1, 0, 0, 0, 0, 0,                                                                   \
     7, 5, 0x81, 0x11, 4, 0, 4                           /* IN 1: feedback, 1 ms */
 
@@ -87,9 +94,9 @@ static const uint8_t cfg_hs[] = {
     18, 0x24, 6, 2, 1, 0x0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  /* feature: mute, volume */
     12, 0x24, 3, 3, 0x02, 0x03, 0, 2, CLOCK_ID, 0, 0, 0,          /* output: headphones */
     9, 4, 1, 0, 0, 1, 2, 0x20, 0,                       /* streaming, alternate 0: no data */
-    FORMAT2(1, 2, 16, MPS2_16),
-    FORMAT2(2, 4, 24, MPS2_32),
-    FORMAT2(3, 4, 32, MPS2_32),
+    FORMAT2(1, 2, 16, MPS2_16, 3),                      /* 500 us */
+    FORMAT2(2, 4, 24, MPS2_32, 2),                      /* 250 us */
+    FORMAT2(3, 4, 32, MPS2_32, 2),
 };
 _Static_assert(sizeof cfg_hs == 258, "UAC2 configuration length");
 
@@ -109,6 +116,8 @@ static struct {
     int32_t err;                /* the last error, frames (the target minus the average) */
     uint32_t sent;              /* the last value sent */
     int on;                     /* the control runs (packets flowing) */
+    uint32_t at_limit;          /* ms the integral has stayed at its limit */
+    volatile int ignored;       /* the host ignores the feedback (until the stream restarts) */
 } fb;
 
 static uint32_t fb_nominal(uint32_t hz)
@@ -310,7 +319,7 @@ static int uac_setup(const uint8_t *s, uint8_t *r)
             return -1;
         if (value) {
             usb_iso_out_open(hs ? (value == 1 ? MPS2_16 : MPS2_32) : value == 1 ? MPS16 : MPS24,
-                             hs ? 4 : 1);
+                             hs ? (value == 1 ? 4 : 2) : 1);
             usb_iso_in_open(hs ? 4 : 3, hs ? 8 : 1);
             fb_send();
         } else {
@@ -398,11 +407,12 @@ static struct {
     int ready;                  /* the output runs at the host's format: packets go to the ring */
     int flowing;                /* packets came lately (else: silence) */
     int corr;                   /* drift correction: -1 drop, +1 repeat, 0 none */
+    uint32_t corr_ms;           /* millis() of the last single-frame correction */
     uint32_t frame;             /* bytes of a frame in the ring: 4 (16 bits) or 8 (24 bits) */
     int32_t target, window, settle, ahead;  /* in ring bytes */
     volatile uint32_t last_ms;  /* millis() of the last packet (set by the interrupt) */
     uint32_t packets, dropped, repeated, realigned, bad;
-    uint32_t per_ms, sub;       /* packets a millisecond: 2 at high speed; the count */
+    uint32_t per_ms, sub;       /* packets a millisecond (high speed: 2 or 4); the count */
     int32_t fill_min, fill_max;
 } st;
 static uint32_t rate_rd0, rate_t0;                      /* the output's real rate, from the DMA */
@@ -458,6 +468,8 @@ static void uac_iso_out(uint32_t n)
         if (st.flowing)
             st.realigned++;
         audio_stream_align((uint32_t)st.target);
+        if (!st.flowing)
+            fb.on = 0;                                  /* the control from scratch */
         st.flowing = 1;
         st.corr = 0;
         fill = audio_fill();
@@ -477,11 +489,17 @@ static void uac_iso_out(uint32_t n)
         st.corr = 1;
     else if ((st.corr < 0 && err <= st.settle) || (st.corr > 0 && err >= -st.settle))
         st.corr = 0;
+    int one = st.corr;                                  /* a host that ignores the feedback: */
+    if (!one && fb.ignored && (fb.err < -1 || fb.err > 1) &&
+        millis() - st.corr_ms >= SPREAD_MS) {           /* one frame, SPREAD_MS apart */
+        one = fb.err < 0 ? -1 : 1;
+        st.corr_ms = millis();
+    }
     uint32_t wpf = st.frame / 4;                        /* words of a frame */
-    if (st.corr < 0 && frames > 1) {                    /* the DACs are slower: one less */
+    if (one < 0 && frames > 1) {                        /* the DACs are slower: one less */
         k -= wpf;
         st.dropped++;
-    } else if (st.corr > 0) {                           /* faster: the last frame twice */
+    } else if (one > 0) {                               /* faster: the last frame twice */
         for (uint32_t i = 0; i < wpf; i++, k++)
             out[k] = out[k - wpf];
         st.repeated++;
@@ -494,7 +512,7 @@ static void uac_iso_out(uint32_t n)
 static uint32_t fb_value(void)
 {
     uint32_t nom = fb_nominal(rate), v = nom;
-    if (fb.on)
+    if (fb.on && !fb.ignored)
         v = (uint32_t)((int32_t)nom + fb.err * FB_KP + fb.integ / 256);
 #ifdef ECHO_UACDIAG
     if (diag.step)                              /* 2: -0.5 %, 3: +0.05 %, the others +0.5 % */
@@ -521,6 +539,8 @@ static void fb_control(int32_t fill)
         fb.on = 1;
         fb.avg = f;
         fb.integ = 0;
+        fb.at_limit = 0;
+        fb.ignored = 0;
     }
     fb.avg += (f - fb.avg) / 64;
     fb.err = (st.target / (int32_t)st.frame * 16 - fb.avg) / 16;
@@ -529,6 +549,11 @@ static void fb_control(int32_t fill)
         fb.integ = nom / 100 * 256;
     if (fb.integ < -(nom / 100 * 256))
         fb.integ = -(nom / 100 * 256);
+    if (fb.integ == nom / 100 * 256 || fb.integ == -(nom / 100 * 256)) {
+        if (++fb.at_limit >= IGNORED_MS)
+            fb.ignored = 1;
+    } else
+        fb.at_limit = 0;
 }
 
 static void uac_reset(void)
@@ -587,7 +612,7 @@ static void apply_format(void)
     cur_rate = rate;
     cur_alt = a;
     st.frame = bits16 ? 4 : 8;
-    st.per_ms = usb.high_speed ? 2 : 1;
+    st.per_ms = usb.high_speed ? (a == 1 ? 2 : 4) : 1;
     st.sub = 0;
     st.target = ms_bytes(TARGET_MS * 1000);
     st.window = ms_bytes(WINDOW_US);
@@ -719,9 +744,10 @@ static void log_stats(const char *what, uint32_t max_gap)
     rate_rd0 = audio.rd;
     rate_t0 = ticks();
     log_printf("uac: feedback %u (%u.%u Hz), error %d frames, integral %d; IN sent %u, "
-               "re-aimed %u", fb.sent, (uint32_t)((uint64_t)fb.sent * 10000 >> 14) / 10,
+               "re-aimed %u%s", fb.sent, (uint32_t)((uint64_t)fb.sent * 10000 >> 14) / 10,
                (uint32_t)((uint64_t)fb.sent * 10000 >> 14) % 10, fb.err, fb.integ / 256,
-               usb.iso_in_sent, usb.iso_in_late);
+               usb.iso_in_sent, usb.iso_in_late,
+               fb.ignored ? "; the host ignores it: corrections spread" : "");
     log_printf("uac: interrupts %u, the longest %u us", usb.irqs, usb.irq_max_us);
     usb.irq_max_us = 0;
     log_printf("uac: longest parts, us: usb %u, format %u, volume %u, keys %u, screen line %u, "
@@ -826,6 +852,13 @@ void uac_mode(void)
         if (st.ready && st.flowing && millis() - last_ms > STALL_MS) {
             st.flowing = 0;                             /* the host stopped sending */
             log_stats("paused", max_gap);
+        }
+        static int noted;
+        if (fb.ignored != noted) {
+            noted = fb.ignored;
+            if (noted)
+                log_printf("uac: the host ignores the feedback (%u s at its limit): back to the "
+                           "nominal, corrections spread", IGNORED_MS / 1000);
         }
 #ifdef ECHO_UACDIAG
         diag_drain();

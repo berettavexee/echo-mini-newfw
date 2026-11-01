@@ -135,8 +135,9 @@ One line per version; the measurements are in `ETUDE.md`.
      for the screen, keys, volume and log; the same results as step 2.
      b. Done in 0.98 (§87): UAC2 at high speed, 44.1 to 96 kHz in 16, 24 and 32 bits, a packet
      every 500 us; UAC1 at full speed kept for older hosts. The RX FIFO cannot be resized (147
-     words): 176.4 and 192 kHz in 24 bits would need a packet every 250 us (about twice the
-     interrupts); left out, such sources being rare.
+     words): 176.4 and 192 kHz in 24 bits need a packet every 250 us. Done since test image 99J
+     (§93): the 24- and 32-bit alternates at 250 us, all six rates in every format, no frame
+     dropped with Linux, 65 us per interrupt at most.
   4. Use: HID media keys (play/pause, next, previous, volume to the host or to the DACs), a
      screen with the format received, the rate fed back, an "untouched stream" mark and two VU
      meters, one per channel (peaks of the samples received, so a silent channel shows at a
@@ -148,9 +149,10 @@ One line per version; the measurements are in `ETUDE.md`.
        is read every millisecond; the phone sends 48,002.7 Hz against our 48,000.3 (about
        50 ppm), and the fallback drops 152 frames, one a packet, every 70 s (inaudible, not
        bit-perfect). The Linux PC follows a +/-0.5 % feedback step to the frame.
-       To do: detect such a host (integral saturated, fixed packet size for 10 s), freeze the
-       control and spread the corrections (one frame every 0.4 s or so) instead of bursts;
-       check the offload (`adb shell dumpsys media.audio_flinger`) and try a commercial
+       Since test image 99I: such a host is detected (the control 10 s at its 1 % limit), the
+       feedback goes back to the nominal and the drift is corrected one frame at a time, 100 ms
+       apart at least (about one every 0.4 s at 50 ppm) instead of bursts (§92). To do: check
+       the offload (`adb shell dumpsys media.audio_flinger`) and try a commercial
        asynchronous DAC on the Pixel. Reported to Google:
        https://issuetracker.google.com/issues/579970942 (similar: issue 423658602).
      - iPhone, 44.1 kHz, 32 bits: sound on the right channel only was the iPhone's Balance
