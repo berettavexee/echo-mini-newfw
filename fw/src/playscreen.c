@@ -1,5 +1,5 @@
-/* The play screen (ETUDE §25, §39): status, title at twice the size, artist and album (scrolled
- * when too long), time and bar (or the seek target), format, volume and ReplayGain; its keys. */
+/* The play screen (ETUDE §25, §39): status, title at twice the size (the full title scrolls when
+ * it cannot fit on two lines), artist and album (also scrolled when too long), time and format. */
 #include "ui_priv.h"
 
 /* The bar in the seek mode: the position dimmed, the target as a mark above and below it */
@@ -44,28 +44,29 @@ static const char *codec_name(uint32_t c)
 #define MQ_STEP  33000u
 static struct marquee {
     const char *s;
-    int y, w, off;
+    int y, w, off, sc;
     uint16_t fg;
     uint32_t t;                                 /* start of the pause, then of the last step */
-} mq[2];
+} mq[3];
 
-static void marquee_set(struct marquee *m, int y, const char *s, uint16_t fg)
+static void marquee_set(struct marquee *m, int y, const char *s, uint16_t fg, int sc)
 {
     m->s = s;
     m->y = y;
     m->fg = fg;
+    m->sc = sc;
     m->off = 0;
     m->t = ticks();
-    m->w = lcd_text_width(s);
+    m->w = lcd_text_width_x(s, sc);
     if (m->w <= MQ_XMAX - MQ_X)
         m->w = 0;                               /* it fits: drawn once, never scrolled */
-    lcd_text_clip(MQ_X, y, s, MQ_XMAX, fg, BG);
+    lcd_text_clip_x(MQ_X, y, s, MQ_XMAX, fg, BG, sc);
 }
 
 void marquee_tick(void)
 {
     uint32_t now = ticks();
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         struct marquee *m = &mq[i];
         if (!m->w || now - m->t < (m->off ? MQ_STEP : MQ_PAUSE))
             continue;
@@ -73,7 +74,7 @@ void marquee_tick(void)
         m->t = now;
         if (m->off >= m->w + MQ_GAP)
             m->off = 0;                         /* back at the start: still again */
-        lcd_text_scroll(MQ_X, m->y, m->s, MQ_XMAX, m->off, MQ_GAP, m->fg, BG);
+        lcd_text_scroll(MQ_X, m->y, m->s, MQ_XMAX, m->off, MQ_GAP, m->sc, m->fg, BG);
     }
 }
 
@@ -83,14 +84,14 @@ void draw_playing(int full)
     if (!q_playing && !q_n) {
         if (full) {
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text_clip(8, 60, ui_tr("nothing plays: PLAY on a file", "未在播放：选中文件后按播放键", "再生中の曲がありません：ファイルを選んでPLAY"), LCD_W, DIM, BG);
+            lcd_text(8, 60, "nothing plays: PLAY on a file", DIM, BG);
         }
         return;
     }
     /* Each band is drawn over the previous picture, every pixel written once: no clearing first,
      * which flickered (ETUDE §39). A full drawing also paints the gaps between the bands. */
     if (full) {
-        mq[0].w = mq[1].w = 0;                  /* set again below, with the new texts */
+        mq[0].w = mq[1].w = mq[2].w = 0;       /* set again below, with the new texts */
         lcd_fill(0, 16, LCD_W, 2, BG);
         lcd_fill(0, 82, LCD_W, 4, BG);
         lcd_fill(0, 118, LCD_W, 4, BG);
@@ -108,17 +109,8 @@ void draw_playing(int full)
         lcd_fill(0, 145, LCD_W, 5, BG);
     }
     /* status: playing / paused, position in the queue */
-    const char *const modes[MODE_COUNT] = {
-        "", ui_tr("  repeat all", "  全部循环", "  全曲リピート"),
-        ui_tr("  repeat one", "  单曲循环", "  1曲リピート"),
-        ui_tr("  shuffle", "  随机播放", "  シャッフル"),
-    };
-    const char *status = !q_playing ? (parked ? "paused" : "stopped") :
-                         audio_paused ? "paused" : "playing";
-    p = put_str(b, ui_tr(status, !q_playing ? (parked ? "已暂停" : "已停止") :
-                         audio_paused ? "已暂停" : "正在播放",
-                         !q_playing ? (parked ? "一時停止" : "停止中") :
-                         audio_paused ? "一時停止" : "再生中"));
+    static const char *const modes[MODE_COUNT] = { "", "  repeat all", "  repeat one", "  shuffle" };
+    p = put_str(b, !q_playing ? (parked ? "paused" : "stopped") : audio_paused ? "paused" : "playing");
     p = put_str(p, "  ");
     p = put_dec(p, (uint32_t)q_cur + 1);
     p = put_str(p, "/");
@@ -131,9 +123,8 @@ void draw_playing(int full)
     *p = 0;
     text_right(LCD_W - 68, LCD_W, 0, b, battery_low ? WARN : DIM, BG);
     if (full) {
-        /* the title (or the file name) at twice the size, on two lines: as much as fits (cut
-         * after a space when there is one in the second half), then the rest cut with an
-         * ellipsis; then the artist and the album (or the folder) */
+        /* keep two lines when the full title fits; otherwise scroll the complete title in one
+         * large line, like a conventional MP3 player marquee */
         const char *nm = tg.title[0] && !cfg.names ? tg.title : q_name(q_cur), *s = nm, *s_sp = 0;
         char l1[96];
         int w = 0, n = 0, n_sp = 0;
@@ -156,13 +147,18 @@ void draw_playing(int full)
         if (*s && s_sp && n_sp > n / 2)         /* a break between words */
             n = n_sp, s = s_sp;
         l1[n] = 0;
-        lcd_text_clip_x(4, 18, l1, LCD_W - 4, FG, BG, 2);
-        lcd_text_clip_x(4, 50, s, LCD_W - 4, FG, BG, 2);
-        marquee_set(&mq[0], 86, cfg.names ? "" : tg.artist, TITLE_FG);     /* names: the folder */
-        marquee_set(&mq[1], 102, tg.album[0] && !cfg.names ? tg.album : q_folder, DIR_FG);
+        if (lcd_text_width_x(s, 2) > LCD_W - 8) {
+            lcd_fill(4, 18, LCD_W - 8, 64, BG);
+            marquee_set(&mq[0], 34, nm, FG, 2);
+        } else {
+            lcd_text_clip_x(4, 18, l1, LCD_W - 4, FG, BG, 2);
+            lcd_text_clip_x(4, 50, s, LCD_W - 4, FG, BG, 2);
+        }
+        marquee_set(&mq[1], 86, cfg.names ? "" : tg.artist, TITLE_FG, 1); /* names: the folder */
+        marquee_set(&mq[2], 102, tg.album[0] && !cfg.names ? tg.album : q_folder, DIR_FG, 1);
     }
     if (sk_on) {                                /* the target, how far, what the keys do */
-        p = put_str(b, ui_tr("go to ", "跳转至 ", "移動 "));
+        p = put_str(b, "go to ");
         p = fmt_time(p, sk_ms);
         p = put_str(p, " / ");
         p = fmt_time(p, player_heard.length_ms);
@@ -170,7 +166,7 @@ void draw_playing(int full)
         p = fmt_time(p, sk_ms >= sk_from ? sk_ms - sk_from : sk_from - sk_ms);
         lcd_text_clip(4, 122, b, LCD_W, SK_FG, BG);
         seek_bar(140, 5, now_ms(), sk_ms, player_heard.length_ms);
-        lcd_text_clip(4, 150, ui_tr("VOL+/- move  PLAY go  BACK cancel", "音量键移动  播放键跳转  返回键取消", "VOL+/-移動  PLAY決定  BACK取消"), LCD_W, DIM, BG);
+        lcd_text_clip(4, 150, "VOL+/- move  PLAY go  BACK cancel", LCD_W, DIM, BG);
         return;
     }
     p = fmt_time(b, now_ms());
@@ -198,7 +194,7 @@ void draw_playing(int full)
     if (rg_mode != RG_MODE_OFF) {
         p = put_str(b, " RG ");
         if (rg_tag == RG_NONE)
-            p = put_str(p, ui_tr("none", "无", "なし"));
+            p = put_str(p, "none");
         else {
             unsigned a = (unsigned)(rg_steps < 0 ? -rg_steps : rg_steps);
             *p++ = rg_steps < 0 ? '-' : '+';
