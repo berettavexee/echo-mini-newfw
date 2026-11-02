@@ -66,8 +66,13 @@ static void marquee_set(struct marquee *m, int y, const char *s, uint16_t fg, in
 void marquee_tick(void)
 {
     uint32_t now = ticks();
+    int paused = !q_playing || audio_paused;    /* paused, parked or stopped: the text stands still */
     for (int i = 0; i < 3; i++) {
         struct marquee *m = &mq[i];
+        if (paused) {
+            m->t = now;                         /* frozen where it is: no jump on resume */
+            continue;
+        }
         if (!m->w || now - m->t < (m->off ? MQ_STEP : MQ_PAUSE))
             continue;
         m->off += m->off ? (int)((now - m->t) / MQ_STEP) : 1;
