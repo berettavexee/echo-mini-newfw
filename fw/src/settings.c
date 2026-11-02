@@ -4,10 +4,10 @@
 #include "ui_priv.h"
 
 static const struct settings defaults = {
-    .screen = 1, .bright = 10, .start = START_PLAY, .auto_off = 1, .list_title = 1,
+    .screen = 1, .bright = 10, .start = START_PLAY, .auto_off = 1, .list_title = 1, .show_clock = 1, .long_vol = 1,
 };
 struct settings cfg = {
-    .screen = 1, .bright = 10, .start = START_PLAY, .auto_off = 1, .list_title = 1,
+    .screen = 1, .bright = 10, .start = START_PLAY, .auto_off = 1, .list_title = 1, .show_clock = 1, .long_vol = 1,
 };
 uint32_t sleep_at;
 
@@ -40,6 +40,18 @@ void sleep_cancel(void)
 struct set_block {
     char magic[12];
     struct settings s;
+    uint32_t sum;
+};
+
+struct set_block_v3 {
+    char magic[12];
+    struct settings_v3 {
+        uint8_t screen, bright, names, start, auto_off, swap_vol;
+        int8_t rg_pre;
+        uint8_t uac_vol;
+        uint8_t language;
+        uint8_t list_title;
+    } s;
     uint32_t sum;
 };
 
@@ -76,7 +88,7 @@ static uint32_t set_sum(const void *block, unsigned words)
 uint32_t settings_put(uint32_t *w)
 {
     struct set_block *b = (struct set_block *)w;
-    __builtin_memcpy(b->magic, "NEWFWSET 3  ", 12);
+    __builtin_memcpy(b->magic, "NEWFWSET 4  ", 12);
     b->s = cfg;
     b->sum = set_sum(b, __builtin_offsetof(struct set_block, sum) / 4);
     return b->sum;
@@ -85,12 +97,28 @@ uint32_t settings_put(uint32_t *w)
 void settings_get(const uint32_t *w)
 {
     const struct set_block *b = (const struct set_block *)w;
+    const struct set_block_v3 *v3 = (const struct set_block_v3 *)w;
     const struct set_block_v2 *v2 = (const struct set_block_v2 *)w;
     const struct set_block_v1 *old = (const struct set_block_v1 *)w;
     int valid = 0;
-    if (!__builtin_memcmp(b->magic, "NEWFWSET 3  ", 12) &&
+    if (!__builtin_memcmp(b->magic, "NEWFWSET 4  ", 12) &&
         b->sum == set_sum(b, __builtin_offsetof(struct set_block, sum) / 4)) {
         cfg = b->s;
+        valid = 1;
+    } else if (!__builtin_memcmp(v3->magic, "NEWFWSET 3  ", 12) &&
+               v3->sum == set_sum(v3, __builtin_offsetof(struct set_block_v3, sum) / 4)) {
+        cfg.screen = v3->s.screen;
+        cfg.bright = v3->s.bright;
+        cfg.names = v3->s.names;
+        cfg.start = v3->s.start;
+        cfg.auto_off = v3->s.auto_off;
+        cfg.swap_vol = v3->s.swap_vol;
+        cfg.rg_pre = v3->s.rg_pre;
+        cfg.uac_vol = v3->s.uac_vol;
+        cfg.language = v3->s.language;
+        cfg.list_title = v3->s.list_title;
+        cfg.show_clock = defaults.show_clock;
+        cfg.long_vol = defaults.long_vol;
         valid = 1;
     } else if (!__builtin_memcmp(v2->magic, "NEWFWSET 2  ", 12) &&
                v2->sum == set_sum(v2, __builtin_offsetof(struct set_block_v2, sum) / 4)) {
@@ -104,6 +132,8 @@ void settings_get(const uint32_t *w)
         cfg.uac_vol = v2->s.uac_vol;
         cfg.language = v2->s.language;
         cfg.list_title = defaults.list_title;
+        cfg.show_clock = defaults.show_clock;
+        cfg.long_vol = defaults.long_vol;
         valid = 1;
     } else if (!__builtin_memcmp(old->magic, "NEWFWSET 1  ", 12)) {
         uint32_t sum = set_sum(old, __builtin_offsetof(struct set_block_v1, sum) / 4);
@@ -119,6 +149,8 @@ void settings_get(const uint32_t *w)
             cfg.uac_vol = old->s.uac_vol;
             cfg.language = defaults.language;
             cfg.list_title = defaults.list_title;
+            cfg.show_clock = defaults.show_clock;
+            cfg.long_vol = defaults.long_vol;
         }
     }
     if (valid) {                              /* each value checked: a bad one, its default */
@@ -137,6 +169,8 @@ void settings_get(const uint32_t *w)
         if (cfg.language > 2)
             cfg.language = defaults.language;
         cfg.list_title = cfg.list_title != 0;
+        cfg.show_clock = cfg.show_clock != 0;
+        cfg.long_vol = cfg.long_vol != 0;
         log_printf("ui: settings: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
                    "off %u, swap %u", cfg.screen, bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags",
                    cfg.rg_pre, cfg.start, cfg.auto_off, cfg.swap_vol);   /* RG mode: resume.c */
@@ -147,7 +181,7 @@ void settings_get(const uint32_t *w)
 /* ---- the screen: VOL+/VOL- the line, PLAY the next value, PLAY held the one before,
  * BACK or MENU back (saved). Each change takes effect at once. ---- */
 enum { S_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_LIST_TITLE, S_RG, S_RG_PRE, S_START, S_SLEEP,
-       S_AUTO_OFF, S_SWAP, S_LANGUAGE, S_DEFAULTS, S_COUNT };
+       S_AUTO_OFF, S_SWAP, S_LONG_VOL, S_LANGUAGE, S_DEFAULTS, S_COUNT };
 static const char *const language_names[] = { "English", "简体中文", "日本語" };
 static const char *setting_name(int i)
 {
@@ -163,6 +197,7 @@ static const char *setting_name(int i)
     case S_SLEEP: return ui_tr("Sleep timer", "睡眠定时器", "スリープタイマー");
     case S_AUTO_OFF: return ui_tr("Power off when idle", "闲置后关机", "無操作時に電源オフ");
     case S_SWAP: return ui_tr("Swap VOL+ and VOL-", "交换音量键", "音量キーを入れ替え");
+    case S_LONG_VOL: return ui_tr("Hold VOL to skip", "长按音量键切歌", "音量長押しで曲送り");
     case S_LANGUAGE: return ui_tr("Language", "语言", "言語");
     default: return ui_tr("Restore the defaults (PLAY)", "恢复默认设置（按播放键）", "設定を初期化（PLAY）");
     }
@@ -265,6 +300,9 @@ static void value_text(int i, char *b)
     case S_SWAP:
         p = put_str(p, cfg.swap_vol ? ui_tr("yes", "是", "はい") : ui_tr("no", "否", "いいえ"));
         break;
+    case S_LONG_VOL:
+        p = put_str(p, cfg.long_vol ? ui_tr("yes", "是", "はい") : ui_tr("no", "否", "いいえ"));
+        break;
     case S_LANGUAGE:
         p = put_str(p, language_names[cfg.language]);
         break;
@@ -320,6 +358,9 @@ static void change(int i, int d)
         break;
     case S_SWAP:
         cfg.swap_vol ^= 1;
+        break;
+    case S_LONG_VOL:
+        cfg.long_vol ^= 1;
         break;
     case S_LANGUAGE:
         cfg.language = (uint8_t)step(cfg.language, 3, d);
@@ -404,8 +445,10 @@ void settings_screen(void)
                    (ev == EV_PRESS || (ev == EV_LONG && sel != S_DEFAULTS))) {
             change(sel, ev == EV_PRESS ? 1 : -1);
             dirty = 1;
-            if (sel == S_LANGUAGE)
+            if (sel == S_LANGUAGE) {
                 page = 1;
+                resume_save();                  /* kept at once, not only on leaving the screen */
+            }
         } else if ((k == KEY_BACK || k == KEY_MENU) && ev == EV_PRESS) {
             resume_save();
             return;

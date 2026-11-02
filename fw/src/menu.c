@@ -59,7 +59,7 @@ int main_menu(void)
 void clock_screen(void)
 {
     struct rtc_tm t;
-    int ok = rtc_get(&t), f = 0, dirty = 1;
+    int ok = rtc_get(&t), f = 0, dirty = 1, show = cfg.show_clock;
     if (ok < 0) {
         lcd_fill(0, 0, LCD_W, LCD_H, BG);
         lcd_text_clip(8, 60, ui_tr("no clock found (I2C1, 0xA2)", "未检测到时钟（I2C1, 0xA2）", "時計が見つかりません（I2C1, 0xA2）"), LCD_W, WARN, BG);
@@ -95,6 +95,11 @@ void clock_screen(void)
                     x += w;
                 }
             }
+            char sw[40], *sp = sw;
+            sp = put_str(sp, ui_tr("Show clock: ", "显示时钟：", "時計表示："));
+            sp = put_str(sp, show ? ui_tr("on", "开", "オン") : ui_tr("off", "关", "オフ"));
+            *sp = 0;
+            lcd_text_clip(8, 90, sw, LCD_W, f == 5 ? FG : DIM, f == 5 ? SEL_BG : BG);
             lcd_text_clip(4, 118, ui_tr("VOL+/VOL-: change   PLAY: next, save", "音量键调整  播放键下一项/保存", "VOL+/-変更  PLAY次へ/保存"), LCD_W, DIM, BG);
             lcd_text_clip(4, 136, ui_tr("BACK: previous, cancel   MENU: cancel", "返回键上一项/取消  菜单键取消", "BACK前へ/取消  MENU取消"), LCD_W, DIM, BG);
             if (!ok)
@@ -119,11 +124,15 @@ void clock_screen(void)
                 t.day = (uint8_t)((t.day - 1 + 31 + d) % 31 + 1);
             else if (f == 3)
                 t.hour = (uint8_t)((t.hour + 24 + d) % 24);
-            else
+            else if (f == 4)
                 t.min = (uint8_t)((t.min + 60 + d) % 60);
+            else
+                show ^= 1;
             dirty = 1;
         } else if (k == KEY_PLAY && ev == EV_PRESS) {
-            if (++f == 5) {
+            if (++f == 6) {
+                cfg.show_clock = (uint8_t)show;
+                resume_save();
                 int r = rtc_set(&t);
                 lcd_fill(0, 0, LCD_W, LCD_H, BG);
                 lcd_text_clip(8, 60, r ? ui_tr("the clock did not answer", "时钟无响应", "時計が応答しません") : ui_tr("clock set", "时间已设置", "時刻を設定しました"), LCD_W, r ? WARN : FG, BG);
