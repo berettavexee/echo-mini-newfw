@@ -273,6 +273,8 @@ void ui_main(void)
         path_root(FAT_VOL_INT);
         dir_load(&path[1].dir);
     }
+    if (q_playing || parked)
+        scr = SCR_PLAYING;                      /* show a track restored at power-on */
     for (;;) {
         sys_idle();
         ui_background();
