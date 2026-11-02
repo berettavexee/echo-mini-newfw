@@ -175,6 +175,29 @@ int list_load(struct listing *l, const struct fat_dir *d)
     return r;
 }
 
+/* "Name  used/total G": the space of a volume, when it can be counted */
+static char *put_gb(char *p, uint32_t mib)
+{
+    uint32_t t = mib * 10 / 1024;
+    p = put_dec(p, t / 10);
+    p = put_str(p, ".");
+    return put_dec(p, t % 10);
+}
+
+static void space_label(char *b, const char *name, int v)
+{
+    uint32_t total, used;
+    char *p = put_str(b, name);
+    if (fat_space(v, &total, &used) == 0) {
+        p = put_str(p, "  ");
+        p = put_gb(p, used);
+        p = put_str(p, "/");
+        p = put_gb(p, total);
+        p = put_str(p, "G");
+    }
+    *p = 0;
+}
+
 /* The top level (ETUDE §38): the internal volume, then the card when one is in */
 static int sd_bad;                              /* the card in did not mount */
 
@@ -193,9 +216,19 @@ int dir_load(const struct fat_dir *d)
     if (d->vol == VOL_TOP) {
         dir_l.n = dir_l.full = 0;
         dir_l.used = 0;
-        top_entry("Internal", 0);
-        if (sd_present())
-            top_entry(sd_bad ? "SD card (not readable)" : "SD card", F_SD);
+        char lb[64];
+        space_label(lb, "Internal", FAT_VOL_INT);
+        top_entry(lb, 0);
+        if (sd_present()) {
+            if (!sd_bad)
+                sd_open();
+            if (sd_bad)
+                top_entry("SD card (not readable)", F_SD);
+            else {
+                space_label(lb, "SD card", FAT_VOL_SD);
+                top_entry(lb, F_SD);
+            }
+        }
     } else {
         r = list_load(&dir_l, d);
         if (r < 0 && d->vol == FAT_VOL_SD) {    /* a read error: mounted again at the next */
