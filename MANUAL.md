@@ -95,6 +95,10 @@ From top to bottom:
 | **MENU** | to the folder browser; the music goes on |
 | **MENU held** | main menu |
 
+Unplugging either the **3.5 mm** or **4.4 mm** headphones pauses music playback. The queue and
+track position are kept; press **PLAY** to resume.
+
+
 A short press of VOL+ or VOL- changes the volume when the key is released. A chord that
 follows it therefore does not move the volume.
 

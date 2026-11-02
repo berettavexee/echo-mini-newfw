@@ -24,6 +24,7 @@ Last update: 2026-11-01, version 0.99.
 | USB sound card: UAC1 at full speed, 16 and 24 bits, 44.1 and 48 kHz, asynchronous with a rate feedback, bit-perfect (tested with Linux) | 0.97 | §84-§85 |
 | USB sound card at high speed: UAC2, 16, 24 and 32 bits, 44.1 to 96 kHz, bit-perfect (tested with Linux); UAC1 kept at full speed | 0.98 | §87 |
 | USB sound card: 176.4 and 192 kHz in every format (24/32-bit packets every 250 us); phones that ignore the feedback handled with evenly spread corrections; tested with a Pixel 6a and an iPhone | 0.99 | §90, §92, §93 |
+| Pause playback when either headphone jack is unplugged | 1.00 | — |
 | Pop-free power-down of the DACs (CS43131 datasheet sequence) at the long pause and the stop | 0.99 | §91 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
@@ -119,8 +120,8 @@ One line per version; the measurements are in `ETUDE.md`.
   (memory at `0x01069000`, stock module 79), its APE decoder (module 80) and its 64-bit MAC (TRM
   chapter 26); Imdct36 for MP3 (mapped, no end flag found, §70). Each checked on the device with
   a comparison bench, with an emulator model. Done: LPC, FFT, SYNTH.
-- Actions on the plug events (to be proposed and agreed first):
-  - pause when the headphones are unplugged;
+- Actions on plug events:
+  - pause playback when either headphone jack is unplugged (1.00).
   - a USB screen to mount the internal memory or the card, read only or read/write.
 - USB access to the microSD card (step S5 of §36).
 - USB DAC mode: the player as a USB sound card for a computer or a phone, chosen on the USB

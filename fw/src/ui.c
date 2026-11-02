@@ -328,8 +328,15 @@ void ui_main(void)
             lvl_key = play_level;
         struct key_ev e;
         int ev = key_poll(&e), k = e.key;
-        if (ev == EV_PLUG || ev == EV_UNPLUG)
-            ev = EV_NONE;                       /* logged (keys.c); no action yet */
+        if (ev == EV_UNPLUG && (k == SRC_JACK35 || k == SRC_JACK44)) {
+            if (q_playing && !audio_paused && audio.on) {
+                log_printf("ui: headphone unplugged; pausing");
+                audio_pause(1);
+                resume_save();
+            }
+            ev = EV_NONE;
+        } else if (ev == EV_PLUG)
+            ev = EV_NONE;                       /* logged (keys.c); no action */
         if (ev != EV_NONE) {
             t_key = ticks();
             key_ms = millis();
