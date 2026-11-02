@@ -74,13 +74,6 @@ static uint32_t codec_of(const char *name)
 static struct dir_buf dir __attribute__((section(".dirbuf")));
 static struct listing dir_l = { dir.e, dir.order, dir.pool, DIR_MAX, sizeof dir.pool, 0, 0, 0, 0,
                                 0 };
-#define TITLE_CACHE_N 16
-struct title_cache_entry {
-    uint16_t index;
-    char title[96];
-};
-static struct title_cache_entry title_cache[TITLE_CACHE_N];
-static uint16_t title_cache_next;
 int dir_n;
 static int dir_full;
 
@@ -182,6 +175,29 @@ int list_load(struct listing *l, const struct fat_dir *d)
     return r;
 }
 
+/* "Name  used/total G": the space of a volume, when it can be counted */
+static char *put_gb(char *p, uint32_t mib)
+{
+    uint32_t t = mib * 10 / 1024;
+    p = put_dec(p, t / 10);
+    p = put_str(p, ".");
+    return put_dec(p, t % 10);
+}
+
+static void space_label(char *b, const char *name, int v)
+{
+    uint32_t total, used;
+    char *p = put_str(b, name);
+    if (fat_space(v, &total, &used) == 0) {
+        p = put_str(p, "  ");
+        p = put_gb(p, used);
+        p = put_str(p, "/");
+        p = put_gb(p, total);
+        p = put_str(p, "G");
+    }
+    *p = 0;
+}
+
 /* The top level (ETUDE §38): the internal volume, then the card when one is in */
 static int sd_bad;                              /* the card in did not mount */
 
@@ -195,18 +211,24 @@ static void top_entry(const char *name, uint16_t flags)
 
 int dir_load(const struct fat_dir *d)
 {
-    for (unsigned i = 0; i < sizeof title_cache / sizeof title_cache[0]; i++)
-        title_cache[i].index = UINT16_MAX;
-    title_cache_next = 0;
     uint32_t t0 = ticks();
     int r = 0;
     if (d->vol == VOL_TOP) {
         dir_l.n = dir_l.full = 0;
         dir_l.used = 0;
-        top_entry(ui_tr("Internal", "内部存储", "内蔵ストレージ"), 0);
-        if (sd_present())
-            top_entry(sd_bad ? ui_tr("SD card (not readable)", "SD 卡（无法读取）", "SDカード（読み取り不可）") :
-                      ui_tr("SD card", "SD 卡", "SDカード"), F_SD);
+        char lb[64];
+        space_label(lb, "Internal", FAT_VOL_INT);
+        top_entry(lb, 0);
+        if (sd_present()) {
+            if (!sd_bad)
+                sd_open();
+            if (sd_bad)
+                top_entry("SD card (not readable)", F_SD);
+            else {
+                space_label(lb, "SD card", FAT_VOL_SD);
+                top_entry(lb, F_SD);
+            }
+        }
     } else {
         r = list_load(&dir_l, d);
         if (r < 0 && d->vol == FAT_VOL_SD) {    /* a read error: mounted again at the next */
@@ -253,35 +275,6 @@ void copy_name(char *d, const char *s, int max)
     d[i] = 0;
 }
 
-static const char *display_name(int i)
-{
-    const struct entry *e = ent(i);
-    const char *name = ent_name(i);
-    if (!cfg.list_title || (e->flags & F_DIR))
-        return name;
-    for (unsigned n = 0; n < TITLE_CACHE_N; n++)
-        if (title_cache[n].index == i)
-            return title_cache[n].title;
-
-    struct title_cache_entry *c = &title_cache[title_cache_next++ % TITLE_CACHE_N];
-    c->index = (uint16_t)i;
-    copy_name(c->title, name, sizeof c->title);  /* fallback when the tag has no title */
-    if ((e->flags & F_SD) && sd_open())
-        return c->title;
-    struct fat_file f = {
-        .vol = e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT,
-        .contig = (e->flags & F_CONTIG) != 0,
-        .cluster = e->cluster,
-        .size = e->size,
-    };
-    struct tags t;
-    fat_open(&f);
-    tags_read(&f, e->flags & F_CODEC, &t);
-    if (t.title[0])
-        copy_name(c->title, t.title, sizeof c->title);
-    return c->title;
-}
-
 int b_dirty = 1;
 static int b_sel = -1, b_top = -1, b_mark = -1;
 
@@ -302,7 +295,7 @@ static void draw_row(int r, int sel, int mark)
     if (i >= dir_n) {
         lcd_fill(0, y, LCD_W, 16, BG);
         if (!dir_n && !r)
-            lcd_text_clip(8, y, ui_tr("no folder or playable file here", "此处没有文件夹或可播放文件", "フォルダーまたは再生可能なファイルがありません"), LCD_W, DIM, BG);
+            lcd_text(8, y, "no folder or playable file here", DIM, BG);
         return;
     }
     const struct entry *e = ent(i);
@@ -312,8 +305,8 @@ static void draw_row(int r, int sel, int mark)
     lcd_fill(0, y, 22, 16, bg);
     if (dirent || i == mark)
         lcd_glyph(dirent ? 6 : 3, y, dirent ? 0xbb : 0x266a, dirent ? DIR_FG : TITLE_FG, bg);
-    lcd_text_clip(22, y, display_name(i), list_text_end(dir_n, ROWS),
-                  dirent ? DIR_FG : e->size ? FG : DIM, bg);
+    lcd_text_clip(22, y, ent_name(i), list_text_end(dir_n, ROWS), dirent ? DIR_FG : e->size ? FG : DIM,
+                  bg);
 }
 
 /* "selected/count" right-aligned on the first line */
@@ -353,7 +346,7 @@ void draw_browser(void)
     }
     if (b_dirty) {                              /* every band once, nothing cleared first */
         lcd_fill(0, 0, 4, 16, BG);
-        lcd_text_clip(4, 0, depth ? path[depth].name : ui_tr("Storage", "存储设备", "ストレージ"), LCD_W - 114, TITLE_FG, BG);
+        lcd_text_clip(4, 0, depth ? path[depth].name : "Storage", LCD_W - 114, TITLE_FG, BG);
         draw_clock(LCD_W - 114, LCD_W - 70, 1);
         lcd_fill(LCD_W - 4, 0, 4, 16, BG);
         lcd_fill(0, 16, LCD_W, ROW_Y0 - 16, BG);
