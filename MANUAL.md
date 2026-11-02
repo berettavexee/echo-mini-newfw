@@ -72,8 +72,8 @@ From top to bottom:
      on battery it only goes down (a pause lets the voltage rise a little: that is not shown),
      and while charging it stops at 99 % until the charger has finished. The battery turns red
      under 3.425 V.
-2. **The title**, or the file name when the file has no title tag. It uses two large lines; if
-   the remaining text is too long, the second line scrolls after a short pause.
+2. **The title**, or the file name when the file has no title tag. It uses two large lines when
+   it fits; longer names scroll in full across one large line after a short pause.
 3. **The artist and the album**, or the folder when the file has no album tag. They scroll when
    too long.
 4. **The time and the bar**.

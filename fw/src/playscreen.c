@@ -1,5 +1,5 @@
-/* The play screen (ETUDE §25, §39): status, title at twice the size (its second line scrolls
- * when too long), artist and album (also scrolled when too long), time, format and its keys. */
+/* The play screen (ETUDE §25, §39): status, title at twice the size (the full title scrolls when
+ * it cannot fit on two lines), artist and album (also scrolled when too long), time and format. */
 #include "ui_priv.h"
 
 /* The bar in the seek mode: the position dimmed, the target as a mark above and below it */
@@ -123,8 +123,8 @@ void draw_playing(int full)
     *p = 0;
     text_right(LCD_W - 68, LCD_W, 0, b, battery_low ? WARN : DIM, BG);
     if (full) {
-        /* the title (or file name) at twice the size on two lines: the second line scrolls its
-         * remaining text when it is too long; then the artist and album (or the folder) */
+        /* keep two lines when the full title fits; otherwise scroll the complete title in one
+         * large line, like a conventional MP3 player marquee */
         const char *nm = tg.title[0] && !cfg.names ? tg.title : q_name(q_cur), *s = nm, *s_sp = 0;
         char l1[96];
         int w = 0, n = 0, n_sp = 0;
@@ -147,8 +147,13 @@ void draw_playing(int full)
         if (*s && s_sp && n_sp > n / 2)         /* a break between words */
             n = n_sp, s = s_sp;
         l1[n] = 0;
-        lcd_text_clip_x(4, 18, l1, LCD_W - 4, FG, BG, 2);
-        marquee_set(&mq[0], 50, s, FG, 2);
+        if (lcd_text_width_x(s, 2) > LCD_W - 8) {
+            lcd_fill(4, 18, LCD_W - 8, 64, BG);
+            marquee_set(&mq[0], 34, nm, FG, 2);
+        } else {
+            lcd_text_clip_x(4, 18, l1, LCD_W - 4, FG, BG, 2);
+            lcd_text_clip_x(4, 50, s, LCD_W - 4, FG, BG, 2);
+        }
         marquee_set(&mq[1], 86, cfg.names ? "" : tg.artist, TITLE_FG, 1); /* names: the folder */
         marquee_set(&mq[2], 102, tg.album[0] && !cfg.names ? tg.album : q_folder, DIR_FG, 1);
     }
