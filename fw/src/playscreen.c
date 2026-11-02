@@ -125,7 +125,11 @@ void draw_playing(int full)
     p = put_dec(p, (uint32_t)q_n);
     p = put_str(p, modes[play_mode]);
     *p = 0;
-    lcd_text_clip(4, 0, b, LCD_W - 104, TITLE_FG, BG);
+    const struct entry *qe = q_ent(q_cur);
+    int favourite = fav_find(qe) >= 0;
+    lcd_text_clip(4, 0, b, favourite ? LCD_W - 124 : LCD_W - 104, TITLE_FG, BG);
+    if (favourite)
+        lcd_glyph(LCD_W - 120, 0, 0x2665, FAV_FG, BG);
     draw_clock(LCD_W - 104, LCD_W - 68, full);
     p = battery_text(b);
     *p = 0;
@@ -220,6 +224,21 @@ void draw_playing(int full)
 int play_key(const struct key_ev *e)
 {
     int k = e->key, ev = e->type;
+    if (cfg.long_vol && key_is_vol(k) && ev == EV_REPEAT) {
+        int next = (k == KEY_VOLUP) != !!cfg.swap_vol;
+        if (next) {
+            int n = q_next_index(q_cur, 1);
+            if (n >= 0)
+                play_index(n);
+        } else {
+            int prev = q_prev_index(q_cur);
+            if (prev >= 0)
+                play_step(prev, -1);
+            else
+                play_index(q_cur);
+        }
+        return UI_FULL;
+    }
     if (key_is_vol(k))
         volume((k == KEY_VOLUP) != !!cfg.swap_vol ? -2 : 2);
     else if (k == KEY_PLAY && ev == EV_PRESS) {

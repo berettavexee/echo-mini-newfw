@@ -25,12 +25,18 @@ static int qd_n;
 
 /* The queue's listing: one folder at a time */
 #define QL_MAX 600
-static struct {
-    struct entry e[QL_MAX];
-    uint16_t order[QL_MAX];
-    char pool[0x8000 - QL_MAX * (sizeof(struct entry) + 2)];
+static union {
+    struct {
+        struct entry e[QL_MAX];
+        uint16_t order[QL_MAX];
+        char pool[0x8000 - QL_MAX * (sizeof(struct entry) + 2)];
+    } l;
+    struct {                                    /* a list of tracks (below): the same memory, */
+        struct entry e[Q_LIST_MAX];             /* the folders' listing is not used then */
+        char name[Q_LIST_MAX][49];
+    } t;
 } ql_buf __attribute__((section(".queuebuf")));
-static struct listing ql = { ql_buf.e, ql_buf.order, ql_buf.pool, QL_MAX, sizeof ql_buf.pool,
+static struct listing ql = { ql_buf.l.e, ql_buf.l.order, ql_buf.l.pool, QL_MAX, sizeof ql_buf.l.pool,
                              0, 0, 0, 1, 1 };
 static int ql_dir = -1;                         /* the qd[] in ql, -1: none */
 static int ql_files;                            /* ql's first file in its order (folders first) */
@@ -68,6 +74,31 @@ static int ql_load(int f)
     return 0;
 }
 
+/* ---- a queue of listed tracks (favourites, playlists): no folders, the entries are kept ---- */
+#define lq_e ql_buf.t.e
+#define lq_name ql_buf.t.name
+static int lq_mode, lq_n, lq_sd;
+static char lq_title[64];
+
+void q_list_begin(const char *title)
+{
+    q_clear();
+    lq_mode = 1;                                /* (q_clear: ql_dir -1, the listing is gone) */
+    lq_n = lq_sd = 0;
+    copy_name(lq_title, title, sizeof lq_title);
+}
+
+void q_list_add(const struct entry *e, const char *name)
+{
+    if (lq_n >= Q_LIST_MAX)
+        return;
+    lq_e[lq_n] = *e;
+    lq_e[lq_n].name = 0;
+    copy_name(lq_name[lq_n], name, sizeof lq_name[0]);
+    lq_sd |= (e->flags & F_SD) != 0;
+    lq_n++;
+}
+
 /* ---- the tracks used lately: their entry and name ---- */
 #define SLOTS 4
 static struct {
@@ -94,6 +125,16 @@ static int slot_of(int i)                       /* the slot of track i, read if 
         }
     if (i < 0 || i >= q_n)
         return -1;
+    if (lq_mode) {
+        for (s = 1; s < SLOTS; s++)
+            if (slot[s].used < slot[old].used)
+                old = s;
+        slot[old].i = i;
+        slot[old].used = ++slot_clock;
+        slot[old].e = lq_e[i];
+        copy_name(slot[old].name, lq_name[i], sizeof slot[old].name);
+        return old;
+    }
     int f = 0, k = i;
     while (f < qd_n && k >= qd[f].count)
         k -= qd[f++].count;
@@ -131,12 +172,15 @@ void q_set_codec(int i, uint32_t codec)         /* M4A: AAC or ALAC, from its co
 
 int q_on_sd(void)
 {
+    if (lq_mode)
+        return lq_sd;
     return qd_n && qd[0].vol == FAT_VOL_SD;
 }
 
 void q_clear(void)
 {
     q_n = qd_n = 0;
+    lq_mode = lq_n = 0;
     q_cur = 0;
     ql_dir = -1;
     slots_clear();
@@ -345,4 +389,15 @@ void q_from_tree(const struct fat_dir *top, const char *name)
         log_printf("ui: %d folders left out (%d at most)", lost, Q_DIRS);
     q_done(name, t0);
     q_cur = play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;     /* shuffle: from anywhere */
+}
+
+int q_list_end(void)
+{
+    q_n = lq_n;
+    slots_clear();
+    q_shuffle_new(-1);
+    copy_name(q_folder, lq_title, sizeof q_folder);
+    q_cur = play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;
+    log_printf("ui: %d tracks in the list %s", q_n, q_folder);
+    return q_n;
 }

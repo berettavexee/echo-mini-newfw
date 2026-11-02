@@ -122,6 +122,10 @@ void fail_text(int code, uint32_t why, const char **what, const char **hint)
     static const char check[] = "Check the file on a computer";
     *hint = check;
     switch (code) {
+    case Q_ENOFAV:
+        *what = "Cannot save favourite";
+        *hint = "Storage full or no NEWFWLOG.TXT";
+        break;
     case Q_EEMPTY:
         *what = "Empty file (0 bytes)";
         *hint = "Copy it again";

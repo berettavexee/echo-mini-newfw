@@ -225,9 +225,8 @@ static void draw_stats(int browser, int whole, uint32_t us)
 }
 
 /* MENU held: the main menu, then what was chosen in it */
-static void menu_open(int *scr)
+static void run_entry(int m, int *scr)
 {
-    int m = main_menu();
     if (m == M_FILES)
         *scr = SCR_BROWSER;
     else if (m == M_SETTINGS)
@@ -257,6 +256,11 @@ static void menu_open(int *scr)
     }
 }
 
+static void menu_open(int *scr)
+{
+    run_entry(main_menu(), scr);
+}
+
 void ui_main(void)
 {
     int scr = SCR_BROWSER, full = 1, quick = 0, drawn_cur = -2, drawn_playing = -1, was_off = 0;
@@ -269,6 +273,7 @@ void ui_main(void)
     fat_root(VOL_TOP, &path[0].dir);
     copy_name(path[0].name, "Storage", sizeof path[0].name);
     path[0].sel = path[0].top = 0;
+    fav_load();
     resume_load();
     if (!depth && !dir_n) {                     /* nothing saved: the internal volume */
         path_root(FAT_VOL_INT);
@@ -311,10 +316,10 @@ void ui_main(void)
             banner_ms = 0;
             full = b_dirty = 1;
         }
-        if (millis() - t_space >= 5) {
+        if (millis() - t_space >= 5) {          /* the space in use of the volumes, in the background */
             t_space = millis();
             if (fat_space_poll() && !depth && !sk_on) {
-                dir_load(&path[0].dir);
+                dir_load(&path[0].dir);         /* the top level, with the figures now known */
                 if (path[0].sel >= dir_n)
                     path[0].sel = 0;
                 b_dirty = full = 1;
@@ -346,6 +351,13 @@ void ui_main(void)
                 audio_pause(1);
                 resume_save();
             }
+            ev = EV_NONE;
+        } else if (ev == EV_PLUG && k == SRC_USB && key_current() == KEY_VOLUP) {
+            log_printf("ui: USB cable plugged with VOL+ held: USB disk, read/write");
+            run_entry(M_USB_RW, &scr);          /* the quick way to the computer (debugging) */
+            full = b_dirty = 1;
+            t_key = ticks();
+            key_ms = millis();
             ev = EV_NONE;
         } else if (ev == EV_PLUG)
             ev = EV_NONE;                       /* logged (keys.c); no action */
@@ -414,6 +426,8 @@ void ui_main(void)
                 full = quick = 0;
             } else if (scr == SCR_PLAYING)
                 marquee_tick();
+            else
+                browser_marquee_tick();
         }
         cpu_wait();                             /* until the next 1 ms tick */
     }

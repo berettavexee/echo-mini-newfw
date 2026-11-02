@@ -44,5 +44,10 @@ void log_poll(void);            /* writes them when enough time or text has gone
  * user interface (512 bytes, starting with "NEWFWSTATE", ui.c) */
 int log_state_read(void *buf);
 int log_state_write(const void *buf);
+/* LOG_AUX_SECTORS sectors before it (only in a file of 32 KiB or more), outside the ring */
+#define LOG_AUX_SECTORS 16
+int log_aux_count(void);        /* 0 when there is no file (or it is too small) */
+int log_aux_read(int i, void *buf);
+int log_aux_write(int i, const void *buf);
 
 #endif
