@@ -22,6 +22,8 @@ static int dev_read(const struct fat_vol *v, uint32_t lba, uint32_t n, void *buf
     return v->dev == FAT_VOL_SD ? sd_read(lba, n, buf) : emmc_read(lba, n, buf);
 }
 
+static void space_reset(struct fat_vol *v);
+
 /* A FAT32 boot sector at 'lba'? Fills v. */
 static int boot_sector(struct fat_vol *v, uint32_t lba)
 {
@@ -40,7 +42,10 @@ static int boot_sector(struct fat_vol *v, uint32_t lba)
     v->data = v->fat + b[16] * fatsz;
     v->clusters = (total - (v->data - lba)) / v->spc;
     v->root = le32(b + 44);
+    v->serial = le32(b + 67);
+    v->active_fat = 0;
     v->exfat = 0;
+    space_reset(v);
     return v->clusters >= 65525 && v->root >= 2;
 }
 
@@ -72,7 +77,10 @@ static int exfat_boot(struct fat_vol *v, uint32_t lba)
     v->data = lba + heap;
     v->clusters = count;
     v->root = root;
+    v->serial = le32(b + 100);
+    v->active_fat = (uint8_t)second;
     v->exfat = 1;
+    space_reset(v);
     return 1;
 }
 
@@ -164,6 +172,134 @@ static int valid(const struct fat_vol *v, uint32_t c)
 static uint32_t cluster_lba(const struct fat_vol *v, uint32_t c)
 {
     return v->data + (c - 2) * v->spc;
+}
+
+/* Space in use, counted in the background (fat_space_poll: a few sectors a call, then cached
+ * until the next mount): FAT32 counts the free entries of the FAT, exFAT the set bits of the
+ * allocation bitmap (directory entry 0x81 of the root). */
+static uint32_t space_buf[128];                 /* 1 sector */
+
+static void space_reset(struct fat_vol *v)
+{
+    v->used_ok = v->used_fail = 0;
+    v->used_pos = v->used_acc = v->bm_c = v->bm_sec = 0;
+    v->bm_bytes = 0;
+    v->bm_dir_c = v->root;
+    v->bm_dir_sec = v->bm_dir_steps = 0;
+}
+
+/* One sector of the exFAT root directory: 1 when the active FAT's bitmap is found,
+ * 0 while searching, -1 if the directory or its FAT chain is invalid. */
+static int find_bitmap_step(struct fat_vol *v)
+{
+    if (!valid(v, v->bm_dir_c) || v->bm_dir_sec >= v->spc ||
+        dev_read(v, cluster_lba(v, v->bm_dir_c) + v->bm_dir_sec, 1, space_buf))
+        return -1;
+    const uint8_t *b = (const uint8_t *)space_buf;
+    for (int o = 0; o < 512; o += 32) {
+        if (!b[o])
+            return -1;                          /* end of directory without the bitmap */
+        if (b[o] == 0x81 && (b[o + 1] & 1) == v->active_fat) {
+            v->bm_c = le32(b + o + 20);
+            v->bm_bytes = le32(b + o + 24);
+            v->bm_sec = 0;
+            v->used_pos = 0;
+            return valid(v, v->bm_c) && v->bm_bytes >= (v->clusters + 7) / 8 ? 1 : -1;
+        }
+    }
+    if (++v->bm_dir_sec >= v->spc) {
+        v->bm_dir_sec = 0;
+        if (v->bm_dir_steps++ >= 63)
+            return -1;
+        uint32_t next = next_cluster(v, v->bm_dir_c);
+        if (!valid(v, next))
+            return -1;
+        v->bm_dir_c = next;
+    }
+    return 0;
+}
+
+/* One step (1 sector) of the count of v; 1 when it has just finished */
+static int space_step(struct fat_vol *v)
+{
+    uint32_t n = v->clusters;
+    if (!v->exfat) {
+        uint32_t entries = n + 2, total = (entries + 127) / 128, s = v->used_pos;
+        uint32_t k = 1;
+        if (dev_read(v, v->fat + s, k, space_buf)) {
+            v->used_fail = 1;
+            return 0;
+        }
+        for (uint32_t i = 0; i < k * 128; i++) {
+            uint32_t e = s * 128 + i;
+            if (e >= 2 && e < entries && !(space_buf[i] & 0x0fffffff))
+                v->used_acc++;
+        }
+        v->used_pos = s + k;
+        if (v->used_pos < total)
+            return 0;
+        v->used = n - v->used_acc;
+        v->used_ok = 1;
+        return 1;
+    }
+    if (!v->bm_c) {
+        int found = find_bitmap_step(v);
+        if (found < 0)
+            v->used_fail = 1;
+        return 0;                              /* the directory search also reads one sector */
+    }
+    uint32_t bytes = (n + 7) / 8;
+    uint32_t k = 1;
+    if (dev_read(v, cluster_lba(v, v->bm_c) + v->bm_sec, k, space_buf)) {
+        v->used_fail = 1;
+        return 0;
+    }
+    const uint8_t *b = (const uint8_t *)space_buf;
+    for (uint32_t i = 0; i < k * 512 && v->used_pos < bytes; i++, v->used_pos++) {
+        uint8_t x = b[i];
+        if (v->used_pos == bytes - 1 && (n & 7))
+            x &= (uint8_t)((1u << (n & 7)) - 1);        /* bits past the last cluster */
+        v->used_acc += (uint32_t)__builtin_popcount(x);
+    }
+    if (v->used_pos >= bytes) {
+        v->used = v->used_acc;
+        v->used_ok = 1;
+        return 1;
+    }
+    v->bm_sec += k;
+    if (v->bm_sec >= v->spc) {
+        uint32_t nx = next_cluster(v, v->bm_c);
+        if (!valid(v, nx)) {
+            v->used_fail = 1;                    /* do not guess that a broken bitmap is contiguous */
+            return 0;
+        }
+        v->bm_c = nx;
+        v->bm_sec = 0;
+    }
+    return 0;
+}
+
+int fat_space_poll(void)
+{
+    int done = 0;
+    for (int i = 0; i < 2; i++) {
+        struct fat_vol *v = i ? &sdvol : &vol;
+        if (v->mounted && !v->used_ok && !v->used_fail) {
+            done |= space_step(v);
+            break;                              /* one step a call */
+        }
+    }
+    return done;
+}
+
+int fat_space(int vi, uint32_t *total_mib, uint32_t *used_mib)
+{
+    struct fat_vol *v = V(vi);
+    if (!v->mounted || !v->used_ok)
+        return -1;                              /* not counted (yet) */
+    *total_mib = v->clusters * v->spc / 2048;
+    *used_mib = v->used * v->spc / 2048;
+    return 0;
 }
 
 /* The next cluster of a file or directory: exFAT "no FAT chain" ones are contiguous */
