@@ -8,6 +8,7 @@
 extern int storage_err, volume_err;             /* eMMC/IDB, internal volume: 0 = ready */
 
 void sys_line(int y, const char *s, uint16_t fg);   /* a text line padded to the right edge */
+const char *ui_tr(const char *en, const char *zh, const char *ja);
 /* Status lines are redrawn only when their text or colour changed */
 void sys_status_line(int i, int y, const char *s, uint16_t fg);
 void sys_status_reset(void);

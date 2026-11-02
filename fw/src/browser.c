@@ -193,9 +193,10 @@ int dir_load(const struct fat_dir *d)
     if (d->vol == VOL_TOP) {
         dir_l.n = dir_l.full = 0;
         dir_l.used = 0;
-        top_entry("Internal", 0);
+        top_entry(ui_tr("Internal", "内部存储", "内蔵ストレージ"), 0);
         if (sd_present())
-            top_entry(sd_bad ? "SD card (not readable)" : "SD card", F_SD);
+            top_entry(sd_bad ? ui_tr("SD card (not readable)", "SD 卡（无法读取）", "SDカード（読み取り不可）") :
+                      ui_tr("SD card", "SD 卡", "SDカード"), F_SD);
     } else {
         r = list_load(&dir_l, d);
         if (r < 0 && d->vol == FAT_VOL_SD) {    /* a read error: mounted again at the next */
@@ -262,7 +263,7 @@ static void draw_row(int r, int sel, int mark)
     if (i >= dir_n) {
         lcd_fill(0, y, LCD_W, 16, BG);
         if (!dir_n && !r)
-            lcd_text(8, y, "no folder or playable file here", DIM, BG);
+            lcd_text_clip(8, y, ui_tr("no folder or playable file here", "此处没有文件夹或可播放文件", "フォルダーまたは再生可能なファイルがありません"), LCD_W, DIM, BG);
         return;
     }
     const struct entry *e = ent(i);
@@ -313,7 +314,7 @@ void draw_browser(void)
     }
     if (b_dirty) {                              /* every band once, nothing cleared first */
         lcd_fill(0, 0, 4, 16, BG);
-        lcd_text_clip(4, 0, depth ? path[depth].name : "Storage", LCD_W - 114, TITLE_FG, BG);
+        lcd_text_clip(4, 0, depth ? path[depth].name : ui_tr("Storage", "存储设备", "ストレージ"), LCD_W - 114, TITLE_FG, BG);
         draw_clock(LCD_W - 114, LCD_W - 70, 1);
         lcd_fill(LCD_W - 4, 0, 4, 16, BG);
         lcd_fill(0, 16, LCD_W, ROW_Y0 - 16, BG);

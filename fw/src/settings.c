@@ -3,8 +3,8 @@
  * (since 0.55); the sleep timer is not kept. */
 #include "ui_priv.h"
 
-static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0 };
-struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0 };
+static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 0 };
+struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 0 };
 uint32_t sleep_at;
 
 static const uint16_t screen_s[] = { 10, 30, 60, 120, 300, 0 };     /* 0: never */
@@ -39,6 +39,16 @@ struct set_block {
     uint32_t sum;
 };
 
+struct set_block_v1 {
+    char magic[12];
+    struct settings_v1 {
+        uint8_t screen, bright, names, start, auto_off, swap_vol;
+        int8_t rg_pre;
+        uint8_t uac_vol;
+    } s;
+    uint32_t sum;
+};
+
 static uint32_t set_sum(const struct set_block *b)
 {
     const uint32_t *w = (const uint32_t *)b;
@@ -51,7 +61,7 @@ static uint32_t set_sum(const struct set_block *b)
 uint32_t settings_put(uint32_t *w)
 {
     struct set_block *b = (struct set_block *)w;
-    __builtin_memcpy(b->magic, "NEWFWSET 1  ", 12);
+    __builtin_memcpy(b->magic, "NEWFWSET 2  ", 12);
     b->s = cfg;
     b->sum = set_sum(b);
     return b->sum;
@@ -60,8 +70,30 @@ uint32_t settings_put(uint32_t *w)
 void settings_get(const uint32_t *w)
 {
     const struct set_block *b = (const struct set_block *)w;
-    if (!__builtin_memcmp(b->magic, "NEWFWSET 1  ", 12) && b->sum == set_sum(b)) {
-        cfg = b->s;                             /* each value checked: a bad one, its default */
+    const struct set_block_v1 *old = (const struct set_block_v1 *)w;
+    int valid = 0;
+    if (!__builtin_memcmp(b->magic, "NEWFWSET 2  ", 12) && b->sum == set_sum(b)) {
+        cfg = b->s;
+        valid = 1;
+    } else if (!__builtin_memcmp(old->magic, "NEWFWSET 1  ", 12)) {
+        uint32_t sum = 0x4e465343;
+        const uint32_t *old_words = (const uint32_t *)old;
+        for (unsigned i = 0; i < __builtin_offsetof(struct set_block_v1, sum) / 4; i++)
+            sum = (sum << 5 | sum >> 27) ^ old_words[i];
+        if (old->sum == sum) {
+            valid = 1;
+            cfg.screen = old->s.screen;
+            cfg.bright = old->s.bright;
+            cfg.names = old->s.names;
+            cfg.start = old->s.start;
+            cfg.auto_off = old->s.auto_off;
+            cfg.swap_vol = old->s.swap_vol;
+            cfg.rg_pre = old->s.rg_pre;
+            cfg.uac_vol = old->s.uac_vol;
+            cfg.language = defaults.language;
+        }
+    }
+    if (valid) {                              /* each value checked: a bad one, its default */
         if (cfg.screen >= N(screen_s))
             cfg.screen = defaults.screen;
         if (cfg.bright < 1 || cfg.bright > 10)
@@ -74,6 +106,8 @@ void settings_get(const uint32_t *w)
         cfg.swap_vol = cfg.swap_vol != 0;
         if (cfg.rg_pre < -6 || cfg.rg_pre > 6)
             cfg.rg_pre = 0;
+        if (cfg.language > 2)
+            cfg.language = defaults.language;
         log_printf("ui: settings: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
                    "off %u, swap %u", cfg.screen, bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags",
                    cfg.rg_pre, cfg.start, cfg.auto_off, cfg.swap_vol);   /* RG mode: resume.c */
@@ -84,12 +118,25 @@ void settings_get(const uint32_t *w)
 /* ---- the screen: VOL+/VOL- the line, PLAY the next value, PLAY held the one before,
  * BACK or MENU back (saved). Each change takes effect at once. ---- */
 enum { S_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START, S_SLEEP, S_AUTO_OFF, S_SWAP,
-       S_DEFAULTS, S_COUNT };
-static const char *const s_names[S_COUNT] = {
-    "Date and time", "Screen off after", "Brightness", "Track title", "ReplayGain", "ReplayGain preamp",
-    "At power on", "Sleep timer", "Power off when idle", "Swap VOL+ and VOL-",
-    "Restore the defaults (PLAY)",
-};
+       S_LANGUAGE, S_DEFAULTS, S_COUNT };
+static const char *const language_names[] = { "English", "简体中文", "日本語" };
+static const char *setting_name(int i)
+{
+    switch (i) {
+    case S_CLOCK: return ui_tr("Date and time", "日期和时间", "日時");
+    case S_SCREEN: return ui_tr("Screen off after", "屏幕关闭时间", "画面消灯時間");
+    case S_BRIGHT: return ui_tr("Brightness", "亮度", "明るさ");
+    case S_NAMES: return ui_tr("Track title", "曲目信息显示", "曲名表示");
+    case S_RG: return ui_tr("ReplayGain", "回放增益", "ReplayGain");
+    case S_RG_PRE: return ui_tr("ReplayGain preamp", "回放增益前置放大", "ReplayGainプリアンプ");
+    case S_START: return ui_tr("At power on", "开机时", "起動時");
+    case S_SLEEP: return ui_tr("Sleep timer", "睡眠定时器", "スリープタイマー");
+    case S_AUTO_OFF: return ui_tr("Power off when idle", "闲置后关机", "無操作時に電源オフ");
+    case S_SWAP: return ui_tr("Swap VOL+ and VOL-", "交换音量键", "音量キーを入れ替え");
+    case S_LANGUAGE: return ui_tr("Language", "语言", "言語");
+    default: return ui_tr("Restore the defaults (PLAY)", "恢复默认设置（按播放键）", "設定を初期化（PLAY）");
+    }
+}
 static const uint8_t rg_order[RG_MODES] = { RG_MODE_ALBUM, RG_MODE_TRACK, RG_MODE_AUTO,
                                             RG_MODE_OFF };
 
@@ -114,7 +161,11 @@ static char *put_min(char *p, uint32_t m)
 
 static void value_text(int i, char *b)
 {
-    static const char *const start[START_COUNT] = { "resume playing", "resume paused", "browser" };
+    const char *const start[START_COUNT] = {
+        ui_tr("resume playing", "继续播放", "再生を再開"),
+        ui_tr("resume paused", "从暂停处继续", "一時停止状態で再開"),
+        ui_tr("browser", "文件浏览", "ブラウザー"),
+    };
     char *p = b;
     switch (i) {
     case S_CLOCK: {                             /* PLAY: its screen (menu.c) */
@@ -136,10 +187,10 @@ static void value_text(int i, char *b)
     }
     case S_SCREEN:
         if (!screen_s[cfg.screen])
-            p = put_str(p, "never");
+            p = put_str(p, ui_tr("never", "永不", "なし"));
         else if (screen_s[cfg.screen] < 60) {
             p = put_dec(p, screen_s[cfg.screen]);
-            p = put_str(p, " s");
+            p = put_str(p, ui_tr(" s", " 秒", " 秒"));
         } else
             p = put_min(p, screen_s[cfg.screen] / 60u);
         break;
@@ -148,10 +199,14 @@ static void value_text(int i, char *b)
         p = put_str(p, " %");
         break;
     case S_NAMES:
-        p = put_str(p, cfg.names ? "file name" : "tags");
+        p = put_str(p, cfg.names ? ui_tr("file name", "文件名", "ファイル名") :
+                                 ui_tr("tags", "标签", "タグ"));
         break;
     case S_RG:
-        p = put_str(p, rg_names[rg_mode]);
+        p = put_str(p, rg_mode == RG_MODE_ALBUM ? ui_tr("album", "专辑", "アルバム") :
+                       rg_mode == RG_MODE_TRACK ? ui_tr("track", "曲目", "トラック") :
+                       rg_mode == RG_MODE_AUTO ? ui_tr("auto", "自动", "自動") :
+                       ui_tr("off", "关闭", "オフ"));
         break;
     case S_RG_PRE:
         *p++ = cfg.rg_pre < 0 ? '-' : '+';
@@ -163,18 +218,21 @@ static void value_text(int i, char *b)
         break;
     case S_SLEEP:
         if (!sleep_at)
-            p = put_str(p, "off");
+            p = put_str(p, ui_tr("off", "关闭", "オフ"));
         else {
             p = put_min(p, sleep_left());
-            p = put_str(p, " left");
+            p = put_str(p, ui_tr(" left", " 剩余", " 残り"));
         }
         break;
     case S_AUTO_OFF:
         p = auto_off_min[cfg.auto_off] ? put_min(p, auto_off_min[cfg.auto_off]) :
-            put_str(p, "never");
+            put_str(p, ui_tr("never", "永不", "なし"));
         break;
     case S_SWAP:
-        p = put_str(p, cfg.swap_vol ? "yes" : "no");
+        p = put_str(p, cfg.swap_vol ? ui_tr("yes", "是", "はい") : ui_tr("no", "否", "いいえ"));
+        break;
+    case S_LANGUAGE:
+        p = put_str(p, language_names[cfg.language]);
         break;
     }
     *p = 0;
@@ -226,6 +284,9 @@ static void change(int i, int d)
     case S_SWAP:
         cfg.swap_vol ^= 1;
         break;
+    case S_LANGUAGE:
+        cfg.language = (uint8_t)step(cfg.language, 3, d);
+        break;
     case S_DEFAULTS:
         cfg = defaults;
         rg_mode = RG_MODE_ALBUM;
@@ -253,7 +314,7 @@ static void draw_row(int i, int top, int sel)
     value_text(i, b);
     int x = x1 - lcd_text_width(b) - 8;
     lcd_fill(0, y, 12, 16, bg);
-    lcd_text_clip(12, y, s_names[i], x, FG, bg);
+    lcd_text_clip(12, y, setting_name(i), x, FG, bg);
     text_right(x, x1, y, b, DIR_FG, bg);
 }
 
@@ -264,7 +325,7 @@ void settings_screen(void)
     for (;;) {
         if (page) {
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text(4, 0, "Settings", TITLE_FG, BG);
+            lcd_text(4, 0, ui_tr("Settings", "设置", "設定"), TITLE_FG, BG);
             page = 0;
             dirty = 1;
         }
@@ -306,6 +367,8 @@ void settings_screen(void)
                    (ev == EV_PRESS || (ev == EV_LONG && sel != S_DEFAULTS))) {
             change(sel, ev == EV_PRESS ? 1 : -1);
             dirty = 1;
+            if (sel == S_LANGUAGE)
+                page = 1;
         } else if ((k == KEY_BACK || k == KEY_MENU) && ev == EV_PRESS) {
             resume_save();
             return;

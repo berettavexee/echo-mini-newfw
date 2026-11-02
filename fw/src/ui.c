@@ -146,7 +146,7 @@ static void battery_off(uint32_t mv)
     }
     sys_screen_set(1);
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    lcd_text_clip_x(8, 50, "Battery empty", LCD_W, WARN, BG, 2);
+    lcd_text_clip_x(8, 50, ui_tr("Battery empty", "电池耗尽", "バッテリー切れ"), LCD_W, WARN, BG, 2);
     mdelay(2000);
     sys_power_off("battery empty");             /* the resume state: paused where it was */
 }                                               /* (returns when the USB cable powers us) */
@@ -287,8 +287,8 @@ void ui_main(void)
             sys_screen_set(1);
             t_key = ticks();
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text_clip_x(8, 50, "Low battery", LCD_W, WARN, BG, 2);
-            lcd_text(8, 100, "plug the USB cable", DIM, BG);
+            lcd_text_clip_x(8, 50, ui_tr("Low battery", "电量低", "バッテリー残量低下"), LCD_W, WARN, BG, 2);
+            lcd_text_clip(8, 100, ui_tr("plug the USB cable", "请连接 USB 线", "USBケーブルを接続してください"), LCD_W, DIM, BG);
         }
         if (fail_due) {                         /* nothing could be played: why, 3 s, then the */
             fail_due = 0;                       /* browser */
@@ -298,7 +298,7 @@ void ui_main(void)
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
             const char *what, *hint;
             fail_text(fail_code, fail_why, &what, &hint);
-            lcd_text_clip_x(8, 20, "Cannot play", LCD_W, WARN, BG, 2);
+            lcd_text_clip_x(8, 20, ui_tr("Cannot play", "无法播放", "再生できません"), LCD_W, WARN, BG, 2);
             lcd_text_clip(8, 62, fail_name, LCD_W - 8, FG, BG);
             lcd_text_clip(8, 92, what, LCD_W - 8, FG, BG);
             lcd_text_clip(8, 118, hint, LCD_W - 8, DIM, BG);

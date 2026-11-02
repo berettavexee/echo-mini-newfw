@@ -174,8 +174,10 @@ struct settings {
     uint8_t swap_vol;                           /* VOL+ and VOL- swapped (the volume) */
     int8_t rg_pre;                              /* ReplayGain preamp, dB */
     uint8_t uac_vol;                            /* USB sound card's volume + 1, 0: the playback's */
+    uint8_t language;                           /* 0: English, 1: Simplified Chinese, 2: Japanese */
 };
 extern struct settings cfg;
+const char *ui_tr(const char *en, const char *zh, const char *ja);
 extern uint32_t sleep_at;                       /* the sleep timer ends (millis), 0: off */
 uint32_t screen_timeout_us(void);               /* 0xffffffff: never */
 uint32_t auto_off_ms(void);                     /* 0: never */
