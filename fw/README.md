@@ -13,6 +13,15 @@ code, the pack of our codec images, the font). The codec sources are in `../thir
 depend on the headers they include and on the flags, so a change of `EXTRA` or of a header
 rebuilds what needs it; `BUILD=dir` builds into another folder.
 
+For the usual build and optional copy to a connected ECHO MINI, run:
+
+    ECHO_MINI_SSH_HOST=player-host fw/tools/build-and-copy.sh
+
+It always builds `fw/build/HIFIEC70.IMG`. Over SSH, the script looks for a writable volume labeled
+`ECHO MINI`, mounts it if needed, atomically copies the image as `NEWFW100.IMG`, syncs it, and
+unmounts it if the script mounted it. If the host or device is unavailable, it leaves the image in
+`fw/build/`.
+
 ## Checks
 
     make check          # before a commit
