@@ -221,13 +221,15 @@ power off (except the sleep timer).
 | Date and time | shows the date and time; PLAY opens the clock screen (below) | |
 | Screen off after | 10 s, 30 s, 1 min, 2 min, 5 min, never | 30 s |
 | Brightness | 10 steps: 8, 12, 17, 23, 30, 39, 50, 63, 80, 100 % (even steps to the eye) | 100 % |
-| Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder | tags |
+| Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder on the play screen | tags |
+| File list | **track title**: show the title tag in the browser; **file name**: show the file name. Missing title tags fall back to the file name | track title |
 | ReplayGain | **album**: the album gain, or the track gain when the file has no album gain; **track**: the track gain; **auto**: album, but track in shuffle; **off**: no gain. Limited by the peak tag, so that a track never clips | album |
 | ReplayGain preamp | -6 dB to +6 dB, added to the gain of tagged tracks (still limited by the peak) | 0 dB |
 | At power on | **resume playing**: the track plays again where it was; **resume paused**: the track waits there, PLAY on the play screen starts it; **browser**: only the folder is shown | resume playing |
 | Sleep timer | off, 15, 30, 45, 60, 90 min; shows the minutes left. At the end the music fades out over 5 s, pauses, and the player powers off (it resumes paused there) | off |
 | Power off when idle | 5, 10, 20, 30 min, never: nothing played and no key for that long (not with the USB cable) | 10 min |
 | Swap VOL+ and VOL- | the volume keys of the play screen swapped (lists and seek unchanged) | no |
+| Language | English, Simplified Chinese, Japanese | English |
 | Restore the defaults | PLAY puts back all the defaults above | |
 
 ### Date and time

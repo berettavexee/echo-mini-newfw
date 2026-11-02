@@ -3,8 +3,12 @@
  * (since 0.55); the sleep timer is not kept. */
 #include "ui_priv.h"
 
-static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 0 };
-struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 0 };
+static const struct settings defaults = {
+    .screen = 1, .bright = 10, .start = START_PLAY, .auto_off = 1, .list_title = 1,
+};
+struct settings cfg = {
+    .screen = 1, .bright = 10, .start = START_PLAY, .auto_off = 1, .list_title = 1,
+};
 uint32_t sleep_at;
 
 static const uint16_t screen_s[] = { 10, 30, 60, 120, 300, 0 };     /* 0: never */
@@ -32,10 +36,21 @@ void sleep_cancel(void)
     sleep_sel = 0;
 }
 
-/* ---- storage: 64 words, "NEWFWSET 1", the values, a sum ---- */
+/* ---- storage: 64 words, versioned settings, and a sum ---- */
 struct set_block {
     char magic[12];
     struct settings s;
+    uint32_t sum;
+};
+
+struct set_block_v2 {
+    char magic[12];
+    struct settings_v2 {
+        uint8_t screen, bright, names, start, auto_off, swap_vol;
+        int8_t rg_pre;
+        uint8_t uac_vol;
+        uint8_t language;
+    } s;
     uint32_t sum;
 };
 
@@ -49,11 +64,11 @@ struct set_block_v1 {
     uint32_t sum;
 };
 
-static uint32_t set_sum(const struct set_block *b)
+static uint32_t set_sum(const void *block, unsigned words)
 {
-    const uint32_t *w = (const uint32_t *)b;
+    const uint32_t *w = block;
     uint32_t s = 0x4e465343;
-    for (unsigned i = 0; i < __builtin_offsetof(struct set_block, sum) / 4; i++)
+    for (unsigned i = 0; i < words; i++)
         s = (s << 5 | s >> 27) ^ w[i];
     return s;
 }
@@ -61,25 +76,37 @@ static uint32_t set_sum(const struct set_block *b)
 uint32_t settings_put(uint32_t *w)
 {
     struct set_block *b = (struct set_block *)w;
-    __builtin_memcpy(b->magic, "NEWFWSET 2  ", 12);
+    __builtin_memcpy(b->magic, "NEWFWSET 3  ", 12);
     b->s = cfg;
-    b->sum = set_sum(b);
+    b->sum = set_sum(b, __builtin_offsetof(struct set_block, sum) / 4);
     return b->sum;
 }
 
 void settings_get(const uint32_t *w)
 {
     const struct set_block *b = (const struct set_block *)w;
+    const struct set_block_v2 *v2 = (const struct set_block_v2 *)w;
     const struct set_block_v1 *old = (const struct set_block_v1 *)w;
     int valid = 0;
-    if (!__builtin_memcmp(b->magic, "NEWFWSET 2  ", 12) && b->sum == set_sum(b)) {
+    if (!__builtin_memcmp(b->magic, "NEWFWSET 3  ", 12) &&
+        b->sum == set_sum(b, __builtin_offsetof(struct set_block, sum) / 4)) {
         cfg = b->s;
         valid = 1;
+    } else if (!__builtin_memcmp(v2->magic, "NEWFWSET 2  ", 12) &&
+               v2->sum == set_sum(v2, __builtin_offsetof(struct set_block_v2, sum) / 4)) {
+        cfg.screen = v2->s.screen;
+        cfg.bright = v2->s.bright;
+        cfg.names = v2->s.names;
+        cfg.start = v2->s.start;
+        cfg.auto_off = v2->s.auto_off;
+        cfg.swap_vol = v2->s.swap_vol;
+        cfg.rg_pre = v2->s.rg_pre;
+        cfg.uac_vol = v2->s.uac_vol;
+        cfg.language = v2->s.language;
+        cfg.list_title = defaults.list_title;
+        valid = 1;
     } else if (!__builtin_memcmp(old->magic, "NEWFWSET 1  ", 12)) {
-        uint32_t sum = 0x4e465343;
-        const uint32_t *old_words = (const uint32_t *)old;
-        for (unsigned i = 0; i < __builtin_offsetof(struct set_block_v1, sum) / 4; i++)
-            sum = (sum << 5 | sum >> 27) ^ old_words[i];
+        uint32_t sum = set_sum(old, __builtin_offsetof(struct set_block_v1, sum) / 4);
         if (old->sum == sum) {
             valid = 1;
             cfg.screen = old->s.screen;
@@ -91,6 +118,7 @@ void settings_get(const uint32_t *w)
             cfg.rg_pre = old->s.rg_pre;
             cfg.uac_vol = old->s.uac_vol;
             cfg.language = defaults.language;
+            cfg.list_title = defaults.list_title;
         }
     }
     if (valid) {                              /* each value checked: a bad one, its default */
@@ -108,6 +136,7 @@ void settings_get(const uint32_t *w)
             cfg.rg_pre = 0;
         if (cfg.language > 2)
             cfg.language = defaults.language;
+        cfg.list_title = cfg.list_title != 0;
         log_printf("ui: settings: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
                    "off %u, swap %u", cfg.screen, bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags",
                    cfg.rg_pre, cfg.start, cfg.auto_off, cfg.swap_vol);   /* RG mode: resume.c */
@@ -117,8 +146,8 @@ void settings_get(const uint32_t *w)
 
 /* ---- the screen: VOL+/VOL- the line, PLAY the next value, PLAY held the one before,
  * BACK or MENU back (saved). Each change takes effect at once. ---- */
-enum { S_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START, S_SLEEP, S_AUTO_OFF, S_SWAP,
-       S_LANGUAGE, S_DEFAULTS, S_COUNT };
+enum { S_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_LIST_TITLE, S_RG, S_RG_PRE, S_START, S_SLEEP,
+       S_AUTO_OFF, S_SWAP, S_LANGUAGE, S_DEFAULTS, S_COUNT };
 static const char *const language_names[] = { "English", "简体中文", "日本語" };
 static const char *setting_name(int i)
 {
@@ -127,6 +156,7 @@ static const char *setting_name(int i)
     case S_SCREEN: return ui_tr("Screen off after", "屏幕关闭时间", "画面消灯時間");
     case S_BRIGHT: return ui_tr("Brightness", "亮度", "明るさ");
     case S_NAMES: return ui_tr("Track title", "曲目信息显示", "曲名表示");
+    case S_LIST_TITLE: return ui_tr("File list", "文件列表显示", "ファイル一覧表示");
     case S_RG: return ui_tr("ReplayGain", "回放增益", "ReplayGain");
     case S_RG_PRE: return ui_tr("ReplayGain preamp", "回放增益前置放大", "ReplayGainプリアンプ");
     case S_START: return ui_tr("At power on", "开机时", "起動時");
@@ -202,6 +232,10 @@ static void value_text(int i, char *b)
         p = put_str(p, cfg.names ? ui_tr("file name", "文件名", "ファイル名") :
                                  ui_tr("tags", "标签", "タグ"));
         break;
+    case S_LIST_TITLE:
+        p = put_str(p, cfg.list_title ? ui_tr("track title", "歌曲标题", "曲名") :
+                                       ui_tr("file name", "文件名", "ファイル名"));
+        break;
     case S_RG:
         p = put_str(p, rg_mode == RG_MODE_ALBUM ? ui_tr("album", "专辑", "アルバム") :
                        rg_mode == RG_MODE_TRACK ? ui_tr("track", "曲目", "トラック") :
@@ -255,6 +289,9 @@ static void change(int i, int d)
         break;
     case S_NAMES:
         cfg.names ^= 1;
+        break;
+    case S_LIST_TITLE:
+        cfg.list_title ^= 1;
         break;
     case S_RG: {
         int k = 0;

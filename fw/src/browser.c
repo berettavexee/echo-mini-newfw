@@ -74,6 +74,13 @@ static uint32_t codec_of(const char *name)
 static struct dir_buf dir __attribute__((section(".dirbuf")));
 static struct listing dir_l = { dir.e, dir.order, dir.pool, DIR_MAX, sizeof dir.pool, 0, 0, 0, 0,
                                 0 };
+#define TITLE_CACHE_N 16
+struct title_cache_entry {
+    uint16_t index;
+    char title[96];
+};
+static struct title_cache_entry title_cache[TITLE_CACHE_N];
+static uint16_t title_cache_next;
 int dir_n;
 static int dir_full;
 
@@ -188,6 +195,9 @@ static void top_entry(const char *name, uint16_t flags)
 
 int dir_load(const struct fat_dir *d)
 {
+    for (unsigned i = 0; i < sizeof title_cache / sizeof title_cache[0]; i++)
+        title_cache[i].index = UINT16_MAX;
+    title_cache_next = 0;
     uint32_t t0 = ticks();
     int r = 0;
     if (d->vol == VOL_TOP) {
@@ -243,6 +253,35 @@ void copy_name(char *d, const char *s, int max)
     d[i] = 0;
 }
 
+static const char *display_name(int i)
+{
+    const struct entry *e = ent(i);
+    const char *name = ent_name(i);
+    if (!cfg.list_title || (e->flags & F_DIR))
+        return name;
+    for (unsigned n = 0; n < TITLE_CACHE_N; n++)
+        if (title_cache[n].index == i)
+            return title_cache[n].title;
+
+    struct title_cache_entry *c = &title_cache[title_cache_next++ % TITLE_CACHE_N];
+    c->index = (uint16_t)i;
+    copy_name(c->title, name, sizeof c->title);  /* fallback when the tag has no title */
+    if ((e->flags & F_SD) && sd_open())
+        return c->title;
+    struct fat_file f = {
+        .vol = e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT,
+        .contig = (e->flags & F_CONTIG) != 0,
+        .cluster = e->cluster,
+        .size = e->size,
+    };
+    struct tags t;
+    fat_open(&f);
+    tags_read(&f, e->flags & F_CODEC, &t);
+    if (t.title[0])
+        copy_name(c->title, t.title, sizeof c->title);
+    return c->title;
+}
+
 int b_dirty = 1;
 static int b_sel = -1, b_top = -1, b_mark = -1;
 
@@ -273,8 +312,8 @@ static void draw_row(int r, int sel, int mark)
     lcd_fill(0, y, 22, 16, bg);
     if (dirent || i == mark)
         lcd_glyph(dirent ? 6 : 3, y, dirent ? 0xbb : 0x266a, dirent ? DIR_FG : TITLE_FG, bg);
-    lcd_text_clip(22, y, ent_name(i), list_text_end(dir_n, ROWS), dirent ? DIR_FG : e->size ? FG : DIM,
-                  bg);
+    lcd_text_clip(22, y, display_name(i), list_text_end(dir_n, ROWS),
+                  dirent ? DIR_FG : e->size ? FG : DIM, bg);
 }
 
 /* "selected/count" right-aligned on the first line */

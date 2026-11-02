@@ -175,6 +175,7 @@ struct settings {
     int8_t rg_pre;                              /* ReplayGain preamp, dB */
     uint8_t uac_vol;                            /* USB sound card's volume + 1, 0: the playback's */
     uint8_t language;                           /* 0: English, 1: Simplified Chinese, 2: Japanese */
+    uint8_t list_title;                         /* browser: show the tag title instead of filename */
 };
 extern struct settings cfg;
 const char *ui_tr(const char *en, const char *zh, const char *ja);
