@@ -1,5 +1,5 @@
-/* The play screen (ETUDE §25, §39): status, title at twice the size, artist and album (scrolled
- * when too long), time and bar (or the seek target), format, volume and ReplayGain; its keys. */
+/* The play screen (ETUDE §25, §39): status, title at twice the size (its second line scrolls
+ * when too long), artist and album (also scrolled when too long), time, format and its keys. */
 #include "ui_priv.h"
 
 /* The bar in the seek mode: the position dimmed, the target as a mark above and below it */
@@ -44,28 +44,29 @@ static const char *codec_name(uint32_t c)
 #define MQ_STEP  33000u
 static struct marquee {
     const char *s;
-    int y, w, off;
+    int y, w, off, sc;
     uint16_t fg;
     uint32_t t;                                 /* start of the pause, then of the last step */
-} mq[2];
+} mq[3];
 
-static void marquee_set(struct marquee *m, int y, const char *s, uint16_t fg)
+static void marquee_set(struct marquee *m, int y, const char *s, uint16_t fg, int sc)
 {
     m->s = s;
     m->y = y;
     m->fg = fg;
+    m->sc = sc;
     m->off = 0;
     m->t = ticks();
-    m->w = lcd_text_width(s);
+    m->w = lcd_text_width_x(s, sc);
     if (m->w <= MQ_XMAX - MQ_X)
         m->w = 0;                               /* it fits: drawn once, never scrolled */
-    lcd_text_clip(MQ_X, y, s, MQ_XMAX, fg, BG);
+    lcd_text_clip_x(MQ_X, y, s, MQ_XMAX, fg, BG, sc);
 }
 
 void marquee_tick(void)
 {
     uint32_t now = ticks();
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         struct marquee *m = &mq[i];
         if (!m->w || now - m->t < (m->off ? MQ_STEP : MQ_PAUSE))
             continue;
@@ -73,7 +74,7 @@ void marquee_tick(void)
         m->t = now;
         if (m->off >= m->w + MQ_GAP)
             m->off = 0;                         /* back at the start: still again */
-        lcd_text_scroll(MQ_X, m->y, m->s, MQ_XMAX, m->off, MQ_GAP, m->fg, BG);
+        lcd_text_scroll(MQ_X, m->y, m->s, MQ_XMAX, m->off, MQ_GAP, m->sc, m->fg, BG);
     }
 }
 
@@ -90,7 +91,7 @@ void draw_playing(int full)
     /* Each band is drawn over the previous picture, every pixel written once: no clearing first,
      * which flickered (ETUDE §39). A full drawing also paints the gaps between the bands. */
     if (full) {
-        mq[0].w = mq[1].w = 0;                  /* set again below, with the new texts */
+        mq[0].w = mq[1].w = mq[2].w = 0;       /* set again below, with the new texts */
         lcd_fill(0, 16, LCD_W, 2, BG);
         lcd_fill(0, 82, LCD_W, 4, BG);
         lcd_fill(0, 118, LCD_W, 4, BG);
@@ -135,9 +136,8 @@ void draw_playing(int full)
     *p = 0;
     text_right(LCD_W - 68, LCD_W, 0, b, battery_low ? WARN : DIM, BG);
     if (full) {
-        /* the title (or the file name) at twice the size, on two lines: as much as fits (cut
-         * after a space when there is one in the second half), then the rest cut with an
-         * ellipsis; then the artist and the album (or the folder) */
+        /* the title (or file name) at twice the size on two lines: the second line scrolls its
+         * remaining text when it is too long; then the artist and album (or the folder) */
         const char *nm = tg.title[0] && !cfg.names ? tg.title : q_name(q_cur), *s = nm, *s_sp = 0;
         char l1[96];
         int w = 0, n = 0, n_sp = 0;
@@ -161,9 +161,9 @@ void draw_playing(int full)
             n = n_sp, s = s_sp;
         l1[n] = 0;
         lcd_text_clip_x(4, 18, l1, LCD_W - 4, FG, BG, 2);
-        lcd_text_clip_x(4, 50, s, LCD_W - 4, FG, BG, 2);
-        marquee_set(&mq[0], 86, cfg.names ? "" : tg.artist, TITLE_FG);     /* names: the folder */
-        marquee_set(&mq[1], 102, tg.album[0] && !cfg.names ? tg.album : q_folder, DIR_FG);
+        marquee_set(&mq[0], 50, s, FG, 2);
+        marquee_set(&mq[1], 86, cfg.names ? "" : tg.artist, TITLE_FG, 1); /* names: the folder */
+        marquee_set(&mq[2], 102, tg.album[0] && !cfg.names ? tg.album : q_folder, DIR_FG, 1);
     }
     if (sk_on) {                                /* the target, how far, what the keys do */
         p = put_str(b, ui_tr("go to ", "跳转至 ", "移動 "));
