@@ -39,9 +39,6 @@ static const char *codec_name(uint32_t c)
  * start, then 1 pixel every 33 ms (30 px/s), round and round with a gap of 32 pixels */
 #define MQ_X     4
 #define MQ_XMAX  (LCD_W - 4)
-#define MQ_GAP   32
-#define MQ_PAUSE 1500000u
-#define MQ_STEP  33000u
 static struct marquee {
     const char *s;
     int y, w, off, sc;

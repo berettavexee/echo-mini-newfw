@@ -64,6 +64,10 @@ the emulator's tests).
   power on opens the play screen instead of the browser. On the device: "At power on: resume
   paused", a track paused in its first two seconds, then the player switched off and on twice.
 
+- From pull request #8 (CHEYAN): the browser's selected row scrolls when its name is too long,
+  a file or a folder, with the play screen's timings. On the device: a long album folder and a
+  long file name, the scroll reset when the selection or the page changes.
+
 ## Version history
 
 One line per version; the measurements are in `ETUDE.md`.

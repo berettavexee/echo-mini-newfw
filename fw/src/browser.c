@@ -77,9 +77,10 @@ static struct listing dir_l = { dir.e, dir.order, dir.pool, DIR_MAX, sizeof dir.
 static struct {
     uint16_t index;
     int top, y, xmax, width, off;
+    uint16_t fg;
     uint32_t t;
     char text[96];
-} browser_mq = { .index = UINT16_MAX };
+} browser_mq = { .index = UINT16_MAX };     /* the selected row's name scrolled (a file or a folder) */
 int dir_n;
 static int dir_full;
 
@@ -286,12 +287,13 @@ static void draw_row(int r, int sel, int mark)
     const char *name = ent_name(i);
     int xmax = list_text_end(dir_n, ROWS);
     uint16_t fg = dirent ? DIR_FG : e->size ? FG : DIM;
-    if (i == sel && !dirent && e->size) {
+    if (i == sel && (dirent || e->size)) {
         if (browser_mq.index != i || browser_mq.top != path[depth].top || b_dirty) {
             browser_mq.index = (uint16_t)i;
             browser_mq.top = path[depth].top;
             browser_mq.y = y;
             browser_mq.xmax = xmax;
+            browser_mq.fg = fg;
             browser_mq.off = 0;
             browser_mq.t = ticks();
             copy_name(browser_mq.text, name, sizeof browser_mq.text);
@@ -300,7 +302,7 @@ static void draw_row(int r, int sel, int mark)
                 browser_mq.width = 0;
         }
         if (browser_mq.off)
-            lcd_text_scroll(22, y, browser_mq.text, xmax, browser_mq.off, 24, 1, fg, bg);
+            lcd_text_scroll(22, y, browser_mq.text, xmax, browser_mq.off, MQ_GAP, 1, fg, bg);
         else
             lcd_text_clip(22, y, browser_mq.text, xmax, fg, bg);
     } else
@@ -328,14 +330,14 @@ void browser_marquee_tick(void)
         browser_mq.top != path[depth].top)
         return;
     uint32_t now = ticks();
-    if (now - browser_mq.t < (browser_mq.off ? 33000u : 1000000u))
+    if (now - browser_mq.t < (browser_mq.off ? MQ_STEP : MQ_PAUSE))
         return;
-    browser_mq.off += browser_mq.off ? (int)((now - browser_mq.t) / 33000u) : 1;
+    browser_mq.off += browser_mq.off ? (int)((now - browser_mq.t) / MQ_STEP) : 1;
     browser_mq.t = now;
-    if (browser_mq.off >= browser_mq.width + 24)
+    if (browser_mq.off >= browser_mq.width + MQ_GAP)
         browser_mq.off = 0;
-    lcd_text_scroll(22, browser_mq.y, browser_mq.text, browser_mq.xmax, browser_mq.off, 24, 1,
-                    FG, SEL_BG);
+    lcd_text_scroll(22, browser_mq.y, browser_mq.text, browser_mq.xmax, browser_mq.off, MQ_GAP, 1,
+                    browser_mq.fg, SEL_BG);
 }
 
 void draw_browser(void)
