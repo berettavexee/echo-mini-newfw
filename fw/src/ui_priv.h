@@ -93,6 +93,7 @@ int sd_watch(void);                             /* the detect switch: 1 redraw, 
 #define ROW_Y0 18
 extern int b_dirty;                             /* the browser page must be drawn again */
 void draw_browser(void);
+void browser_marquee_tick(void);
 int browser_key(const struct key_ev *e);
 
 /* ---- queue.c ---- */

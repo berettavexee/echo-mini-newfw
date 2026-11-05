@@ -74,6 +74,12 @@ static uint32_t codec_of(const char *name)
 static struct dir_buf dir __attribute__((section(".dirbuf")));
 static struct listing dir_l = { dir.e, dir.order, dir.pool, DIR_MAX, sizeof dir.pool, 0, 0, 0, 0,
                                 0 };
+static struct {
+    uint16_t index;
+    int top, y, xmax, width, off;
+    uint32_t t;
+    char text[96];
+} browser_mq = { .index = UINT16_MAX };
 int dir_n;
 static int dir_full;
 
@@ -189,6 +195,9 @@ static void top_entry(const char *name, uint16_t flags)
 
 int dir_load(const struct fat_dir *d)
 {
+    browser_mq.index = UINT16_MAX;
+    browser_mq.width = 0;
+    browser_mq.off = 0;
     uint32_t t0 = ticks();
     int r = 0;
     if (d->vol == VOL_TOP) {
@@ -274,8 +283,28 @@ static void draw_row(int r, int sel, int mark)
     lcd_fill(0, y, 22, 16, bg);
     if (dirent || i == mark)
         lcd_glyph(dirent ? 6 : 3, y, dirent ? 0xbb : 0x266a, dirent ? DIR_FG : TITLE_FG, bg);
-    lcd_text_clip(22, y, ent_name(i), list_text_end(dir_n, ROWS), dirent ? DIR_FG : e->size ? FG : DIM,
-                  bg);
+    const char *name = ent_name(i);
+    int xmax = list_text_end(dir_n, ROWS);
+    uint16_t fg = dirent ? DIR_FG : e->size ? FG : DIM;
+    if (i == sel && !dirent && e->size) {
+        if (browser_mq.index != i || browser_mq.top != path[depth].top || b_dirty) {
+            browser_mq.index = (uint16_t)i;
+            browser_mq.top = path[depth].top;
+            browser_mq.y = y;
+            browser_mq.xmax = xmax;
+            browser_mq.off = 0;
+            browser_mq.t = ticks();
+            copy_name(browser_mq.text, name, sizeof browser_mq.text);
+            browser_mq.width = lcd_text_width(browser_mq.text);
+            if (browser_mq.width <= xmax - 22)
+                browser_mq.width = 0;
+        }
+        if (browser_mq.off)
+            lcd_text_scroll(22, y, browser_mq.text, xmax, browser_mq.off, 24, 1, fg, bg);
+        else
+            lcd_text_clip(22, y, browser_mq.text, xmax, fg, bg);
+    } else
+        lcd_text_clip(22, y, name, xmax, fg, bg);
 }
 
 /* "selected/count" right-aligned on the first line */
@@ -291,6 +320,22 @@ static void draw_count(int sel)
         *p++ = '+';
     *p = 0;
     text_right(LCD_W - 70, LCD_W - 4, 0, b, DIM, BG);
+}
+
+void browser_marquee_tick(void)
+{
+    if (!browser_mq.width || browser_mq.index != path[depth].sel ||
+        browser_mq.top != path[depth].top)
+        return;
+    uint32_t now = ticks();
+    if (now - browser_mq.t < (browser_mq.off ? 33000u : 1000000u))
+        return;
+    browser_mq.off += browser_mq.off ? (int)((now - browser_mq.t) / 33000u) : 1;
+    browser_mq.t = now;
+    if (browser_mq.off >= browser_mq.width + 24)
+        browser_mq.off = 0;
+    lcd_text_scroll(22, browser_mq.y, browser_mq.text, browser_mq.xmax, browser_mq.off, 24, 1,
+                    FG, SEL_BG);
 }
 
 void draw_browser(void)

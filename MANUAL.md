@@ -136,7 +136,8 @@ sorted in natural order, ignoring case, so "track 2" comes before "track 10". Em
 ![A folder of the internal memory](docs/manual/browser-album.png)
 
 The number at the top right is the number of entries in the folder. Below, an empty file is
-greyed. While a track plays, the browser shows its progress bar at the bottom.
+greyed. A selected file name that is too long scrolls after a short pause. While a track
+plays, the browser shows its progress bar at the bottom.
 
 ![An empty file, greyed](docs/manual/browser-empty-file.png)
 
