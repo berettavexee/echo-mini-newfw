@@ -273,6 +273,8 @@ void ui_main(void)
         path_root(FAT_VOL_INT);
         dir_load(&path[1].dir);
     }
+    if (q_playing || parked)
+        scr = SCR_PLAYING;                      /* show a track restored at power-on */
     for (;;) {
         sys_idle();
         ui_background();
@@ -395,6 +397,8 @@ void ui_main(void)
                 full = quick = 0;
             } else if (scr == SCR_PLAYING)
                 marquee_tick();
+            else
+                browser_marquee_tick();
         }
         cpu_wait();                             /* until the next 1 ms tick */
     }

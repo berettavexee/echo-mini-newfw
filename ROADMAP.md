@@ -86,6 +86,15 @@ of the rework).
   starts or the screen comes on, nothing odd when plugging and unplugging the cable. A first
   short session (full battery) showed no regression; a long one, half charged, is still needed.
 
+- From pull requests #9 and #1 (CHEYAN): a track saved paused at position 0 now comes back
+  paused (it was lost; emulator: `emutest.py resume-paused-zero`), and a track resumed at
+  power on opens the play screen instead of the browser. On the device: "At power on: resume
+  paused", a track paused in its first two seconds, then the player switched off and on twice.
+
+- From pull request #8 (CHEYAN): the browser's selected row scrolls when its name is too long,
+  a file or a folder, with the play screen's timings. On the device: a long album folder and a
+  long file name, the scroll reset when the selection or the page changes.
+
 ## Version history
 
 One line per version; the measurements are in `ETUDE.md`.
@@ -142,6 +151,11 @@ One line per version; the measurements are in `ETUDE.md`.
   packets every 250 us (§93); pop-free DAC power-down (§91); docs/USB_AUDIO.md, docs/CS43131.md.
 
 ## To do
+
+- Screen writes by DMA: a band (for instance 320 x 16) drawn into a buffer, then sent to the
+  panel by the DMA, instead of the CPU writing each pixel: a scrolling line (the long title's
+  32-pixel marquee every 33 ms, since PR #2) and full redraws (11 to 14 ms today) would no
+  longer hold core A. Goes with step 2 of the rework (one loop, banded drawing).
 
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64); more varied seeds for the FAT
   target (its coverage stops growing after 20 minutes).

@@ -21,8 +21,8 @@ int lcd_text_width(const char *s);
 int lcd_text_clip(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t bg);
 /* the same, each pixel of the font a square of sc x sc (lines of 16 x sc pixels) */
 int lcd_text_width_x(const char *s, int sc);
-void lcd_text_scroll(int x, int y, const char *s, int xmax, int off, int gap, uint16_t fg,
-                     uint16_t bg);  /* s scrolled left by off pixels, then gap, then s again */
+void lcd_text_scroll(int x, int y, const char *s, int xmax, int off, int gap, int sc,
+                     uint16_t fg, uint16_t bg);  /* s scrolled left by off pixels, then gap, then s again */
 int lcd_text_clip_x(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t bg, int sc);
 void lcd_backlight(int on);
 void lcd_brightness(int pct);   /* 1 to 100 %, applied at once when the backlight is on */

@@ -113,9 +113,10 @@ static void resume_track(const struct resume *r)
     if (r->playing && cfg.start == START_PLAY) {
         player_seek_hint(pos);
         play_index(q_cur);
-    } else if (r->playing || pos) {             /* paused: PLAY goes on from there */
+    } else {                                    /* paused: PLAY goes on from there (even at 0) */
         parked = 1;
         parked_ms = pos;
+        log_printf("ui: resume: paused at %u ms", pos);
     }
 }
 

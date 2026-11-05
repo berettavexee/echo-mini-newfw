@@ -79,6 +79,14 @@ TESTS = {
                                 (6000, "PLAY")),
                       expect=[r"uac: start", r"screen off", r"uac: exit \(Power 2 s\)",
                               r"power off \(Power 2 s\)"]),
+    # a track saved paused at position 0 (the state written by the test: the keys cannot pause
+    # before anything is heard), then a power on: it comes back paused (PR #9: it was lost, its
+    # position 0 read as "nothing to resume")
+    "resume-paused-zero": dict(files={"A.WAV": "wav10"}, keys=keys((2000, "PLAY", 100)),
+                               ms=7000, reboot=dict(ms=7000, keys="",
+                                                    state=dict(playing=0, pos_ms=0)),
+                               expect=[r"track [0-9a-f]+ at 0 ms, playing 0",
+                                       r"ui: resume: paused at 0 ms"]),
     # a queue made by PLAY held on a folder (two levels), two tracks on, then a reboot: the same
     # queue rebuilt, the same track playing, then the one after it in that queue
     "resume-tree": dict(files={"ALBUM/CD1/A1.WAV": "wav10", "ALBUM/CD1/A2.WAV": "wav10",
@@ -245,6 +253,33 @@ def read_log(dump):
     return subprocess.run([sys.executable, READLOG, raw], capture_output=True, text=True).stdout
 
 
+# The resume state (resume.c): the last sector of NEWFWLOG.TXT, "NEWFWSTATE 3", then depth, the
+# path (DEPTH_MAX 16 clusters, sel and top), track, playing, level, mode, pos_ms and the sum
+STATE_FIELDS = dict(track=144, playing=148, level=152, mode=156, pos_ms=160)
+STATE_SUM = 164
+
+
+def patch_state(disk, fields):
+    """Changes fields of the resume state on the disk in place, its sum made again: a state the
+    keys cannot reach in a short run (a track paused before any of it was heard, say)"""
+    with open(disk, "r+b") as f:
+        d = f.read()
+        at = d.find(b"NEWFWSTATE 3")
+        while at >= 0 and at % 512:             # the firmware's own copy of the string first
+            at = d.find(b"NEWFWSTATE 3", at + 1)
+        if at < 0:
+            raise RuntimeError("no resume state on the disk")
+        s = bytearray(d[at:at + 512])
+        for k, v in fields.items():
+            struct.pack_into("<I", s, STATE_FIELDS[k], v)
+        h = 0x4e465753
+        for (w,) in struct.iter_unpack("<I", bytes(s[:STATE_SUM])):
+            h = ((h << 5 | h >> 27) & 0xffffffff) ^ w
+        struct.pack_into("<I", s, STATE_SUM, h)
+        f.seek(at)
+        f.write(s)
+
+
 def run(name, t, img, elf, tmp):
     if "set" in t:
         return run_set(t["set"], t, img, elf, tmp)
@@ -276,6 +311,8 @@ def run(name, t, img, elf, tmp):
                          capture_output=True, text=True).stdout
     if "reboot" in t and os.path.exists(dump):
         shutil.move(dump, disk)
+        if t["reboot"].get("state"):
+            patch_state(disk, t["reboot"]["state"])
         out += "\n-- reboot\n" + subprocess.run(
             [sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--boot-disk", "--ms",
              str(t["reboot"]["ms"]), "--steps", "30000000000", "--dump-disk", dump] +

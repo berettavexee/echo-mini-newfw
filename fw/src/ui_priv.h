@@ -94,6 +94,12 @@ int sd_watch(void);                             /* the detect switch: 1 redraw, 
 #define ROW_Y0 18
 extern int b_dirty;                             /* the browser page must be drawn again */
 void draw_browser(void);
+/* A line too long scrolls (the play screen, the browser's selected row): still MQ_PAUSE us at
+ * the start, then 1 pixel every MQ_STEP us, round and round with a gap of MQ_GAP pixels */
+#define MQ_GAP   32
+#define MQ_PAUSE 1500000u
+#define MQ_STEP  33000u
+void browser_marquee_tick(void);
 int browser_key(const struct key_ev *e);
 
 /* ---- queue.c ---- */

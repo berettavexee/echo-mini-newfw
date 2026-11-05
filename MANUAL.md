@@ -72,7 +72,8 @@ From top to bottom:
      on battery it only goes down (a pause lets the voltage rise a little: that is not shown),
      and while charging it stops at 99 % until the charger has finished. The battery turns red
      under 3.425 V.
-2. **The title**, or the file name when the file has no title tag.
+2. **The title**, or the file name when the file has no title tag. It uses two large lines when
+   it fits; longer names scroll in full across one large line after a short pause.
 3. **The artist and the album**, or the folder when the file has no album tag. They scroll when
    too long.
 4. **The time and the bar**.
@@ -135,7 +136,8 @@ sorted in natural order, ignoring case, so "track 2" comes before "track 10". Em
 ![A folder of the internal memory](docs/manual/browser-album.png)
 
 The number at the top right is the number of entries in the folder. Below, an empty file is
-greyed. While a track plays, the browser shows its progress bar at the bottom.
+greyed. A selected file or folder name that is too long scrolls after a short pause. While a track
+plays, the browser shows its progress bar at the bottom.
 
 ![An empty file, greyed](docs/manual/browser-empty-file.png)
 
@@ -236,7 +238,7 @@ power off (except the sleep timer).
 | Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder | tags |
 | ReplayGain | **album**: the album gain, or the track gain when the file has no album gain; **track**: the track gain; **auto**: album, but track in shuffle; **off**: no gain. Limited by the peak tag, so that a track never clips | album |
 | ReplayGain preamp | -6 dB to +6 dB, added to the gain of tagged tracks (still limited by the peak) | 0 dB |
-| At power on | **resume playing**: the track plays again where it was; **resume paused**: the track waits there, PLAY on the play screen starts it; **browser**: only the folder is shown | resume playing |
+| At power on | **resume playing**: opens the play screen and resumes the track; **resume paused**: opens the play screen with the track paused, PLAY starts it; **browser**: only the folder is shown | resume playing |
 | Sleep timer | off, 15, 30, 45, 60, 90 min; shows the minutes left. At the end the music fades out over 5 s, pauses, and the player powers off (it resumes paused there) | off |
 | Power off when idle | 5, 10, 20, 30 min, never: nothing played and no key for that long (not with the USB cable) | 10 min |
 | Swap VOL+ and VOL- | the volume keys of the play screen swapped (lists and seek unchanged) | no |
@@ -308,6 +310,12 @@ Storage:
    - PLAY then installs it, and BACK cancels.
 3. Do not power off during the install. The battery must be above 3.6 V, or the USB cable in.
 4. The player restarts on the new firmware.
+
+**The settings and the resume state** are kept in `NEWFWLOG.TXT`, at the root of the internal
+memory, with the log; the firmware never creates files, so without it nothing is kept after a
+power off. Create it once from the computer: `python3 fw/tools/mklog.py /path/to/the/player`
+(1 MiB, in one piece; `--force` replaces an existing one, and so loses the settings and the
+resume state).
 
 **Keep a stock image** at the root of the internal memory, under a name that neither firmware
 installs by itself, for instance `STOCK39.IMG`. Avoid `HIFIECnn.IMG` and `ECHOMINI.IMG`. To go
