@@ -323,11 +323,17 @@ void ui_main(void)
         scr = SCR_PLAYING;                      /* show a track restored at power-on */
     for (;;) {
         sys_idle();
+        const char *pp = perf_begin("player");  /* the loop's tasks, named for perf (§97, §99) */
         ui_background();
         audio_power_service();
+        perf_end(pp);
+        pp = perf_begin("power");
         power_service(key_ms);
         int fading = sleep_service();
+        perf_end(pp);
+        pp = perf_begin("battery");
         int bat = battery_service();
+        perf_end(pp);
         if (bat == BAT_REDRAW)
             full = b_dirty = 1;
         if (bat == BAT_WARN) {                  /* the banner, 3 s, screen on */
@@ -358,14 +364,16 @@ void ui_main(void)
             if (scr_n)
                 scr_stack[scr_n - 1]->shown();
         }
+        pp = perf_begin("card watch");
         int sw = sd_watch();
+        perf_end(pp);
         if (sw)
             full = 1;
         if (sw == 2)
             scr = SCR_BROWSER;
         if (q_playing && !audio_paused && millis() - t_save > 60000) {
             t_save = millis();                  /* the position, for a resume after a cut */
-            resume_save();
+            resume_save();                      /* (its own phase, "resume save") */
         }
         if (sys_screen_is_off())
             was_off = 1;

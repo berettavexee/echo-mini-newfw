@@ -296,7 +296,12 @@ static int settings_draw(void)
         s_page = 0;
         s_dirty = 1;
     }
-    if (s_dirty || live() != s_shown) {
+    static uint32_t t_live, now_live;           /* the clock read 4 times a second, not each */
+    if (s_dirty || millis() - t_live >= 250) {  /* pass (an I2C read, about 1.9 ms) */
+        t_live = millis();
+        now_live = live();
+    }
+    if (s_dirty || now_live != s_shown) {
         char b[16];
         char *p = put_dec(b, (uint32_t)s_sel + 1);
         p = put_str(p, "/");
@@ -306,7 +311,7 @@ static int settings_draw(void)
         for (int i = s_top; i < S_COUNT && i < s_top + ROWS; i++)
             draw_row(i, s_top, s_sel);
         list_scrollbar(ROW_Y0, ROWS, s_top, S_COUNT);
-        s_shown = live();
+        s_shown = now_live;
         s_dirty = 0;
     }
     perf_end(pp);
