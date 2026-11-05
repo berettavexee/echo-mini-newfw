@@ -178,7 +178,7 @@ is open, except for the USB and system entries, which stop it.
   the clock was not set or was behind that file.
 - The microSD card is not available over USB yet.
 
-**USB sound card** (0.97, high speed in 0.98, 192 kHz in 0.99): plug the cable, then choose the entry. The computer
+**USB sound card** (0.97, high speed in 0.98, 192 kHz in 0.99, remote and Power key since 0.99): plug the cable, then choose the entry. The computer
 sees a sound card named "ECHO MINI" (USB Audio Class 2 at high speed, or Class 1 on an older
 full-speed port; asynchronous, no driver needed), and its sound comes out of the player's
 headphone outputs, sample for sample: the player keeps its own clock and tells the computer how
@@ -188,6 +188,22 @@ many samples to send ("feedback" on the screen).
 - **VOL+** / **VOL-** set the sound card's own volume, kept for the next time (the first time,
   the playback volume); the computer's volume (and mute) adds to it, in 0.5 dB steps on the
   DACs.
+- **The remote** (high speed only): the player also acts as a headset remote for the computer's
+  player, like the buttons of a wired or Bluetooth headset:
+
+  | Key | Effect on the computer |
+  |---|---|
+  | PLAY | play / pause |
+  | VOL+ pressed twice | next track |
+  | VOL- pressed twice | previous track |
+  | MENU | turns the remote on or off (kept for the next time; on at first) |
+
+  A single press of VOL+ or VOL- (or a held key) still sets the volume; on a double press the
+  volume step of the first press is undone. With the remote off, the computer receives no key.
+  Tested with VLC and a browser (YouTube) on Linux; the computer's player must follow the media
+  keys.
+- **Power**: a short press switches the screen off or on, the sound goes on; held 2 s, it leaves
+  the sound card and powers off (the charging screen, the cable being in).
 - Leave with **BACK held**, or by unplugging the cable.
 - The screen shows the state (waiting for the computer, connected, playing), the format and the
   rate asked of the computer, both volumes, and counters: the fill of the output buffer (about

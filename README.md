@@ -18,7 +18,8 @@ with gapless playback and ReplayGain.
 - **Settings**: brightness, screen timeout, sleep timer, power off when idle, start-up behaviour.
 - Resume where you stopped, seek, clock, USB disk mode, low-battery warning, charging screen.
 - **USB sound card** for a computer or a phone: 16, 24 or 32 bits, 44.1 to 192 kHz,
-  asynchronous (bit-perfect with Linux; Android and iPhone play, see `docs/USB_AUDIO.md`).
+  asynchronous (bit-perfect with Linux; Android and iPhone play, see `docs/USB_AUDIO.md`), with
+  headset-style remote keys for the computer's player (play/pause, next, previous).
 - **Not there (yet)**: equaliser, music library by artist or album (folders only), lyrics.
 
 ## Before you install

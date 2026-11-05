@@ -22,6 +22,10 @@ char *put_dec(char *p, uint32_t v);
 char *put_hex(char *p, uint32_t v, int digits);
 
 void sys_idle(void);            /* watchdog, log, battery, clock marker, Power key */
+/* The Power key alone (sys_idle), now = ticks(); mine: 1 once held 2 s, the power off left to
+ * the caller (sys_power_key_off() after leaving its mode), else 0 */
+int sys_power_poll(uint32_t now, int mine);
+void sys_power_key_off(void);   /* "power off", the state saved; the charging screen on USB */
 void cpu_wait(void);            /* sleep until the next interrupt (SysTick: 1 ms at most) */
 int sys_screen_is_off(void);    /* switched off by a short press of Power, or after 30 s */
 void sys_screen_set(int on);    /* backlight and panel sleep together */

@@ -3,7 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-05, version 0.99 (and the emulator's tests).
+Last update: 2026-11-05, version 0.99 and `main` since (the sound card's remote and Power key,
+the emulator's tests).
 
 ## Done, validated on the device
 
@@ -25,6 +26,8 @@ Last update: 2026-11-05, version 0.99 (and the emulator's tests).
 | USB sound card at high speed: UAC2, 16, 24 and 32 bits, 44.1 to 96 kHz, bit-perfect (tested with Linux); UAC1 kept at full speed | 0.98 | §87 |
 | USB sound card: 176.4 and 192 kHz in every format (24/32-bit packets every 250 us); phones that ignore the feedback handled with evenly spread corrections; tested with a Pixel 6a and an iPhone | 0.99 | §90, §92, §93 |
 | Pop-free power-down of the DACs (CS43131 datasheet sequence) at the long pause and the stop | 0.99 | §91 |
+| USB sound card as a headset remote (HID): PLAY play/pause, VOL+ or VOL- twice next or previous, MENU the remote on and off (kept); tested with VLC and YouTube on Linux | main (after 0.99) | §95 |
+| USB sound card: the Power key (screen off and on; held 2 s, the card left, then the power off) | main (after 0.99) | §95 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
 | USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
@@ -69,11 +72,6 @@ Last update: 2026-11-05, version 0.99 (and the emulator's tests).
   again, the same track and the same shuffled order (emulator: `resume-tree`,
   `resume-shuffle`). On the device: the whole card in shuffle, power off, power on (the time of
   the walk at boot).
-- The sound card's remote (HID): PLAY play/pause, VOL+ twice next track, VOL- twice previous
-  (the first press's volume step undone), a single press or a held key the device's volume,
-  MENU the remote on and off (kept in the settings, now version 2; version 1 still read), BACK
-  held to leave (host test: `remote_test`). On the device: each key with VLC and a browser,
-  the remote off, the setting kept after a power off, the settings of 0.99 kept.
 
 ## Version history
 
@@ -144,9 +142,9 @@ One line per version; the measurements are in `ETUDE.md`.
 - USB access to the microSD card (step S5 of §36).
 - USB sound card (done so far: the table above; history in `docs/USB_AUDIO.md`, §83-§93):
   - entered from the USB screen when the cable comes in (the main menu only today);
-  - HID media keys, as a headset remote: play/pause checked on the device (0.99uh: every report
-    taken by a Linux PC, VLC and YouTube follow); next and previous (VOL+ or VOL- pressed twice)
-    and MENU to turn the remote on and off, to test on the device;
+  - HID media keys (done, §95): to check with Windows, macOS, Android and iOS hosts; the
+    MENU redraw of the remote's line holds the loop 13 ms (harmless, the packets come in by
+    interrupt; a smaller redraw would do);
   - a screen with the format received, the rate fed back, an "untouched stream" mark and two
     VU meters, one per channel (a silent channel shows at a glance); power saving off in this
     mode (USB-powered);
@@ -187,8 +185,8 @@ One line per version; the measurements are in `ETUDE.md`.
   3. a finer panel model: drawing windows and sweeps followed, full redraws and flicker counted,
      the time of the first frame;
   4. a check that the ELF matches the image (wrong symbols otherwise);
-  5. a simulated USB host (enumeration, isochronous packets, feedback), to test the sound card
-     and the HID without the device;
+  5. a simulated USB host (enumeration, isochronous packets, feedback, the HID reports), to
+     test the sound card without the device (today `uac-power` only enters its screen);
   6. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
 - Output and DAC settings (CS43131 registers, little code each):
   - headphone gain low / high (low suits sensitive in-ear monitors);

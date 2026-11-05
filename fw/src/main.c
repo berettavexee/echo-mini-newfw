@@ -255,8 +255,14 @@ void sys_idle(void)
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) / 10 : 0,
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) % 10 : 0);
     }
-    /* Power: a short press switches the screen off and on, 2 s switch the player off (with the
-     * cable in: the charging screen) */
+    sys_power_poll(now, 0);
+}
+
+/* Power: a short press switches the screen off and on, 2 s switch the player off (with the
+ * cable in: the charging screen). No log write: the sound card's loop calls it too, with mine
+ * set: it then gets 1 for the 2 s, leaves its mode and calls sys_power_key_off() */
+int sys_power_poll(uint32_t now, int mine)
+{
     if (sys_power_mine) {
     } else if (!sys_power_released) {
         sys_power_released = !power_key();      /* ignore the press that switched us on */
@@ -264,16 +270,26 @@ void sys_idle(void)
         if (!sys_t_power)
             sys_t_power = now ? now : 1;
         else if (now - sys_t_power > 2000000) {
-            sys_screen_set(1);
-            sys_line(122, "power off", WARN);
-            sys_power_off("Power 2 s");
-            charge_screen(0);                   /* still powered: the USB cable is in */
+            if (mine) {
+                sys_t_power = 0;
+                return 1;
+            }
+            sys_power_key_off();
         }
     } else if (sys_t_power) {
         if (now - sys_t_power > 30000)          /* a press, not a bounce */
             sys_screen_set(sys_screen_off);
         sys_t_power = 0;
     }
+    return 0;
+}
+
+void sys_power_key_off(void)
+{
+    sys_screen_set(1);
+    sys_line(122, "power off", WARN);
+    sys_power_off("Power 2 s");
+    charge_screen(0);                           /* still powered: the USB cable is in */
 }
 
 /* The state saved, then the power hold released; returns when the USB cable still powers us */

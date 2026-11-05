@@ -3825,3 +3825,27 @@ Limites : ces temps mêlent le stockage, le temps du cœur (qui tourne parfois s
 - **`emutest.py`** : `boot`, `play-wav`, `install-badcrc`, `install-ok` PASS ; les trois premiers en quelques secondes (étape de la CI).
 - Corrections de l'émulateur trouvées en chemin : `--ms` n'arrêtait la simulation qu'à un `cpu_wait()` (un écran qui attend une touche en boucle active laissait le temps simulé filer à plus de 600 s : arrêt aussi à chaque `ticks()`) ; disques et copies de disques écrits **creux** (le quota de `/tmp` était dépassé par les disques de 300 Mio ; un disque de test ne prend plus qu'une dizaine de Mio) ; les disques temporaires supprimés même quand un scénario échoue. Pour les scénarios de refus, l'écran d'erreur attend une touche sans écrire le journal : les scénarios y appuient sur BACK avant la fin.
 - **Calibrage du point 4** : installation de 2 Mio dans l'émulateur en `--cycles` : 146 ms sans latence (calcul seul), **1 644 ms avec `--mmc-lat 100,20,500,90`**, contre **1 460 ms** (médiane) sur l'appareil. Le calcul ne pèse donc qu'environ 10 % ; la latence d'écriture est un peu forte : `100,20,450,80` devrait tomber près de 1,45 s (à confirmer, avec l'image de mesure sur l'appareil pour les lectures).
+
+## 95. Carte son USB : télécommande HID et touche Power (images de test 99K, 99L, 99M, 2026-11-05)
+
+**Objectif** : que l'ECHO MINI, en carte son, commande aussi le lecteur de l'ordinateur, comme la télécommande d'un casque filaire ou Bluetooth sous Android.
+
+**Interface HID** (`uac.c`), à haute vitesse seulement :
+- 3ᵉ interface de la configuration UAC2 (283 octets au lieu de 258), classe HID 1.11 sans protocole de démarrage ; descripteur de rapport « consumer control » de 27 octets : un octet, un bit par touche (lecture/pause `0xCD`, piste suivante `0xB5`, piste précédente `0xB6`), 5 bits de remplissage.
+- **Point d'entrée** : interrupt IN 0x82, 8 octets, `bInterval` 8 (16 ms). Le contrôleur n'a **qu'un point d'entrée IN périodique**, pris par le retour d'horloge (FIFO TX périodique 1) : le point HID passe par la **FIFO TX non périodique** (FIFO 0, partagée avec le point 0). Cela marche : l'hôte l'interroge comme tout point interrupt. L'écriture dans la FIFO se fait l'interruption USB bloquée, puisque le point 0 y écrit depuis l'interruption (`usb_int_in_open()`, `usb_int_in_send()`, `usb.int_in_sent` compté à la fin de chaque transfert).
+- **Requêtes** : `GET_DESCRIPTOR` du rapport (type `0x22`, destinataire l'interface), `SET_IDLE` accepté, `GET_INTERFACE` à 0.
+- Une touche = un rapport avec son bit, puis un rapport vide (relâchée) ; la touche suivante attend que les deux soient pris.
+
+**Image 99K (0.99uh, lecture/pause seule)** : Linux crée `hidraw` et un périphérique d'entrée (`hid-generic`) ; 9 appuis, **18 rapports sur 18 pris** par l'hôte, aucun paquet audio perdu. Showtime ne réagissait pas (il ne répondait plus à MPRIS), VLC et YouTube suivent (relevé MPRIS par `dbus-monitor` : `PlayPause`, puis `PlaybackStatus` « Paused » / « Playing »).
+
+**Image 99L (0.99l, la télécommande complète)** :
+- PLAY : lecture/pause ; **VOL+ deux fois** : piste suivante ; **VOL- deux fois** : piste précédente ; MENU : télécommande active ou non ; BACK maintenu : sortie (inchangé).
+- Le double appui (`remote.c`, logique pure, test sur PC `remote_test`) : le premier appui règle le volume aussitôt ; un second appui de la même touche **dans les 400 ms** (d'un relâchement au suivant : un appui court de VOL est pris au relâchement, §34) annule ce pas et envoie la touche de piste. Une touche maintenue (répétition) règle le volume seule et annule un double appui en cours ; télécommande coupée : deux pas de volume. Le pas annulé est celui réellement appliqué (au bord de la plage, il peut être nul). Avec les touches de volume inversées, la piste suivante reste sur la touche qui monte le volume.
+- **Réglages, version 2** (`settings.c`) : le champ `uac_remote` (actif par défaut) déplace la somme ; un bloc « NEWFWSET 1 » (0.99) reste lu, ses 8 octets de valeurs et sa somme au mot 5, le reste à ses valeurs par défaut.
+- Sur l'appareil, avec VLC (trois sons de 2 min, 330, 660 et 990 Hz) : `PlayPause` 4 fois, `Next` 9 fois, `Previous` 2 fois, chaque commande suivie du changement de piste ou d'état ; MENU coupé : plus rien. Réglage gardé après une extinction, réglages de la 0.99 conservés.
+
+**Image 99M (0.99m, la touche Power)** :
+- La touche Power n'était **jamais lue** en carte son (depuis la 0.97) : elle l'est par `sys_idle()`, que la boucle de la carte son n'appelle pas (il écrit le journal, ce qu'on évite pendant le flux). Sa gestion est sortie dans `sys_power_poll(now, mine)`, sans écriture du journal ; `sys_idle()` l'appelle comme avant. La boucle de la carte son l'appelle avec `mine` : à 2 s, elle sort d'abord proprement (USB coupé, DAC arrêtés, réglages enregistrés), puis `sys_power_key_off()` (« power off », écran de charge, le câble étant branché).
+- Émulateur : `emutest.py uac-power` (démarrage par Power câble branché, entrée dans la carte son, appui court puis 2,5 s).
+- Sur l'appareil, en lecture (148 409 paquets, **0 perdu, 0 manque**) : appui court, écran éteint puis rallumé sans coupure ; 2 s : « uac: exit (Power 2 s) », extinction, écran de charge, redémarrage normal.
+- Remarque : le redessin de la ligne « MENU: remote on/off » bloque la boucle environ 13 ms (« longest loop gap » 12,6 ms contre 1,6 ms) ; sans effet sur le son (paquets reçus sous interruption, réserve de 10 ms stable).

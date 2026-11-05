@@ -68,6 +68,17 @@ TESTS = {
     "sd-noreply": dict(files={"A.WAV": "wav"}, sd=True, emu_args=["--sd-noreply"], ms=11000,
                        keys=keys((2000, "BACK"), (3000, "VOL-"), (4000, "PLAY")),
                        expect=[r"ui: card not readable: no reply"]),
+    # switched on by Power with the cable in, the sound card (no USB host in the emulator: it
+    # waits for one), Power pressed (the screen off), then held 2.5 s: the card left, the power
+    # off (the charging screen)
+    "uac-power": dict(files={"A.WAV": "wav"}, ms=14000,
+                      emu_args=["--vbus", "1", "--power", "1",
+                                "--gpio-at", "1500:2:5:0,7000:2:5:1,7200:2:5:0,"
+                                             "9000:2:5:1,11500:2:5:0"],
+                      keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(5)],
+                                (6000, "PLAY")),
+                      expect=[r"uac: start", r"screen off", r"uac: exit \(Power 2 s\)",
+                              r"power off \(Power 2 s\)"]),
     # a queue made by PLAY held on a folder (two levels), two tracks on, then a reboot: the same
     # queue rebuilt, the same track playing, then the one after it in that queue
     "resume-tree": dict(files={"ALBUM/CD1/A1.WAV": "wav10", "ALBUM/CD1/A2.WAV": "wav10",

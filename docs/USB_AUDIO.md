@@ -4,7 +4,7 @@ This page sums up what this project learned while turning the SNOWSKY ECHO MINI 
 RKNanoD, two Cirrus Logic CS43131) into an asynchronous, bit-perfect USB sound card: what works,
 what failed, the hardware limits, the pitfalls, and how computers and phones actually behave. It
 is meant to save time for anyone writing USB audio for this player or for a similar DesignWare
-USB controller. The study behind it, in French, is `ETUDE.md` §83-§88 and §90; the code is
+USB controller. The study behind it, in French, is `ETUDE.md` §83-§88, §90 and §92-§95; the code is
 `fw/src/uac.c` (the class), `fw/src/usb.c` (the controller) and `fw/src/audio.c` (the DAC ring).
 
 Status (version 0.99, 2026-11-01):
@@ -15,8 +15,10 @@ Status (version 0.99, 2026-11-01):
   +40 ppm);
 - phones (a Pixel 6a, an iPhone) play cleanly but **ignore the feedback**: the firmware then
   drops a frame now and then (inaudible, not bit-perfect);
-- not done: HID media keys, the choice between disk and sound card at the cable's arrival, a
-  screen with VU meters. Windows and macOS were never tried.
+- since 0.99 (in `main`, not released yet): **HID media keys**, the player acting as a headset
+  remote (below), and the Power key in this mode;
+- not done: the choice between disk and sound card at the cable's arrival, a screen with VU
+  meters. Windows and macOS were never tried.
 
 ## The hardware
 
@@ -215,3 +217,25 @@ Neither had a feedback endpoint or went beyond 48 kHz.
   path (offload): `adb shell dumpsys media.audio_flinger` during playback would tell for
   Android.
 - The log written during a stream.
+
+## Media keys (HID)
+
+At high speed the configuration carries a third interface beside the two of audio: a HID
+consumer control, the player's remote for the computer (`fw/src/uac.c`, `fw/src/remote.c`).
+- **Report**: one byte, a bit per key: play/pause (usage `0xCD`), next track (`0xB5`), previous
+  track (`0xB6`), 5 bits of padding (27 bytes of report descriptor). A key is one report with
+  its bit, then an empty one (the key released); the next key waits for both to be taken.
+- **Endpoint**: interrupt IN 0x82, 8 bytes, `bInterval` 8 (16 ms). The controller has **one
+  periodic IN endpoint only**, taken by the feedback: the interrupt endpoint runs on the
+  **non-periodic TX FIFO** (FIFO 0, shared with endpoint 0), which works, the host polling it
+  like any interrupt endpoint. Write to it with the USB interrupt blocked, since endpoint 0
+  writes the same FIFO from the interrupt.
+- **Requests**: `GET_DESCRIPTOR` of the report (type `0x22`, to the interface), `SET_IDLE`
+  accepted, `GET_INTERFACE` answered 0. Linux binds `hid-generic` and makes an input device
+  of it; GNOME then sends the MPRIS commands to the active player.
+- **Keys**: PLAY play/pause; VOL+ or VOL- pressed twice within 400 ms (from one release to the
+  next) next or previous, the first press's volume step undone; held, the volume only; MENU turns
+  the remote on and off (a setting).
+- At full speed (UAC1), no HID interface: the descriptors stay as they were.
+- Checked on the device with Linux: every report taken by the host, VLC and YouTube follow, the
+  stream untouched (no sample dropped while the keys were sent).

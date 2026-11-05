@@ -897,6 +897,7 @@ void uac_mode(void)
     uint32_t t0 = millis(), t_draw = 0, t_key = 0, t_log = millis(), last = ticks(), max_gap = 0;
     uint32_t gap_all = 0, configured_at = 0;
     const char *why = "?";
+    int power = 0;
     for (;;) {
         wdt_kick();
         uint32_t now = ticks();
@@ -954,6 +955,11 @@ void uac_mode(void)
             t_key = now;
             if (!vbus()) {
                 why = "cable unplugged";
+                break;
+            }
+            if (sys_power_poll(ticks(), 1)) {           /* held 2 s: off once the card stops */
+                why = "Power 2 s";
+                power = 1;
                 break;
             }
             struct key_ev e;
@@ -1022,4 +1028,6 @@ void uac_mode(void)
     }
     log_stats(why, gap_all);
     log_printf("uac: exit (%s) after %u s", why, (millis() - t0) / 1000);
+    if (power)
+        sys_power_key_off();                            /* the charging screen: the cable is in */
 }
