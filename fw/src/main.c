@@ -283,6 +283,7 @@ void sys_idle(void)
  * set: it then gets 1 for the 2 s, leaves its mode and calls sys_power_key_off() */
 int sys_power_poll(uint32_t now, int mine)
 {
+    lcd_service();                              /* (the sound card's loop calls this one too) */
     if (sys_power_mine) {
     } else if (!sys_power_released) {
         sys_power_released = !power_key();      /* ignore the press that switched us on */
@@ -323,6 +324,7 @@ void sys_power_key_off(void)
 /* The state saved, then the power hold released; returns when the USB cable still powers us */
 void sys_power_off(const char *why)
 {
+    lcd_settle();                               /* the last screen lit before the power goes */
     ui_power_off();
     log_printf("power off (%s), battery %u mV", why, battery_mv());
     log_flush();
@@ -358,11 +360,8 @@ void sys_screen_set(int on)
             log_printf("screen: clocks back on the PLL, core %u Hz against the crystal (%u expected)",
                        clock_measure(50), cpu_hz);
         }
-        const char *pp = perf_begin("screen wake");  /* the panel's 120 ms out of sleep */
-        lcd_sleep(0);
-        perf_end(pp);
-        lcd_backlight(1);
-    } else {
+        lcd_wake_lit();                         /* not waited: lcd_service() lights it 120 ms */
+    } else {                                    /* later, the first frame drawn meanwhile */
         lcd_backlight(0);
         lcd_sleep(1);
     }

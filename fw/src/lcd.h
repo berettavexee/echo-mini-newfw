@@ -26,7 +26,11 @@ void lcd_text_scroll(int x, int y, const char *s, int xmax, int off, int gap, in
 int lcd_text_clip_x(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t bg, int sc);
 void lcd_backlight(int on);
 void lcd_brightness(int pct);   /* 1 to 100 %, applied at once when the backlight is on */
-void lcd_sleep(int on);         /* panel asleep (backlight apart); waking takes 120 ms */
+void lcd_sleep(int on);         /* panel asleep (backlight apart): asked, done by lcd_service() */
+void lcd_wake_lit(void);        /* awake, then the backlight on, once the panel's 120 ms passed */
+void lcd_service(void);         /* the panel's sleep and wake commands, each after its delay */
+int lcd_waking(void);           /* a sleep or wake command still waits its delay */
+void lcd_settle(void);          /* waits for it (up to 120 ms): before a power off, a fixed wait */
 void lcd_wake_fault(void);
 
 #endif

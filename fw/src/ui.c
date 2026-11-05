@@ -147,6 +147,7 @@ static void battery_off(uint32_t mv)
     sys_screen_set(1);
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
     lcd_text_clip_x(8, 50, "Battery empty", LCD_W, WARN, BG, 2);
+    lcd_settle();                               /* lit before the wait, not after it */
     mdelay(2000);
     sys_power_off("battery empty");             /* the resume state: paused where it was */
 }                                               /* (returns when the USB cable powers us) */
