@@ -4,7 +4,8 @@ State of the ECHO MINI new firmware, kept up to date with each version. The deta
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
 Last update: 2026-11-05, version 0.99 and `main` since (the sound card's remote and Power key,
-the emulator's tests); the rework on its own branch (0.99r4, step 1).
+the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r9,
+steps 1 and 2).
 
 ## Done, validated on the device
 
@@ -65,7 +66,13 @@ and checked on the device before the next; `main` stays the working firmware mea
    a small PCM ring: the screen waking (120 ms), the DACs starting (337 ms), the card mounting
    (253 ms), the tags after a big Ogg cover (up to 1.4 s measured); at 24/192 the margin is
    only 121 ms today. Left: a long device session on r4, the table in the rework document.
-2. One loop and a stack of screens.
+2. **One loop and a stack of screens** (done in the emulator, 0.99r5-r9, ETUDE §99; the device
+   test of r9 pending): the screen wakes without blocking (the 120 ms gap gone), the main menu,
+   the settings and the date and time are screens on a stack served by the main loop (its
+   services run whatever the screen), the sleep timer's fade is a step of the loop, the loop's
+   tasks are named in the perf lines. Left: the keys read in the SysTick interrupt (needs a
+   SysTick in the emulator, or the device), the screens that stop the music still in loops of
+   their own (USB, install, sound card, system).
 3. A storage task, deferred writes, the next track prepared in slices (tags_read cut).
 4. Core B writes the PCM ring (64 KiB), the input ring in SYSRAM.
 5. Records in the input ring (TRACK, DATA, END, SEEK); a seek never resets an index the other

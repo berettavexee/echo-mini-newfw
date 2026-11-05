@@ -3969,3 +3969,26 @@ Revue des commits depuis le 29 octobre, pour ce qui touche la refonte.
 - Tests d'installation dans un émulateur, comme les nôtres.
 
 **Conséquences pour notre plan** : la direction des étapes 3 et 4 est confirmée par ReChord, qui y est arrivé par la même mesure ; deux règles à ajouter (SEEK sans remise à zéro concurrente des indices ; trace de faute dans des secteurs préalloués plutôt qu'en PMU-SRAM seule) ; le réveil de l'écran et les écrans immobiles sont des gains simples, indépendants de la refonte du son.
+
+## 99. Refonte, étape 2 : une boucle, une pile d'écrans (images 99R5 à 99R9, 2026-11-05, émulateur)
+
+Faite d'une traite sans l'appareil, chaque sous-étape vérifiée dans l'émulateur (devenu assez représentatif, §96-§97) : `make check`, les 12 tests `emutest`, les scénarios privés comparés **capture par capture** à la 0.99r4, puis une seule image de test pour l'appareil, `NEWFWR09`.
+
+**r5 — le réveil de l'écran sans blocage.** `lcd_sleep(0)` attendait 120 ms entre SLPOUT et DISPON (le délai du contrôleur ST7789), à chaque réveil : le pire trou du chemin audio en usage courant (§97). `lcd_service()`, appelée par `sys_power_poll()` (donc par toutes les boucles, celle de la carte son comprise), envoie maintenant chaque commande une fois le délai du contrôleur passé (120 ms après SLPOUT, 5 ms après SLPIN, une mise en veille demandée pendant un réveil attendant la fin de celui-ci) ; `lcd_wake_lit()` demande le réveil puis le rétroéclairage, allumé avec le DISPON : la première image est dessinée pendant l'attente (l'idée d'EchoPod, §98). `lcd_settle()` attend seulement avant une extinction (« power off », « Battery empty »), pour que le dernier message se voie.
+
+**r6 — la pile d'écrans.** Le menu principal, les réglages et l'écran de la date et de l'heure n'ont plus de boucle à eux : ce sont des écrans (`enter`, `shown`, `key`, `draw` ; `key` et `draw` rendent « rester » ou « fermer ») sur une pile de 4 au-dessus du navigateur et de l'écran de lecture, servis par la boucle de `ui_main()`. Conséquences :
+- les services de la boucle (mise à l'arrêt après une longue pause, minuterie de sommeil, batterie, surveillance de la carte, sauvegarde périodique) tournent quel que soit l'écran ; avant, ils s'arrêtaient dans le menu et les réglages ;
+- le choix du menu est exécuté une fois le menu fermé ; les écrans qui arrêtent la musique (disque USB, installation, carte son, écran système, mode chargeur) gardent leur propre boucle, appelée de là : exception assumée, leur logique matérielle a ses propres délais (la carte son surtout) ;
+- les messages de l'horloge (« clock set », « no clock found ») ne bloquent plus : affichés, puis l'écran se ferme ;
+- l'extinction automatique de l'écran ne s'applique toujours pas au-dessus d'un écran de la pile (comme avant).
+
+**r7 — la minuterie de sommeil.** Le fondu de 5 s avant l'extinction était une boucle dans la boucle ; c'est maintenant un pas de la boucle à chaque passage (les touches ignorées pendant le fondu, comme avant). Build de test `ECHO_SLEEP_SECONDS` (les minutes de la minuterie comptées en secondes) et scénario `sleep-fade` : fin à 26,66 s, pause 5,00 s plus tard, extinction.
+
+**r8 — les tâches nommées, l'horloge des réglages.** Les tâches de la boucle portent leur phase `perf` (« player », « power », « battery », « card watch ») : le pire passage dit quelle tâche l'a pris. L'écran des réglages lisait l'horloge temps réel par I2C (environ 1,9 ms) **à chaque passage** pour savoir si la minute affichée avait changé : 4 fois par seconde maintenant.
+
+**Écart au plan.** Les touches devaient être lues dans l'interruption SysTick, rangées dans une file. L'émulateur n'a pas de SysTick sur le cœur A (`cpu_wait()` y est un simple retour) : sans lui, aucune touche n'aurait pu être testée. Elles restent lues par la boucle, désormais en un seul endroit qui les donne à l'écran du dessus de la pile ; le passage en interruption (avec la lecture de la batterie dans la même interruption, le SARADC étant partagé, et les lignes « keys: » écrites par la boucle) attend un essai sur l'appareil ou un SysTick dans l'émulateur.
+
+**Vérification de la r9 dans l'émulateur** (`work/emu/regress_r09.txt`, `perf_r09.txt`) :
+- 12 tests `emutest` PASS ; 31 scénarios sur la r4 et la r9 sans faute, **43 captures identiques sur 54** ; les 11 autres : 9 fois une colonne de la barre de progression (1 pixel d'avance) ou la progression de l'écriture de l'installateur, l'horloge du mode par défaut avançant à chaque lecture (`lcd_service()` en ajoute une par passage) ; et l'ordre aléatoire de `queue-big`, tiré de l'horloge (la piste suivante et le retour en arrière retombent sur les mêmes positions de la file) ;
+- scénarios de mesure en `--cycles` : les mêmes pires cas qu'en r4 (§97) ; les trous des boucles portent maintenant le nom de la tâche (« player » pour un changement de piste, 5 à 10 ms) ; le blocage de 500 ms (`perf-stall`) et la minuterie (`sleep-fade`) PASS.
+- Limites de l'émulateur pour cette étape : il ne reproduit ni le délai réel de la dalle au réveil (à voir sur l'appareil : l'image doit apparaître propre, sans artefact), ni la cadence des touches dans une interruption.
