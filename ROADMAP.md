@@ -62,7 +62,7 @@ the emulator's tests).
 - From pull requests #9 and #1 (CHEYAN): a track saved paused at position 0 now comes back
   paused (it was lost; emulator: `emutest.py resume-paused-zero`), and a track resumed at
   power on opens the play screen instead of the browser. On the device: "At power on: resume
-  paused", a track paused in its first two seconds, two power offs and ons.
+  paused", a track paused in its first two seconds, then the player switched off and on twice.
 
 ## Version history
 
