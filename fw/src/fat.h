@@ -17,7 +17,13 @@ struct fat_vol {
     uint32_t data;              /* cluster 2 */
     uint32_t spc;               /* sectors per cluster */
     uint32_t clusters;
+    uint32_t serial;            /* volume serial number: tells one card from another */
+    uint8_t active_fat;         /* exFAT's active FAT (and matching allocation bitmap) */
     uint32_t root;              /* first cluster of the root directory */
+    uint32_t used;              /* clusters in use, valid when used_ok (fat_space) */
+    uint8_t used_ok, used_fail;
+    uint32_t used_pos, used_acc, bm_c, bm_sec, bm_bytes;   /* the count in progress */
+    uint32_t bm_dir_c, bm_dir_sec, bm_dir_steps;           /* incremental exFAT bitmap search */
 };
 
 struct fat_file {
@@ -34,6 +40,8 @@ extern struct fat_vol vol;      /* the internal volume */
 extern struct fat_vol sdvol;    /* the card's */
 
 int fat_mount(uint32_t from);   /* searches from sector 'from' in 1 MiB steps */
+int fat_space_poll(void);       /* a step of the count of the space in use; 1: one is done */
+int fat_space(int v, uint32_t *total_mib, uint32_t *used_mib);   /* 0, or <0 on a read error */
 int fat_mount_sd(void);         /* the first FAT32 or exFAT partition of the card (sd_init done) */
 /* Calls fn for each regular file of the root directory; stops when fn returns non-zero */
 int fat_list_root(int (*fn)(const struct fat_file *f, void *ctx), void *ctx);

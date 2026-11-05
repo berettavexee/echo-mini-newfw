@@ -263,6 +263,7 @@ void ui_main(void)
     uint32_t drawn_gen = 0;
     int lvl_key = play_level;                   /* the volume before a VOL key: undone by a chord */
     uint32_t t_draw = 0, t_key = ticks(), t_save = millis(), key_ms = millis();
+    uint32_t t_space = 0;
     uint32_t banner_ms = 0;                     /* a banner is shown (low battery, cannot play) */
     depth = 0;
     fat_root(VOL_TOP, &path[0].dir);
@@ -307,6 +308,15 @@ void ui_main(void)
         if (banner_ms && millis() - banner_ms > 3000) {
             banner_ms = 0;
             full = b_dirty = 1;
+        }
+        if (millis() - t_space >= 5) {
+            t_space = millis();
+            if (fat_space_poll() && !depth && !sk_on) {
+                dir_load(&path[0].dir);
+                if (path[0].sel >= dir_n)
+                    path[0].sel = 0;
+                b_dirty = full = 1;
+            }
         }
         int sw = sd_watch();
         if (sw)
