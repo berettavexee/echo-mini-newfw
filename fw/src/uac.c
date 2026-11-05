@@ -790,14 +790,14 @@ void uac_mode(void)
 {
     sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    sys_line(0, "USB sound card", TITLE);
+    sys_line(0, ui_tr("USB sound card", "USB 声卡", "USB DAC"), TITLE);
     if (!vbus()) {
-        sys_line(36, "plug the USB cable", WARN);
+        sys_line(36, ui_tr("plug the USB cable", "请连接 USB 线", "USBケーブルを接続してください"), WARN);
         mdelay(2000);
         return;
     }
-    sys_line(138, "VOL+ / VOL-: volume", DIM);
-    sys_line(154, "BACK held: exit", DIM);
+    sys_line(138, ui_tr("VOL+ / VOL-: volume", "音量键：调节音量", "VOL+ / VOL-：音量"), DIM);
+    sys_line(154, ui_tr("BACK held: exit", "长按返回键退出", "BACK長押しで終了"), DIM);
     level = cfg.uac_vol ? cfg.uac_vol - 1 : play_level;     /* its own, once set */
     rate = 48000;
     alt = 0;
@@ -810,7 +810,7 @@ void uac_mode(void)
     st.frame = 4;
     audio_stop();                                       /* from scratch: not parked, not paused */
     if (audio_start(rate, 1)) {
-        sys_line(36, "audio output failed", WARN);
+        sys_line(36, ui_tr("audio output failed", "音频输出失败", "音声出力に失敗しました"), WARN);
         mdelay(2000);
         return;
     }
