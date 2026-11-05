@@ -3923,6 +3923,18 @@ Les étiquettes des Ogg à grosse pochette : 643 ms (8,7 Mo) et 1 323 ms (17,9 M
 
 Anneau DAC jamais sous **880 ms** en lecture continue (MP3, Opus, Vorbis). Les seuls manques (5 à 15 Ko, 30 à 80 ms) sont au **début d'une piste lancée à la main** (PLAY maintenu, saut, recherche) : l'anneau est vidé à 12 ms et le premier PCM du cœur B arrive 47 à 358 ms plus tard ; ce petit silence existe déjà sur `main`.
 
+**Session longue en r4** (77 min, 29 pistes, lecture aléatoire de toute la carte et navigation ; `work/hwlog/1105_r04`) :
+
+| Format | Pistes | Plus long trou du chemin audio | Plus long trou de la boucle | Anneau DAC min | Tours perdus |
+|---|---|---|---|---|---|
+| MP3 44,1/16 | 22 | 122 ms (réveil de l'écran 120) | 135 ms (réveil de l'écran) | 969 ms | 0 |
+| Opus 48/16 | 6 | 122 ms (réveil de l'écran 120) | 2 805 ms (dossiers 2 333) | 880 ms | 0 |
+| Vorbis 44,1/16 | 1 | 122 ms (réveil de l'écran 120) | 136 ms | 969 ms | 0 |
+
+- Le **réveil de l'écran** est le pire trou du chemin audio en usage courant, à chaque fois et pour tous les formats.
+- Le trou de 2,8 s de la boucle est le parcours de toute la carte au lancement de la lecture aléatoire (18 257 pistes en 2,39 s) ; avec le cumul par nom (r4), il est attribué à la **lecture des 1 396 dossiers** (2 333 ms, la phase « folder » imbriquée dans « tree walk ») : c'est la lecture des répertoires, pas le tri ni la file, qui coûte.
+- Aucun tour perdu ; les manques (4 à 15 Ko, une fois par piste) restent tous au début d'une piste lancée à la main.
+
 **Ce que la refonte doit sortir du chemin audio** (avant l'anneau PCM de 64 Kio de l'étape 4, 371 ms en 16/44,1, 43 ms en 24/192) :
 1. le réveil de l'écran (120 ms) : attente sans blocage, ou dalle laissée éveillée et rétroéclairage seul coupé ;
 2. le démarrage des DAC (337 ms) et le changement de fréquence (8 à 10 ms) ;
