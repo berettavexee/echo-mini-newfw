@@ -181,7 +181,9 @@ static int q_open(int i, int chain)
     int was_on = audio.on;
     (void)chain;
     player_ogg_hint(tg_next.ogg_end_page, tg_next.ogg_end_seg);  /* core B skips the comment header */
+    pp = perf_begin("open");
     int r = player_open(&f, flags & F_CODEC, PLAY_CHAIN);
+    perf_end(pp);
     if (!r && (!was_on || audio.vol == 0xff))
         fresh = 1;
     log_printf("ui: queue %d/%d: %s (%d)", i + 1, q_n, q_name(i), r);

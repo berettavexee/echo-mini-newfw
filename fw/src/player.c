@@ -585,6 +585,10 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     fed_since_ring = freed_since_ring = 0;
     player.state = ST_LOAD;
     ps.kept = (flags & PLAY_CHAIN) && dac.running && audio.on;
+    if (!ps.kept) {                             /* nothing heard before it (a start, a jump): */
+        perf_play.last = 0;                     /* no gap of the audio path to count until its */
+        perf_play.max = 0;                      /* first service (r9: 8 s of browsing counted) */
+    }
     drain.on = 0;
     ps.fill0 = ps.kept ? audio_fill() : 0;      /* what the DAC ring holds at the switch */
     ps.ur0 = audio.ur_all;                      /* the counters of this track by difference */
