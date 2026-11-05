@@ -109,6 +109,7 @@ static void resume_track(const struct resume *r)
     } else {                                    /* paused: PLAY goes on from there (even at 0) */
         parked = 1;
         parked_ms = pos;
+        log_printf("ui: resume: paused at %u ms", pos);
     }
 }
 
