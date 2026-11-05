@@ -74,6 +74,19 @@ static uint32_t codec_of(const char *name)
 static struct dir_buf dir __attribute__((section(".dirbuf")));
 static struct listing dir_l = { dir.e, dir.order, dir.pool, DIR_MAX, sizeof dir.pool, 0, 0, 0, 0,
                                 0 };
+#define TITLE_CACHE_N 16
+struct title_cache_entry {
+    uint16_t index;
+    char title[96];
+};
+static struct title_cache_entry title_cache[TITLE_CACHE_N];
+static uint16_t title_cache_next;
+static struct {
+    uint16_t index;
+    int top, y, xmax, width, off;
+    uint32_t t;
+    char text[96];
+} browser_mq = { .index = UINT16_MAX };
 int dir_n;
 static int dir_full;
 
@@ -178,24 +191,79 @@ int list_load(struct listing *l, const struct fat_dir *d)
 /* The top level (ETUDE §38): the internal volume, then the card when one is in */
 static int sd_bad;                              /* the card in did not mount */
 
-static void top_entry(const char *name, uint16_t flags)
+/* "Name  used/total G": the space of a volume, when it can be counted */
+static char *put_gb(char *p, uint32_t mib)
+{
+    uint32_t t = mib * 10 / 1024;               /* tenths of a GiB */
+    p = put_dec(p, t / 10);
+    p = put_str(p, ".");
+    return put_dec(p, t % 10);
+}
+
+static void space_label(char *b, const char *name, int v)
+{
+    uint32_t total, used;
+    char *p = put_str(b, name);
+    if (fat_space(v, &total, &used) == 0) {
+        p = put_str(p, "  ");
+        p = put_gb(p, used);
+        p = put_str(p, "/");
+        p = put_gb(p, total);
+        p = put_str(p, "G");
+    }
+    *p = 0;
+}
+
+static void top_entry_at(const char *name, uint32_t cluster, uint16_t flags)
 {
     uint32_t len = 0;
     while (name[len])
         len++;
-    list_add(&dir_l, name, len, 0, 0, (uint16_t)(F_DIR | F_VOLROOT | flags));
+    list_add(&dir_l, name, len, cluster, 0, (uint16_t)(F_DIR | F_VOLROOT | flags));
+}
+
+static void top_entry(const char *name, uint16_t flags)
+{
+    top_entry_at(name, 0, flags);
+}
+
+static int is_fav_top(const struct entry *e)    /* the top level's "Favourites" */
+{
+    return (e->flags & F_VOLROOT) && e->cluster == FAV_MARK;
 }
 
 int dir_load(const struct fat_dir *d)
 {
+    for (unsigned i = 0; i < sizeof title_cache / sizeof title_cache[0]; i++)
+        title_cache[i].index = UINT16_MAX;
+    title_cache_next = 0;
+    browser_mq.index = UINT16_MAX;
+    browser_mq.width = 0;
+    browser_mq.off = 0;
     uint32_t t0 = ticks();
     int r = 0;
     if (d->vol == VOL_TOP) {
         dir_l.n = dir_l.full = 0;
         dir_l.used = 0;
-        top_entry("Internal", 0);
-        if (sd_present())
-            top_entry(sd_bad ? "SD card (not readable)" : "SD card", F_SD);
+        char lb[80];
+        space_label(lb, ui_tr("Internal", "内部存储", "内蔵ストレージ"), FAT_VOL_INT);
+        top_entry(lb, 0);
+        if (sd_present()) {
+            if (!sd_bad)
+                sd_open();                      /* mounted, to know its size */
+            if (sd_bad)
+                top_entry(ui_tr("SD card (not readable)", "SD 卡（无法读取）", "SDカード（読み取り不可）"), F_SD);
+            else {
+                space_label(lb, ui_tr("SD card", "SD 卡", "SDカード"), FAT_VOL_SD);
+                top_entry(lb, F_SD);
+            }
+        }
+        char *fp = put_str(lb, ui_tr("Favourites", "收藏歌曲", "お気に入り"));
+        fp = put_str(fp, " (");
+        fp = put_dec(fp, (uint32_t)fav_count());
+        *fp++ = ')';
+        *fp = 0;
+        top_entry_at(lb, FAV_MARK, 0);
     } else {
         r = list_load(&dir_l, d);
         if (r < 0 && d->vol == FAT_VOL_SD) {    /* a read error: mounted again at the next */
@@ -242,6 +310,35 @@ void copy_name(char *d, const char *s, int max)
     d[i] = 0;
 }
 
+static const char *display_name(int i)
+{
+    const struct entry *e = ent(i);
+    const char *name = ent_name(i);
+    if (!cfg.list_title || (e->flags & F_DIR))
+        return name;
+    for (unsigned n = 0; n < TITLE_CACHE_N; n++)
+        if (title_cache[n].index == i)
+            return title_cache[n].title;
+
+    struct title_cache_entry *c = &title_cache[title_cache_next++ % TITLE_CACHE_N];
+    c->index = (uint16_t)i;
+    copy_name(c->title, name, sizeof c->title);  /* fallback when the tag has no title */
+    if ((e->flags & F_SD) && sd_open())
+        return c->title;
+    struct fat_file f = {
+        .vol = e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT,
+        .contig = (e->flags & F_CONTIG) != 0,
+        .cluster = e->cluster,
+        .size = e->size,
+    };
+    struct tags t;
+    fat_open(&f);
+    tags_read(&f, e->flags & F_CODEC, &t);
+    if (t.title[0])
+        copy_name(c->title, t.title, sizeof c->title);
+    return c->title;
+}
+
 int b_dirty = 1;
 static int b_sel = -1, b_top = -1, b_mark = -1;
 
@@ -262,18 +359,42 @@ static void draw_row(int r, int sel, int mark)
     if (i >= dir_n) {
         lcd_fill(0, y, LCD_W, 16, BG);
         if (!dir_n && !r)
-            lcd_text(8, y, "no folder or playable file here", DIM, BG);
+            lcd_text_clip(8, y, ui_tr("no folder or playable file here", "此处没有文件夹或可播放文件", "フォルダーまたは再生可能なファイルがありません"), LCD_W, DIM, BG);
         return;
     }
     const struct entry *e = ent(i);
     uint16_t bg = i == sel ? SEL_BG : BG;
     int dirent = e->flags & F_DIR;
-    /* a fixed column for the mark: » folder, ♪ the track that plays */
+    /* a fixed column for the mark: » folder, ♪ the track that plays, ♥ favourite */
     lcd_fill(0, y, 22, 16, bg);
-    if (dirent || i == mark)
+    if (is_fav_top(e))
+        lcd_glyph(5, y, 0x2665, FAV_FG, bg);
+    else if (dirent || i == mark)
         lcd_glyph(dirent ? 6 : 3, y, dirent ? 0xbb : 0x266a, dirent ? DIR_FG : TITLE_FG, bg);
-    lcd_text_clip(22, y, ent_name(i), list_text_end(dir_n, ROWS), dirent ? DIR_FG : e->size ? FG : DIM,
-                  bg);
+    else if (fav_find(e) >= 0)
+        lcd_glyph(5, y, 0x2665, FAV_FG, bg);
+    const char *name = display_name(i);
+    int xmax = list_text_end(dir_n, ROWS);
+    uint16_t fg = dirent ? DIR_FG : e->size ? FG : DIM;
+    if (i == sel && !dirent && e->size) {
+        if (browser_mq.index != i || browser_mq.top != path[depth].top || b_dirty) {
+            browser_mq.index = (uint16_t)i;
+            browser_mq.top = path[depth].top;
+            browser_mq.y = y;
+            browser_mq.xmax = xmax;
+            browser_mq.off = 0;
+            browser_mq.t = ticks();
+            copy_name(browser_mq.text, name, sizeof browser_mq.text);
+            browser_mq.width = lcd_text_width(browser_mq.text);
+            if (browser_mq.width <= xmax - 22)
+                browser_mq.width = 0;
+        }
+        if (browser_mq.off)
+            lcd_text_scroll(22, y, browser_mq.text, xmax, browser_mq.off, 24, 1, fg, bg);
+        else
+            lcd_text_clip(22, y, browser_mq.text, xmax, fg, bg);
+    } else
+        lcd_text_clip(22, y, name, xmax, fg, bg);
 }
 
 /* "selected/count" right-aligned on the first line */
@@ -289,6 +410,22 @@ static void draw_count(int sel)
         *p++ = '+';
     *p = 0;
     text_right(LCD_W - 70, LCD_W - 4, 0, b, DIM, BG);
+}
+
+void browser_marquee_tick(void)
+{
+    if (!browser_mq.width || browser_mq.index != path[depth].sel ||
+        browser_mq.top != path[depth].top)
+        return;
+    uint32_t now = ticks();
+    if (now - browser_mq.t < (browser_mq.off ? 33000u : 1000000u))
+        return;
+    browser_mq.off += browser_mq.off ? (int)((now - browser_mq.t) / 33000u) : 1;
+    browser_mq.t = now;
+    if (browser_mq.off >= browser_mq.width + 24)
+        browser_mq.off = 0;
+    lcd_text_scroll(22, browser_mq.y, browser_mq.text, browser_mq.xmax, browser_mq.off, 24, 1,
+                    FG, SEL_BG);
 }
 
 void draw_browser(void)
@@ -313,7 +450,7 @@ void draw_browser(void)
     }
     if (b_dirty) {                              /* every band once, nothing cleared first */
         lcd_fill(0, 0, 4, 16, BG);
-        lcd_text_clip(4, 0, depth ? path[depth].name : "Storage", LCD_W - 114, TITLE_FG, BG);
+        lcd_text_clip(4, 0, depth ? path[depth].name : ui_tr("Storage", "存储设备", "ストレージ"), LCD_W - 114, TITLE_FG, BG);
         draw_clock(LCD_W - 114, LCD_W - 70, 1);
         lcd_fill(LCD_W - 4, 0, 4, 16, BG);
         lcd_fill(0, 16, LCD_W, ROW_Y0 - 16, BG);
@@ -483,7 +620,15 @@ int browser_key(const struct key_ev *e)
         leave();
     else if (k == KEY_PLAY && dir_n) {
         int sel = path[depth].sel;
-        if ((ent(sel)->flags & F_DIR) && ev == EV_PRESS)
+        if (is_fav_top(ent(sel))) {
+            if (ev == EV_PRESS || ev == EV_LONG) {
+                b_dirty = 1;
+                if (fav_play_queue(ui_tr("Favourites", "收藏歌曲", "お気に入り"))) {
+                    play_index(0);
+                    return UI_FULL | UI_TO_PLAYING;
+                }
+            }
+        } else if ((ent(sel)->flags & F_DIR) && ev == EV_PRESS)
             enter(sel);
         else if (ent(sel)->flags & F_DIR) {
             char nm[64];                        /* held on a folder: all that is under it */
@@ -507,6 +652,11 @@ int browser_key(const struct key_ev *e)
             q_from_dir(sel);
             play_index(q_cur);
             return UI_FULL | UI_TO_PLAYING;
+        } else if (ev == EV_LONG) {
+            /* PLAY held on a file: toggle favourite */
+            if (fav_toggle(ent(sel), display_name(sel)) < 0)
+                play_failed(ent_name(sel), Q_ENOFAV);
+            b_dirty = 1;
         }
     }
     return UI_FULL;

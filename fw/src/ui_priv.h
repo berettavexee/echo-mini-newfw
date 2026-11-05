@@ -27,6 +27,7 @@
 #include "tags.h"
 #include "ui.h"
 
+#define FAV_FG   RGB(255, 70, 90)               /* the red heart */
 #define TITLE_FG RGB(255, 210, 90)
 #define DIR_FG   RGB(140, 200, 255)
 #define BAR_FG   RGB(90, 160, 255)
@@ -93,6 +94,7 @@ int sd_watch(void);                             /* the detect switch: 1 redraw, 
 #define ROW_Y0 18
 extern int b_dirty;                             /* the browser page must be drawn again */
 void draw_browser(void);
+void browser_marquee_tick(void);
 int browser_key(const struct key_ev *e);
 
 /* ---- queue.c ---- */
@@ -109,11 +111,24 @@ void q_shuffle_new(int from);                   /* another shuffled order, from 
 void q_from_dir(int start);
 void q_from_tree(const struct fat_dir *top, const char *name);
 void q_clear(void);
+/* A queue of listed tracks (favourites, playlists): begin, add each, end (returns the count) */
+#define Q_LIST_MAX 256
+void q_list_begin(const char *title);
+void q_list_add(const struct entry *e, const char *name);
+int q_list_end(void);
 int q_on_sd(void);                              /* the queue is on the card */
 /* Track i: its entry and name (read again from its folder when needed; 0 / "" if unreadable) */
 const struct entry *q_ent(int i);
 const char *q_name(int i);
 void q_set_codec(int i, uint32_t codec);
+
+/* ---- fav.c ---- */
+#define FAV_MARK 0xfffffff0u                    /* entry.cluster of the favourites at the top level */
+void fav_load(void);
+int fav_find(const struct entry *e);            /* its slot, or -1: not a favourite */
+int fav_toggle(const struct entry *e, const char *name);
+int fav_count(void);                            /* those of the internal volume and of the card in */
+int fav_play_queue(const char *title);
 
 /* ---- playback.c ---- */
 extern struct tags tg;                          /* of the track heard */
@@ -130,6 +145,7 @@ enum { STOP_NOW, STOP_SKIP, STOP_DRAIN };
 void play_stop(int how);
 void play_index(int i);
 void play_step(int i, int step);
+#define Q_ENOFAV (-61)                          /* a heart that cannot be kept (full, or no log file) */
 #define Q_EEMPTY (-60)                          /* an empty file (0 bytes) */
 extern char fail_name[64];                      /* nothing could be played: the banner */
 extern int fail_code, fail_due;
@@ -174,8 +190,13 @@ struct settings {
     uint8_t swap_vol;                           /* VOL+ and VOL- swapped (the volume) */
     int8_t rg_pre;                              /* ReplayGain preamp, dB */
     uint8_t uac_vol;                            /* USB sound card's volume + 1, 0: the playback's */
+    uint8_t language;                           /* 0: English, 1: Simplified Chinese, 2: Japanese */
+    uint8_t list_title;                         /* browser: show the tag title instead of filename */
+    uint8_t show_clock;                         /* the time at the top right of the screens */
+    uint8_t long_vol;                           /* hold VOL+ / VOL- to skip tracks */
 };
 extern struct settings cfg;
+const char *ui_tr(const char *en, const char *zh, const char *ja);
 extern uint32_t sleep_at;                       /* the sleep timer ends (millis), 0: off */
 uint32_t screen_timeout_us(void);               /* 0xffffffff: never */
 uint32_t auto_off_ms(void);                     /* 0: never */

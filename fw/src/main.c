@@ -168,7 +168,7 @@ static void draw_static(void)
     }
     *p = 0;
     sys_line(32, b, storage_err || volume_err || volume_dirty ? WARN : FG);
-    sys_line(154, "any key: back", DIM);
+    sys_line(154, ui_tr("any key: back", "按任意键返回", "任意のキーで戻る"), DIM);
 }
 
 static uint32_t draw_us;                        /* last status refresh that drew something */
@@ -265,7 +265,7 @@ void sys_idle(void)
             sys_t_power = now ? now : 1;
         else if (now - sys_t_power > 2000000) {
             sys_screen_set(1);
-            sys_line(122, "power off", WARN);
+            sys_line(122, ui_tr("power off", "正在关机", "電源オフ"), WARN);
             sys_power_off("Power 2 s");
             charge_screen(0);                   /* still powered: the USB cable is in */
         }
@@ -341,7 +341,7 @@ void sys_screen(void)
 
 void sys_loader_usb(void)
 {
-    sys_line(122, "USB loader mode (exit: RST)", WARN);
+    sys_line(122, ui_tr("USB loader mode (exit: RST)", "USB 引导模式（RST 退出）", "USBローダーモード（RSTで終了）"), WARN);
     log_printf("reboot to the loader USB mode (main menu)");
     log_flush();
     mdelay(1000);
@@ -362,8 +362,8 @@ static void battery_check_boot(void)
     if (sum / 8 >= 3350)
         return;
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    lcd_text_clip_x(8, 50, "Battery empty", LCD_W, WARN, BG, 2);
-    lcd_text(8, 100, "plug the USB cable", DIM, BG);
+    lcd_text_clip_x(8, 50, ui_tr("Battery empty", "电池耗尽", "バッテリー切れ"), LCD_W, WARN, BG, 2);
+    lcd_text_clip(8, 100, ui_tr("plug the USB cable", "请连接 USB 线", "USBケーブルを接続してください"), LCD_W, DIM, BG);
     mdelay(2000);
     log_printf("power off (battery empty at start), battery %u mV", sum / 8);
     log_flush();                                /* not sys_power_off(): nothing loaded yet, */
@@ -396,7 +396,7 @@ int main(void)
                pll_con1_after & 0xffff, mode_tries, adc_cycles_24m, adc_cycles);
     log_printf("clock: core %u Hz against the crystal (%u expected)", clock_measure(50), cpu_hz);
     lcd_init();
-    lcd_text(4, 0, "starting...", DIM, BG);
+    lcd_text(4, 0, ui_tr("starting...", "正在启动……", "起動中..."), DIM, BG);
     lcd_backlight(1);
     storage_init();
     font_init();
@@ -449,7 +449,7 @@ void fault_screen(const uint32_t *frame, uint32_t exc)
     p = put_hex(p, REG(0xe000ed38), 8);
     *p = 0;
     lcd_text(4, 44, b, FG, RGB(128, 0, 0));
-    lcd_text(4, 84, "any key: restart   Power 2 s: off", FG, RGB(128, 0, 0));
+    lcd_text_clip(4, 84, ui_tr("any key: restart   Power 2 s: off", "按任意键重启  长按电源键关机", "任意キーで再起動  電源2秒長押しで終了"), LCD_W, FG, RGB(128, 0, 0));
     lcd_backlight(1);
     /* no SysTick here: busy-wait on the ADC (about 20 us per read) */
     for (unsigned n = 0;;) {

@@ -18,6 +18,7 @@
 #endif
 
 char *put_str(char *p, const char *s);
+const char *ui_tr(const char *en, const char *zh, const char *ja);
 char *put_dec(char *p, uint32_t v);
 char *put_hex(char *p, uint32_t v, int digits);
 

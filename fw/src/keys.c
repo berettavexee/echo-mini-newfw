@@ -186,6 +186,11 @@ int key_held(void)
     return kp_key != KEY_NONE;
 }
 
+int key_current(void)
+{
+    return kp_key;
+}
+
 uint32_t key_held_us(void)
 {
     return ticks() - kp_t0;

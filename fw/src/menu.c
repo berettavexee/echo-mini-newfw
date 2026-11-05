@@ -2,10 +2,20 @@
 #include "ui_priv.h"
 
 /* ---- main menu ---- */
-static const char *const m_names[M_COUNT] = {
-    "Files", "Now playing", "Settings", "USB disk, read only", "USB disk, read/write",
-    "USB sound card", "Install a firmware (.IMG)", "System screen", "USB loader mode (exit: RST)",
-};
+static const char *menu_name(int i)
+{
+    switch (i) {
+    case M_FILES: return ui_tr("Files", "文件", "ファイル");
+    case M_PLAYING: return ui_tr("Now playing", "正在播放", "再生中");
+    case M_SETTINGS: return ui_tr("Settings", "设置", "設定");
+    case M_USB_RO: return ui_tr("USB disk, read only", "USB 磁盘（只读）", "USBディスク（読み取り専用）");
+    case M_USB_RW: return ui_tr("USB disk, read/write", "USB 磁盘（读写）", "USBディスク（読み書き）");
+    case M_USB_DAC: return ui_tr("USB sound card", "USB 声卡", "USB DAC");
+    case M_INSTALL: return ui_tr("Install a firmware (.IMG)", "安装固件（.IMG）", "ファームウェアをインストール（.IMG）");
+    case M_SYSTEM: return ui_tr("System screen", "系统信息", "システム情報");
+    default: return ui_tr("USB loader mode (exit: RST)", "USB 引导模式（RST 退出）", "USBローダーモード（RSTで終了）");
+    }
+}
 
 int main_menu(void)
 {
@@ -13,12 +23,12 @@ int main_menu(void)
     for (;;) {
         if (dirty) {                            /* ROWS of the M_COUNT entries: scrolled */
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text(4, 0, "Menu", TITLE_FG, BG);
+            lcd_text(4, 0, ui_tr("Menu", "菜单", "メニュー"), TITLE_FG, BG);
             for (int i = top; i < M_COUNT && i < top + ROWS; i++) {
                 uint16_t bg = i == sel ? SEL_BG : BG;
                 int y = ROW_Y0 + 16 * (i - top);
                 lcd_fill(0, y, LCD_W, 16, bg);
-                lcd_text_clip(12, y, m_names[i], list_text_end(M_COUNT, ROWS), FG, bg);
+                lcd_text_clip(12, y, menu_name(i), list_text_end(M_COUNT, ROWS), FG, bg);
             }
             list_scrollbar(ROW_Y0, ROWS, top, M_COUNT);
             dirty = 0;
@@ -52,7 +62,7 @@ void clock_screen(void)
     int ok = rtc_get(&t), f = 0, dirty = 1;
     if (ok < 0) {
         lcd_fill(0, 0, LCD_W, LCD_H, BG);
-        lcd_text(8, 60, "no clock found (I2C1, 0xA2)", WARN, BG);
+        lcd_text_clip(8, 60, ui_tr("no clock found (I2C1, 0xA2)", "未检测到时钟（I2C1, 0xA2）", "時計が見つかりません（I2C1, 0xA2）"), LCD_W, WARN, BG);
         mdelay(1500);
         return;
     }
@@ -66,7 +76,7 @@ void clock_screen(void)
             if (t.day > dmax)
                 t.day = (uint8_t)dmax;
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text(4, 0, "Date and time", TITLE_FG, BG);
+            lcd_text(4, 0, ui_tr("Date and time", "日期和时间", "日時"), TITLE_FG, BG);
             unsigned v[5] = { t.year, t.mon, t.day, t.hour, t.min };
             static const uint8_t wd[5] = { 4, 2, 2, 2, 2 };
             static const char *const sep[5] = { "-", "-", "  ", ":", "" };
@@ -85,10 +95,10 @@ void clock_screen(void)
                     x += w;
                 }
             }
-            lcd_text(4, 118, "VOL+/VOL-: change   PLAY: next, save", DIM, BG);
-            lcd_text(4, 136, "BACK: previous, cancel   MENU: cancel", DIM, BG);
+            lcd_text_clip(4, 118, ui_tr("VOL+/VOL-: change   PLAY: next, save", "音量键调整  播放键下一项/保存", "VOL+/-変更  PLAY次へ/保存"), LCD_W, DIM, BG);
+            lcd_text_clip(4, 136, ui_tr("BACK: previous, cancel   MENU: cancel", "返回键上一项/取消  菜单键取消", "BACK前へ/取消  MENU取消"), LCD_W, DIM, BG);
             if (!ok)
-                lcd_text(4, 154, "the clock had stopped: not set", WARN, BG);
+                lcd_text_clip(4, 154, ui_tr("the clock had stopped: not set", "时钟已停止：尚未设置", "時計が停止していました：未設定"), LCD_W, WARN, BG);
             dirty = 0;
         }
         sys_idle();
@@ -116,7 +126,7 @@ void clock_screen(void)
             if (++f == 5) {
                 int r = rtc_set(&t);
                 lcd_fill(0, 0, LCD_W, LCD_H, BG);
-                lcd_text(8, 60, r ? "the clock did not answer" : "clock set", r ? WARN : FG, BG);
+                lcd_text_clip(8, 60, r ? ui_tr("the clock did not answer", "时钟无响应", "時計が応答しません") : ui_tr("clock set", "时间已设置", "時刻を設定しました"), LCD_W, r ? WARN : FG, BG);
                 mdelay(800);
                 clock_min = -1;
                 return;

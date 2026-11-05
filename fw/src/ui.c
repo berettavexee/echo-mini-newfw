@@ -146,7 +146,7 @@ static void battery_off(uint32_t mv)
     }
     sys_screen_set(1);
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    lcd_text_clip_x(8, 50, "Battery empty", LCD_W, WARN, BG, 2);
+    lcd_text_clip_x(8, 50, ui_tr("Battery empty", "电池耗尽", "バッテリー切れ"), LCD_W, WARN, BG, 2);
     mdelay(2000);
     sys_power_off("battery empty");             /* the resume state: paused where it was */
 }                                               /* (returns when the USB cable powers us) */
@@ -225,9 +225,8 @@ static void draw_stats(int browser, int whole, uint32_t us)
 }
 
 /* MENU held: the main menu, then what was chosen in it */
-static void menu_open(int *scr)
+static void run_entry(int m, int *scr)
 {
-    int m = main_menu();
     if (m == M_FILES)
         *scr = SCR_BROWSER;
     else if (m == M_SETTINGS)
@@ -257,22 +256,31 @@ static void menu_open(int *scr)
     }
 }
 
+static void menu_open(int *scr)
+{
+    run_entry(main_menu(), scr);
+}
+
 void ui_main(void)
 {
     int scr = SCR_BROWSER, full = 1, quick = 0, drawn_cur = -2, drawn_playing = -1, was_off = 0;
     uint32_t drawn_gen = 0;
     int lvl_key = play_level;                   /* the volume before a VOL key: undone by a chord */
     uint32_t t_draw = 0, t_key = ticks(), t_save = millis(), key_ms = millis();
+    uint32_t t_space = 0;
     uint32_t banner_ms = 0;                     /* a banner is shown (low battery, cannot play) */
     depth = 0;
     fat_root(VOL_TOP, &path[0].dir);
     copy_name(path[0].name, "Storage", sizeof path[0].name);
     path[0].sel = path[0].top = 0;
+    fav_load();
     resume_load();
     if (!depth && !dir_n) {                     /* nothing saved: the internal volume */
         path_root(FAT_VOL_INT);
         dir_load(&path[1].dir);
     }
+    if (q_playing || parked)
+        scr = SCR_PLAYING;                      /* show a track restored at power-on */
     for (;;) {
         sys_idle();
         ui_background();
@@ -287,8 +295,8 @@ void ui_main(void)
             sys_screen_set(1);
             t_key = ticks();
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text_clip_x(8, 50, "Low battery", LCD_W, WARN, BG, 2);
-            lcd_text(8, 100, "plug the USB cable", DIM, BG);
+            lcd_text_clip_x(8, 50, ui_tr("Low battery", "电量低", "バッテリー残量低下"), LCD_W, WARN, BG, 2);
+            lcd_text_clip(8, 100, ui_tr("plug the USB cable", "请连接 USB 线", "USBケーブルを接続してください"), LCD_W, DIM, BG);
         }
         if (fail_due) {                         /* nothing could be played: why, 3 s, then the */
             fail_due = 0;                       /* browser */
@@ -298,7 +306,7 @@ void ui_main(void)
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
             const char *what, *hint;
             fail_text(fail_code, fail_why, &what, &hint);
-            lcd_text_clip_x(8, 20, "Cannot play", LCD_W, WARN, BG, 2);
+            lcd_text_clip_x(8, 20, ui_tr("Cannot play", "无法播放", "再生できません"), LCD_W, WARN, BG, 2);
             lcd_text_clip(8, 62, fail_name, LCD_W - 8, FG, BG);
             lcd_text_clip(8, 92, what, LCD_W - 8, FG, BG);
             lcd_text_clip(8, 118, hint, LCD_W - 8, DIM, BG);
@@ -307,6 +315,15 @@ void ui_main(void)
         if (banner_ms && millis() - banner_ms > 3000) {
             banner_ms = 0;
             full = b_dirty = 1;
+        }
+        if (millis() - t_space >= 5) {          /* the space in use of the volumes, in the background */
+            t_space = millis();
+            if (fat_space_poll() && !depth && !sk_on) {
+                dir_load(&path[0].dir);         /* the top level, with the figures now known */
+                if (path[0].sel >= dir_n)
+                    path[0].sel = 0;
+                b_dirty = full = 1;
+            }
         }
         int sw = sd_watch();
         if (sw)
@@ -328,8 +345,22 @@ void ui_main(void)
             lvl_key = play_level;
         struct key_ev e;
         int ev = key_poll(&e), k = e.key;
-        if (ev == EV_PLUG || ev == EV_UNPLUG)
-            ev = EV_NONE;                       /* logged (keys.c); no action yet */
+        if (ev == EV_UNPLUG && (k == SRC_JACK35 || k == SRC_JACK44)) {
+            if (q_playing && !audio_paused && audio.on) {
+                log_printf("ui: headphone unplugged; pausing");
+                audio_pause(1);
+                resume_save();
+            }
+            ev = EV_NONE;
+        } else if (ev == EV_PLUG && k == SRC_USB && key_current() == KEY_VOLUP) {
+            log_printf("ui: USB cable plugged with VOL+ held: USB disk, read/write");
+            run_entry(M_USB_RW, &scr);          /* the quick way to the computer (debugging) */
+            full = b_dirty = 1;
+            t_key = ticks();
+            key_ms = millis();
+            ev = EV_NONE;
+        } else if (ev == EV_PLUG)
+            ev = EV_NONE;                       /* logged (keys.c); no action */
         if (ev != EV_NONE) {
             t_key = ticks();
             key_ms = millis();
@@ -395,6 +426,8 @@ void ui_main(void)
                 full = quick = 0;
             } else if (scr == SCR_PLAYING)
                 marquee_tick();
+            else
+                browser_marquee_tick();
         }
         cpu_wait();                             /* until the next 1 ms tick */
     }
