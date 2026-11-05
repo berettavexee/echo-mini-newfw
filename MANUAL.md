@@ -310,6 +310,12 @@ Storage:
 3. Do not power off during the install. The battery must be above 3.6 V, or the USB cable in.
 4. The player restarts on the new firmware.
 
+**The settings and the resume state** are kept in `NEWFWLOG.TXT`, at the root of the internal
+memory, with the log; the firmware never creates files, so without it nothing is kept after a
+power off. Create it once from the computer: `python3 fw/tools/mklog.py /path/to/the/player`
+(1 MiB, in one piece; `--force` replaces an existing one, and so loses the settings and the
+resume state).
+
 **Keep a stock image** at the root of the internal memory, under a name that neither firmware
 installs by itself, for instance `STOCK39.IMG`. Avoid `HIFIECnn.IMG` and `ECHOMINI.IMG`. To go
 back to the stock firmware, install that image the same way.
