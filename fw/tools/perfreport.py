@@ -15,7 +15,7 @@ import re
 import subprocess
 import sys
 
-TRACK = re.compile(r"perf: (?P<name>.+?) \[(?P<fmt>[^\]]+)\]: gap max (?P<gap>\d+) ms \((?P<ph>.+?) (?P<phms>\d+) ms\), "
+TRACK = re.compile(r"perf: (?P<name>.+) \[(?P<fmt>[^][]+)\]: gap max (?P<gap>\d+) ms \((?P<ph>.+?) (?P<phms>\d+) ms\), "
                    r"loop gap max (?P<loop>\d+) ms \((?P<lph>.+?) (?P<lphms>\d+) ms\); "
                    r"(?:DAC ring never full|DAC min (?P<dac>\d+) ms; in min \d+ B \((?P<inms>\d+) ms\); "
                    r"out min \d+ B max \d+ B; in empty (?P<empty>\d+)(?:; laps lost (?P<laps>\d+))?)")
