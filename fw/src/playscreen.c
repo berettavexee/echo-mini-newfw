@@ -83,7 +83,7 @@ void draw_playing(int full)
     if (!q_playing && !q_n) {
         if (full) {
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text(8, 60, "nothing plays: PLAY on a file", DIM, BG);
+            lcd_text_clip(8, 60, ui_tr("nothing plays: PLAY on a file", "未在播放：选中文件后按播放键", "再生中の曲がありません：ファイルを選んでPLAY"), LCD_W, DIM, BG);
         }
         return;
     }
@@ -108,8 +108,17 @@ void draw_playing(int full)
         lcd_fill(0, 145, LCD_W, 5, BG);
     }
     /* status: playing / paused, position in the queue */
-    static const char *const modes[MODE_COUNT] = { "", "  repeat all", "  repeat one", "  shuffle" };
-    p = put_str(b, !q_playing ? (parked ? "paused" : "stopped") : audio_paused ? "paused" : "playing");
+    const char *const modes[MODE_COUNT] = {
+        "", ui_tr("  repeat all", "  全部循环", "  全曲リピート"),
+        ui_tr("  repeat one", "  单曲循环", "  1曲リピート"),
+        ui_tr("  shuffle", "  随机播放", "  シャッフル"),
+    };
+    const char *status = !q_playing ? (parked ? "paused" : "stopped") :
+                         audio_paused ? "paused" : "playing";
+    p = put_str(b, ui_tr(status, !q_playing ? (parked ? "已暂停" : "已停止") :
+                         audio_paused ? "已暂停" : "正在播放",
+                         !q_playing ? (parked ? "一時停止" : "停止中") :
+                         audio_paused ? "一時停止" : "再生中"));
     p = put_str(p, "  ");
     p = put_dec(p, (uint32_t)q_cur + 1);
     p = put_str(p, "/");
@@ -153,7 +162,7 @@ void draw_playing(int full)
         marquee_set(&mq[1], 102, tg.album[0] && !cfg.names ? tg.album : q_folder, DIR_FG);
     }
     if (sk_on) {                                /* the target, how far, what the keys do */
-        p = put_str(b, "go to ");
+        p = put_str(b, ui_tr("go to ", "跳转至 ", "移動 "));
         p = fmt_time(p, sk_ms);
         p = put_str(p, " / ");
         p = fmt_time(p, player_heard.length_ms);
@@ -161,7 +170,7 @@ void draw_playing(int full)
         p = fmt_time(p, sk_ms >= sk_from ? sk_ms - sk_from : sk_from - sk_ms);
         lcd_text_clip(4, 122, b, LCD_W, SK_FG, BG);
         seek_bar(140, 5, now_ms(), sk_ms, player_heard.length_ms);
-        lcd_text_clip(4, 150, "VOL+/- move  PLAY go  BACK cancel", LCD_W, DIM, BG);
+        lcd_text_clip(4, 150, ui_tr("VOL+/- move  PLAY go  BACK cancel", "音量键移动  播放键跳转  返回键取消", "VOL+/-移動  PLAY決定  BACK取消"), LCD_W, DIM, BG);
         return;
     }
     p = fmt_time(b, now_ms());
@@ -189,7 +198,7 @@ void draw_playing(int full)
     if (rg_mode != RG_MODE_OFF) {
         p = put_str(b, " RG ");
         if (rg_tag == RG_NONE)
-            p = put_str(p, "none");
+            p = put_str(p, ui_tr("none", "无", "なし"));
         else {
             unsigned a = (unsigned)(rg_steps < 0 ? -rg_steps : rg_steps);
             *p++ = rg_steps < 0 ? '-' : '+';

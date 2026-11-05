@@ -54,7 +54,7 @@ int clock_min = -1;
 void draw_clock(int x0, int x1, int force)
 {
     struct rtc_tm t;
-    int ok = rtc_get(&t) == 1, m = ok ? t.hour * 60 + t.min : -2;
+    int ok = rtc_get(&t) == 1 && cfg.show_clock, m = ok ? t.hour * 60 + t.min : -2;
     if (!force && m == clock_min)
         return;
     clock_min = m;

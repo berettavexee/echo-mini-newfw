@@ -58,22 +58,23 @@ static void usb_mode(int writable)
 
     sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    sys_line(0, writable ? "USB disk (read/write)" : "USB disk (read only)", writable ? WARN : TITLE);
+    sys_line(0, writable ? ui_tr("USB disk (read/write)", "USB 磁盘（读写）", "USBディスク（読み書き）") :
+             ui_tr("USB disk (read only)", "USB 磁盘（只读）", "USBディスク（読み取り専用）"), writable ? WARN : TITLE);
     if (storage_err || volume_err || emmc_sectors(&total) || total <= vol.base) {
-        sys_line(36, "internal volume not available", WARN);
+        sys_line(36, ui_tr("internal volume not available", "内部存储不可用", "内蔵ストレージを利用できません"), WARN);
         mdelay(2000);
         return;
     }
     if (!vbus()) {
-        sys_line(36, "plug the USB cable", WARN);
+        sys_line(36, ui_tr("plug the USB cable", "请连接 USB 线", "USBケーブルを接続してください"), WARN);
         mdelay(2000);
         return;
     }
-    sys_line(154, "BACK: exit (eject on the computer first)", DIM);
+    sys_line(154, ui_tr("BACK: exit (eject on the computer first)", "先在电脑上弹出，再按返回键退出", "PCで取り出してからBACKで終了"), DIM);
     if (writable)
-        sys_line(122, "eject on the computer before unplugging", WARN);
+        sys_line(122, ui_tr("eject on the computer before unplugging", "拔线前请先在电脑上弹出", "ケーブルを抜く前にPCで取り出してください"), WARN);
     if (msc_start(vol.base, total - vol.base, writable)) {
-        sys_line(36, "write fence refused: volume inside the system area", WARN);
+        sys_line(36, ui_tr("write fence refused: volume inside the system area", "已拒绝写入：卷位于系统区域内", "書き込み拒否：ボリュームがシステム領域内です"), WARN);
         log_printf("usb: write fence refused for %x + %u", vol.base, total - vol.base);
         mdelay(3000);
         return;

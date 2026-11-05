@@ -72,7 +72,8 @@ From top to bottom:
      on battery it only goes down (a pause lets the voltage rise a little: that is not shown),
      and while charging it stops at 99 % until the charger has finished. The battery turns red
      under 3.425 V.
-2. **The title**, or the file name when the file has no title tag.
+2. **The title**, or the file name when the file has no title tag. It uses two large lines when
+   it fits; longer names scroll in full across one large line after a short pause.
 3. **The artist and the album**, or the folder when the file has no album tag. They scroll when
    too long.
 4. **The time and the bar**.
@@ -94,6 +95,10 @@ From top to bottom:
 | **VOL+ held, then VOL-** | seek mode (below) |
 | **MENU** | to the folder browser; the music goes on |
 | **MENU held** | main menu |
+
+Unplugging either the **3.5 mm** or **4.4 mm** headphones pauses music playback. The queue and
+track position are kept; press **PLAY** to resume.
+
 
 A short press of VOL+ or VOL- changes the volume when the key is released. A chord that
 follows it therefore does not move the volume.
@@ -126,16 +131,19 @@ page), after a short silence: about 0.2 s (Vorbis) or 0.3 s (Opus).
 
 ## The folder browser
 
-The top level lists **Internal** (the internal memory) and **SD card** (the microSD card, when
-one is inserted). In a folder, the subfolders come first, then the playable files. Names are
+The top level lists **Internal** (the internal memory), **SD card** (the microSD card, when one
+is inserted), and **Favourites**. Favourites shows saved songs from internal storage and the
+currently inserted card. In a folder, the subfolders come first, then the playable files. Names are
 sorted in natural order, ignoring case, so "track 2" comes before "track 10". Empty files
 (0 bytes) are greyed and never played.
 
 ![Top level of the internal memory](docs/manual/browser-internal.png)
 ![A folder of the internal memory](docs/manual/browser-album.png)
 
-The number at the top right is the number of entries in the folder. Below, an empty file is
-greyed. While a track plays, the browser shows its progress bar at the bottom.
+The number at the top right is the number of entries in the folder. The top-level volume names
+show used/total capacity once background counting finishes. Below, an empty file is greyed. A
+selected file name or title that is too long scrolls after a short pause. A red heart marks saved
+songs. While a track plays, the browser shows its progress bar at the bottom.
 
 ![An empty file, greyed](docs/manual/browser-empty-file.png)
 
@@ -145,6 +153,7 @@ greyed. While a track plays, the browser shows its progress bar at the bottom.
 | **PLAY** on a folder | open it |
 | **PLAY held** on a folder | play everything under it, subfolders included, in order (also on "Internal" or "SD card") |
 | **PLAY** on a file | play the folder from this file, and go to the play screen |
+| **PLAY held** on a file | add or remove it from Favourites |
 | **BACK** | up one folder |
 | **MENU** | to the play screen |
 | **MENU held** | main menu |
@@ -172,7 +181,8 @@ is open, except for the USB and system entries, which stop it.
 | System screen | hardware state (battery, keys, plugs, clocks); any key returns |
 | USB loader mode (exit: RST) | restarts into the loader's USB mode, for recovery from a computer; leave it with the RST hole |
 
-**USB disk**: plug the cable, then choose the entry.
+**USB disk**: plug the cable, then choose the entry. To enter read/write mode directly, hold
+**VOL+** while plugging in the cable.
 - Leave with **BACK**, after ejecting the disk on the computer.
 - After a read/write session, the clock is set from the newest file the computer wrote, when
   the clock was not set or was behind that file.
@@ -214,16 +224,19 @@ power off (except the sleep timer).
 
 | Setting | Values | Default |
 |---|---|---|
-| Date and time | shows the date and time; PLAY opens the clock screen (below) | |
+| Date and time | shows the date and time; PLAY opens the clock screen (below), where the clock can also be shown or hidden | |
 | Screen off after | 10 s, 30 s, 1 min, 2 min, 5 min, never | 30 s |
 | Brightness | 10 steps: 8, 12, 17, 23, 30, 39, 50, 63, 80, 100 % (even steps to the eye) | 100 % |
-| Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder | tags |
+| Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder on the play screen | tags |
+| Hold VOL to skip | long VOL+ / VOL- moves to the next / previous track; a short press still changes volume | yes |
+| File list | **track title**: show the title tag in the browser; **file name**: show the file name. Missing title tags fall back to the file name | track title |
 | ReplayGain | **album**: the album gain, or the track gain when the file has no album gain; **track**: the track gain; **auto**: album, but track in shuffle; **off**: no gain. Limited by the peak tag, so that a track never clips | album |
 | ReplayGain preamp | -6 dB to +6 dB, added to the gain of tagged tracks (still limited by the peak) | 0 dB |
-| At power on | **resume playing**: the track plays again where it was; **resume paused**: the track waits there, PLAY on the play screen starts it; **browser**: only the folder is shown | resume playing |
+| At power on | **resume playing**: opens the play screen and resumes the track; **resume paused**: opens the play screen with the track paused, PLAY starts it; **browser**: only the folder is shown | resume playing |
 | Sleep timer | off, 15, 30, 45, 60, 90 min; shows the minutes left. At the end the music fades out over 5 s, pauses, and the player powers off (it resumes paused there) | off |
 | Power off when idle | 5, 10, 20, 30 min, never: nothing played and no key for that long (not with the USB cable) | 10 min |
 | Swap VOL+ and VOL- | the volume keys of the play screen swapped (lists and seek unchanged) | no |
+| Language | English, Simplified Chinese, Japanese | English |
 | Restore the defaults | PLAY puts back all the defaults above | |
 
 ### Date and time
@@ -236,7 +249,7 @@ Settings, first line, PLAY.
 | Key | Action |
 |---|---|
 | **VOL+** / **VOL-** | change the highlighted field |
-| **PLAY** | next field; on the last one (minutes), save |
+| **PLAY** | next field; on the last option, save |
 | **BACK** | previous field; on the first one (year), cancel |
 | **MENU** | cancel |
 

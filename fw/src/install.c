@@ -36,7 +36,11 @@ static int collect(const struct fat_file *f, void *ctx)
 
 static void progress(int stage, uint32_t done, uint32_t total)
 {
-    static const char *const what[] = { "checking CRC", "writing FW2", "writing FW1" };
+    const char *const what[] = {
+        ui_tr("checking CRC", "正在检查 CRC", "CRCを確認中"),
+        ui_tr("writing FW2", "正在写入 FW2", "FW2を書き込み中"),
+        ui_tr("writing FW1", "正在写入 FW1", "FW1を書き込み中"),
+    };
     char b[48], *p = put_str(b, what[stage]);
     p = put_str(p, " ");
     p = put_dec(p, (uint32_t)((uint64_t)done * 100 / total));
@@ -69,11 +73,11 @@ static void firmware_menu(void)
         fat_list_root(collect, &l);
     for (;;) {
         lcd_fill(0, 0, LCD_W, LCD_H, BG);
-        sys_line(0, "Install firmware (*.IMG, internal root)", TITLE);
+        sys_line(0, ui_tr("Install firmware (*.IMG, internal root)", "安装固件（*.IMG，内部存储根目录）", "ファームウェアをインストール（*.IMG、内蔵ストレージのルート）"), TITLE);
         if (storage_err || volume_err)
-            sys_line(32, "internal volume not available", WARN);
+            sys_line(32, ui_tr("internal volume not available", "内部存储不可用", "内蔵ストレージを利用できません"), WARN);
         else if (!l.n)
-            sys_line(32, "no .IMG file in the root folder", WARN);
+            sys_line(32, ui_tr("no .IMG file in the root folder", "根目录中没有 .IMG 文件", "ルートに.IMGファイルがありません"), WARN);
         if (l.n) {                              /* "selected/count" right-aligned */
             p = put_dec(b, (uint32_t)sel + 1);
             *p++ = '/';
@@ -93,7 +97,7 @@ static void firmware_menu(void)
             lcd_text_clip(4, y, b, list_text_end(l.n, IMG_ROWS), FG, bg);
         }
         list_scrollbar(18, IMG_ROWS, top, l.n);
-        sys_line(154, "VOL+/VOL-: choose  PLAY: check  BACK", DIM);
+        sys_line(154, ui_tr("VOL+/VOL-: choose  PLAY: check  BACK", "音量键选择  播放键检查  返回键退出", "VOL+/-選択  PLAY確認  BACK戻る"), DIM);
 
         int k;
         while (!(k = key_edge()))
@@ -116,7 +120,7 @@ static void firmware_menu(void)
                    r ? upd_error(r) : "valid");
         if (r) {
             sys_line(112, upd_error(r), WARN);
-            sys_line(154, "BACK: return", DIM);
+            sys_line(154, ui_tr("BACK: return", "返回键：返回", "BACK：戻る"), DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();
             continue;
@@ -128,17 +132,18 @@ static void firmware_menu(void)
         p = put_str(p, " MiB");
         *p = 0;
         sys_line(36, b, FG);
-        sys_line(54, info.two_copies ? "writes FW2, then FW1" : "too big for FW2: writes FW1 only", FG);
+        sys_line(54, info.two_copies ? ui_tr("writes FW2, then FW1", "依次写入 FW2 和 FW1", "FW2、続いてFW1に書き込み") :
+                 ui_tr("too big for FW2: writes FW1 only", "镜像过大：只写入 FW1", "FW2には大きすぎるためFW1のみ書き込み"), FG);
         unsigned mv = battery_mv();
         if (!vbus() && mv < 3600) {
-            sys_line(80, "battery too low: plug the USB cable", WARN);
-            sys_line(154, "BACK: return", DIM);
+            sys_line(80, ui_tr("battery too low: plug the USB cable", "电量过低：请连接 USB 线", "電池残量不足：USBケーブルを接続してください"), WARN);
+            sys_line(154, ui_tr("BACK: return", "返回键：返回", "BACK：戻る"), DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();
             continue;
         }
-        sys_line(80, "do not power off during the install", WARN);
-        sys_line(154, "PLAY: install   BACK: cancel", DIM);
+        sys_line(80, ui_tr("do not power off during the install", "安装期间请勿关机", "インストール中は電源を切らないでください"), WARN);
+        sys_line(154, ui_tr("PLAY: install   BACK: cancel", "播放键安装  返回键取消", "PLAYでインストール  BACKで取消"), DIM);
         while ((k = key_edge()) != KEY_PLAY && k != KEY_BACK)
             wdt_kick();
         if (k == KEY_BACK)
@@ -153,13 +158,13 @@ static void firmware_menu(void)
         log_flush();
         if (r) {
             sys_line(112, upd_error(r), WARN);
-            sys_line(130, "restart, then install again", WARN);
-            sys_line(154, "BACK: return", DIM);
+            sys_line(130, ui_tr("restart, then install again", "请重启后重新安装", "再起動してから再インストールしてください"), WARN);
+            sys_line(154, ui_tr("BACK: return", "返回键：返回", "BACK：戻る"), DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();
             continue;
         }
-        sys_line(112, "installed: restarting", TITLE);
+        sys_line(112, ui_tr("installed: restarting", "安装完成：正在重启", "インストール完了：再起動中"), TITLE);
         mdelay(1500);
         clock_fast_ok();                        /* this loop skips sys_idle(): a restart on */
         reboot();                               /* purpose is not a failed 200 MHz attempt */
