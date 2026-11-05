@@ -173,7 +173,9 @@ static int q_open(int i, int chain)
     f.size = e->size;
     fat_open(&f);
     uint32_t t0 = ticks();
+    const char *pp = perf_begin("tags");
     tags_read(&f, flags & F_CODEC, &tg_next);
+    perf_end(pp);
     log_printf("ui: tags in %u us: '%s' / '%s' / '%s' / %u", ticks() - t0, tg_next.title,
                tg_next.artist, tg_next.album, tg_next.track);
     int was_on = audio.on;

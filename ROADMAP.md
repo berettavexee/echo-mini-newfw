@@ -4,7 +4,7 @@ State of the ECHO MINI new firmware, kept up to date with each version. The deta
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
 Last update: 2026-11-05, version 0.99 and `main` since (the sound card's remote and Power key,
-the emulator's tests).
+the emulator's tests); the rework on its own branch (0.99r4, step 1).
 
 ## Done, validated on the device
 
@@ -51,6 +51,33 @@ the emulator's tests).
 | Decoders hardened against damaged files; a fuzzing bench (Ogg, Vorbis, Opus, MP3, AAC, MP4, tags, FAT) | 0.81-0.83, 0.91 | §62-§64 |
 | The chip's accelerators: FLAC LPC (HIFIACC), MP3 synthesis (SYNTH), Vorbis IMDCT (HIFIACC FFT), AAC IMDCT FFTs (HIFIACC), Musepack synthesis (SYNTH): 28 to 65 % less core B load | 0.85-0.93 | §66-§77 |
 | Automatic checks (`make check`, pre-commit hook, GitHub Actions); images reproducible byte for byte; emulator tests in the CI on a shareable test set (CC0 recording) | 0.91, 0.92, 0.99 | §94 |
+
+## The rework (branch `rework`)
+
+A rework of how the work is shared between the two cores (core B: the whole PCM path to the
+DMA; core A: one loop with a time budget, short interrupts), in seven steps, each one released
+and checked on the device before the next; `main` stays the working firmware meanwhile.
+
+1. **Measure** (in progress, 0.99r1-r4, ETUDE §97): the longest gap of the audio path and of
+   the main loops, with the operation behind it, the rings' lowest fill, the DAC ring laps a
+   long wait hides; `fw/tools/perfreport.py` makes the table, the emulator's `perf-*` scenarios
+   (`--cycles`) and device sessions fill it. Found so far, to take out of the audio path before
+   a small PCM ring: the screen waking (120 ms), the DACs starting (337 ms), the card mounting
+   (253 ms), the tags after a big Ogg cover (up to 1.4 s measured); at 24/192 the margin is
+   only 121 ms today. Left: a long device session on r4, the table in the rework document.
+2. One loop and a stack of screens.
+3. A storage task, deferred writes, the next track prepared in slices (tags_read cut).
+4. Core B writes the PCM ring (64 KiB), the input ring in SYSRAM.
+5. Records in the input ring (TRACK, DATA, END, SEEK); a seek never resets an index the other
+   core may publish (ReChord's crackle, ETUDE §98).
+6. Core B's clock.
+7. Robustness: a fault record (in sectors preallocated on the internal memory rather than in
+   PMU-SRAM only, ETUDE §98), core B reloaded after a fault, a stall watch.
+
+Ideas from the other projects for it (ETUDE §98): still screens not redrawn and the loop in WFI
+(EchoPod), the first frame drawn before the backlight (no 120 ms block), cold code built for
+size (Podium), a wired headset remote on the 3.5 mm mic contact (Podium; a feature, not part
+of the rework).
 
 ## Waiting for a test on the device
 

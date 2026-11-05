@@ -12,6 +12,7 @@ int main_menu(void)
     int sel = 0, top = 0, dirty = 1;
     for (;;) {
         if (dirty) {                            /* ROWS of the M_COUNT entries: scrolled */
+            const char *pp = perf_begin("menu draw");
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
             lcd_text(4, 0, "Menu", TITLE_FG, BG);
             for (int i = top; i < M_COUNT && i < top + ROWS; i++) {
@@ -22,6 +23,7 @@ int main_menu(void)
             }
             list_scrollbar(ROW_Y0, ROWS, top, M_COUNT);
             dirty = 0;
+            perf_end(pp);
         }
         sys_idle();
         ui_background();

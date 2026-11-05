@@ -77,7 +77,7 @@ void marquee_tick(void)
     }
 }
 
-void draw_playing(int full)
+static void draw_playing_do(int full)
 {
     char b[96], *p;
     if (!q_playing && !q_n) {
@@ -204,6 +204,13 @@ void draw_playing(int full)
     }
     if (x < LCD_W)
         lcd_fill(x, 150, LCD_W - x, 16, BG);
+}
+
+void draw_playing(int full)
+{
+    const char *pp = perf_begin("draw");
+    draw_playing_do(full);
+    perf_end(pp);
 }
 
 /* A key on the play screen: VOL+/VOL- volume, PLAY pause / play, PLAY held next track (stop past

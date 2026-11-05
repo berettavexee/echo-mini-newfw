@@ -79,7 +79,7 @@ DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §61, ac
 | `ROADMAP.md` | what is done, waiting for a test, to do, ideas, known limitations |
 | `fw/src/` | main-core firmware (C) |
 | `fw/hifi/` | HiFi-core runtime and codec glue |
-| `fw/tools/` | image builder, emulator (`emu_fw.py`, Unicorn), test disk and exFAT image builders, log reader |
+| `fw/tools/` | image builder, emulator (`emu_fw.py`, Unicorn) and its tests (`emutest.py`), test set builder (`mktestset.py`), test disk and exFAT image builders, log reader, latency report (`perfreport.py`) |
 | `fw/tools/fuzz/` | fuzzing bench for the decoders and file readers (ASan, UBSan, coverage-guided): see `docs/FUZZING.md` |
 | `docs/` | `FUZZING.md` (the fuzzing bench and its findings), `HIFIACC.md` (the RKNanoD audio accelerator: registers, sequence, pitfalls), `MP3ACC.md` (the SYNTH and Imdct36 MP3 accelerators), `CS43131.md` (the DACs: wiring, start-up sequence, the firmwares compared), `USB_AUDIO.md` (the USB sound card: profiles, feedback, limits, pitfalls, hosts tested), screenshots of the manual |
 | `fw/font/` | Fusion Pixel 12 px (SIL OFL 1.1) |

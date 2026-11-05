@@ -17,6 +17,8 @@
 #include "keys.h"
 #include "ui.h"
 #include "sys_priv.h"
+#include "perf.h"
+#include "player.h"
 
 extern uint32_t boot_regs[4], boot_tag;
 
@@ -228,6 +230,20 @@ static uint32_t sys_t_start, sys_t_bat, sys_t_power;
 static int sys_fast_cleared, sys_power_released, sys_screen_off;
 static uint32_t a_idle;                         /* TIMER1 ticks asleep in cpu_wait() */
 
+/* perf (ETUDE §97), without a track playing (player.c reports it then): the longest gap of the
+ * main loops over 10 s, when it reaches 50 ms */
+static void perf_idle_report(void)
+{
+    static uint32_t t;
+    if (player_is_open() || millis() - t < 10000)
+        return;
+    t = millis();
+    if (perf_loop.max >= 50000)
+        log_printf("perf: idle: loop gap max %u ms (%s %u ms) over 10 s", perf_loop.max / 1000,
+                   perf_loop.max_ph ? perf_loop.max_ph : "-", perf_loop.max_ph_us / 1000);
+    perf_restart(&perf_loop);
+}
+
 void sys_idle(void)
 {
     wdt_kick();
@@ -238,8 +254,12 @@ void sys_idle(void)
         clock_fast_ok();
         sys_fast_cleared = 1;
     }
+    perf_tick(&perf_loop);
+    const char *pp = perf_begin("log write");
     log_poll();
+    perf_end(pp);
     rtc_service();
+    perf_idle_report();
     if (millis() - sys_t_bat > 60000) {
         static uint32_t t_win, idle_win;
         struct rtc_tm t;
@@ -277,8 +297,16 @@ int sys_power_poll(uint32_t now, int mine)
             sys_power_key_off();
         }
     } else if (sys_t_power) {
-        if (now - sys_t_power > 30000)          /* a press, not a bounce */
+        if (now - sys_t_power > 30000) {        /* a press, not a bounce */
             sys_screen_set(sys_screen_off);
+#ifdef ECHO_STALL
+            /* test build (ETUDE §97): the loop held 500 ms, as a long operation would */
+            const char *pp = perf_begin("stall");
+            log_printf("stall: 500 ms");
+            mdelay(500);
+            perf_end(pp);
+#endif
+        }
         sys_t_power = 0;
     }
     return 0;
@@ -330,7 +358,9 @@ void sys_screen_set(int on)
             log_printf("screen: clocks back on the PLL, core %u Hz against the crystal (%u expected)",
                        clock_measure(50), cpu_hz);
         }
+        const char *pp = perf_begin("screen wake");  /* the panel's 120 ms out of sleep */
         lcd_sleep(0);
+        perf_end(pp);
         lcd_backlight(1);
     } else {
         lcd_backlight(0);

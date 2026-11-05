@@ -21,6 +21,7 @@
 #include "lcd.h"
 #include "log.h"
 #include "player.h"
+#include "perf.h"
 #include "rtc.h"
 #include "sd.h"
 #include "sys.h"

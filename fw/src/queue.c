@@ -280,7 +280,7 @@ static void qd_set(int f, const struct fat_dir *d, int level)
 }
 
 /* The playable files of the folder shown, from the one at 'start' (or the next playable) */
-void q_from_dir(int start)
+static void q_from_dir_do(int start)
 {
     uint32_t t0 = ticks();
     q_clear();
@@ -305,11 +305,18 @@ void q_from_dir(int start)
         q_shuffle_new(q_cur);                   /* the one chosen first, then the others */
 }
 
+void q_from_dir(int start)
+{
+    const char *pp = perf_begin("queue");
+    q_from_dir_do(start);
+    perf_end(pp);
+}
+
 /* PLAY held on a folder: everything under it, the files of each folder in order, then its
  * subfolders in order, depth first (Q_LEVELS levels, Q_DIRS folders with tracks). Each folder
  * listed is replaced in the table by its subfolders (inserted right after it, which gives the
  * depth-first order) and kept only when it has tracks. */
-void q_from_tree(const struct fat_dir *top, const char *name)
+static void q_from_tree_do(const struct fat_dir *top, const char *name)
 {
     uint32_t t0 = ticks();
     int lost = 0;
@@ -351,6 +358,13 @@ void q_from_tree(const struct fat_dir *top, const char *name)
         log_printf("ui: %d folders left out (%d at most)", lost, Q_DIRS);
     q_done(name, t0);
     q_cur = play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;     /* shuffle: from anywhere */
+}
+
+void q_from_tree(const struct fat_dir *top, const char *name)
+{
+    const char *pp = perf_begin("tree walk");
+    q_from_tree_do(top, name);
+    perf_end(pp);
 }
 
 /* ---- the resume state of a tree queue (resume.c) ---- */

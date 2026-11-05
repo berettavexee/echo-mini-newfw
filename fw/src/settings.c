@@ -271,6 +271,7 @@ void settings_screen(void)
     int sel = 0, top = 0, dirty = 1, page = 1;
     uint32_t shown = 0;                         /* live() shown */
     for (;;) {
+        const char *pp = perf_begin("settings draw");
         if (page) {
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
             lcd_text(4, 0, "Settings", TITLE_FG, BG);
@@ -290,6 +291,7 @@ void settings_screen(void)
             shown = live();
             dirty = 0;
         }
+        perf_end(pp);
         sys_idle();
         ui_background();
         struct key_ev e;

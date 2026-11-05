@@ -164,7 +164,7 @@ static void list_sort(struct listing *l)
 }
 
 /* A folder of a volume into l, sorted (folders first, then natural order): < 0 on a read error */
-int list_load(struct listing *l, const struct fat_dir *d)
+static int list_load_do(struct listing *l, const struct fat_dir *d)
 {
     l->n = l->full = 0;
     l->used = 0;
@@ -172,6 +172,14 @@ int list_load(struct listing *l, const struct fat_dir *d)
         return -1;
     int r = fat_list(d, collect, l);
     list_sort(l);
+    return r;
+}
+
+int list_load(struct listing *l, const struct fat_dir *d)
+{
+    const char *pp = perf_begin("folder");
+    int r = list_load_do(l, d);
+    perf_end(pp);
     return r;
 }
 
@@ -293,7 +301,7 @@ static void draw_count(int sel)
     text_right(LCD_W - 70, LCD_W - 4, 0, b, DIM, BG);
 }
 
-void draw_browser(void)
+static void draw_browser_do(void)
 {
     int sel = path[depth].sel, top = path[depth].top, mark = playing_index();
     if (!b_dirty && top == b_top) {
@@ -343,6 +351,13 @@ void draw_browser(void)
     b_dirty = 0;
 }
 
+void draw_browser(void)
+{
+    const char *pp = perf_begin("draw");
+    draw_browser_do();
+    perf_end(pp);
+}
+
 /* path[1]: the root of a volume */
 void path_root(int v)
 {
@@ -363,7 +378,7 @@ void sd_forget(void)
     sd.ready = 0;
 }
 
-int sd_open(void)
+static int sd_open_do(void)
 {
     if (sdvol.mounted)
         return 0;
@@ -385,6 +400,14 @@ int sd_open(void)
                (ticks() - t0) / 1000, sdvol.exfat ? "exFAT" : "FAT32", sd.sectors / 2048,
                sdvol.clusters, sdvol.spc);
     return 0;
+}
+
+int sd_open(void)
+{
+    const char *pp = perf_begin("card mount");
+    int r = sd_open_do();
+    perf_end(pp);
+    return r;
 }
 
 /* A folder of the card could not be read: the top level, "SD card (not responding)" ... */

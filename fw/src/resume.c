@@ -47,7 +47,7 @@ static uint32_t rs_sum(const struct resume *r)
     return s;
 }
 
-void resume_save(void)
+static void resume_save_do(void)
 {
     struct resume *r = (struct resume *)rs_buf;
     for (int i = 0; i < 128; i++)
@@ -77,6 +77,13 @@ void resume_save(void)
         return;                                 /* nothing changed: no write */
     rs_last_sum = sum;
     log_state_write(rs_buf);
+}
+
+void resume_save(void)
+{
+    const char *pp = perf_begin("resume save");
+    resume_save_do();
+    perf_end(pp);
 }
 
 void ui_power_off(void)

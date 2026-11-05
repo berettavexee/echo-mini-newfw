@@ -7,6 +7,7 @@
  * 256 fs from the ACODEC PLL; the CS43131 at 0x60 and 0x66 (8-bit addresses) are set up over
  * I2C0. */
 #include "audio.h"
+#include "perf.h"
 #include "board.h"
 #include "i2c.h"
 #include "log.h"
@@ -408,7 +409,16 @@ void audio_update(void)
 
     if (pos >= size || !audio.on)
         return;
-    audio.rd += (pos + size - audio.last_pos) % size;
+    uint32_t now = ticks(), dt = now - audio.t_upd;
+    audio.t_upd = now;
+    uint32_t moved = (pos + size - audio.last_pos) % size;
+    /* the position is known modulo the ring: a wait of more than a lap (the loop held longer
+     * than the ring lasts) hides whole laps; counted from the time (ETUDE §97), not corrected
+     * (the measures of step 1 change nothing) */
+    uint64_t played = (uint64_t)dt * audio.rate * audio.frame_bytes / 1000000;
+    if (played > size / 2 && played > moved)
+        audio.laps_lost += (uint32_t)((played - moved + size / 2) / size);
+    audio.rd += moved;
     audio.last_pos = pos;
     if (REG(I2S_INTSR) & 2) {                   /* TX underrun */
         audio.i2s_ur++;
@@ -583,7 +593,7 @@ void audio_volume(uint8_t vol, int ramp)
     audio.vol = vol;
 }
 
-int audio_start(uint32_t rate, int bits16)
+static int audio_start_do(uint32_t rate, int bits16)
 {
     bp.on = bp.mix = 0;
     audio.bits16 = bits16;
@@ -607,6 +617,7 @@ int audio_start(uint32_t rate, int bits16)
                REG(ACODEC + 0x210), REG(I2S_CKR), REG(I2S_TXCR));
     ring_setup();
     audio.rd = audio.last_pos = 0;
+    audio.t_upd = ticks();
     audio_paused = standby = 0;
     audio.wr = audio.ring_size - GUARD;         /* the zeroed ring: silence ahead */
     audio_reset_stats();
@@ -624,6 +635,14 @@ int audio_start(uint32_t rate, int bits16)
     audio.on = 1;
     meas_start();
     return audio.i2c_errors ? -1 : 0;
+}
+
+int audio_start(uint32_t rate, int bits16)
+{
+    const char *pp = perf_begin("dac start");
+    int r = audio_start_do(rate, bits16);
+    perf_end(pp);
+    return r;
 }
 
 static void dac_standby(int on);
@@ -649,7 +668,7 @@ void audio_stop(void)
  * and format, the DACs' rate index 0x01000b), muted around it; the ring restarts from its
  * zeroed start.
  * Returns 0, or -1 when the output is off (then audio_start is needed). */
-int audio_change_rate(uint32_t rate, int bits16)
+static int audio_change_rate_do(uint32_t rate, int bits16)
 {
     if (!audio.on)
         return -1;
@@ -675,6 +694,7 @@ int audio_change_rate(uint32_t rate, int bits16)
     for (uint32_t i = 0; i < 8192 / 4; i++)     /* the start only: the producer writes 1 KiB */
         ((volatile uint32_t *)audio.ring)[i] = 0;   /* ahead of the DMA, at once */
     audio.rd = audio.last_pos = 0;
+    audio.t_upd = ticks();
     audio.wr = audio.ring_size - GUARD;
     audio_reset_stats();
     dma_start();
@@ -694,6 +714,14 @@ int audio_change_rate(uint32_t rate, int bits16)
     read_status("int status 1", 0x0f0000);
     read_status("int status 2", 0x0f0001);
     return 0;
+}
+
+int audio_change_rate(uint32_t rate, int bits16)
+{
+    const char *pp = perf_begin("rate change");
+    int r = audio_change_rate_do(rate, bits16);
+    perf_end(pp);
+    return r;
 }
 
 /* Pause: the DACs muted, then the I2S stops asking for data, so the DMA waits where it is and

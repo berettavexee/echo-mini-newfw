@@ -25,6 +25,8 @@ struct audio_state {
     uint32_t ur_all, i2s_all, lost_all; /* the same since boot, never reset: per track by difference */
     int in_ur;
     int32_t min_fill;           /* lowest fill seen since the counters were reset, bytes */
+    uint32_t t_upd;             /* ticks() of the last audio_update: laps the DMA position hides */
+    uint32_t laps_lost;         /* whole ring laps found that way (since boot) */
 };
 
 extern struct audio_state audio;
