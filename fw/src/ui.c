@@ -49,27 +49,38 @@ static void power_service(uint32_t key_ms)
 
 /* The sleep timer (settings) ended: the music faded out over 5 s, paused, power off (paused
  * where it was at the next start) */
-static void sleep_service(void)
+/* The fade is a step of the main loop each pass (since 0.99r7, ETUDE §99), the keys ignored
+ * meanwhile as before; 1 while it runs */
+static struct { int on; uint32_t t0, v0, v; } fade;
+
+static int sleep_service(void)
 {
-    if (!sleep_at || (int32_t)(millis() - sleep_at) < 0)
-        return;
-    sleep_cancel();
-    log_printf("ui: sleep timer ended");
-    if (q_playing && !audio_paused && audio.on && audio.vol != 0xff) {
-        for (uint32_t t0 = millis(), v0 = audio.vol, v = v0; v < 0xfe;) {
-            sys_idle();
-            ui_background();
-            cpu_wait();
-            uint32_t t = millis() - t0 < 5000 ? millis() - t0 : 5000;
-            uint32_t want = v0 + (0xfe - v0) * t / 5000;
-            if (want > v)
-                audio_volume((uint8_t)(v = want), 0);
-        }
+    if (fade.on) {
+        uint32_t t = millis() - fade.t0 < 5000 ? millis() - fade.t0 : 5000;
+        uint32_t want = fade.v0 + (0xfe - fade.v0) * t / 5000;
+        if (want > fade.v)
+            audio_volume((uint8_t)(fade.v = want), 0);
+        if (fade.v < 0xfe && q_playing)
+            return 1;
+        fade.on = 0;
         audio_pause(1);
         rg_apply();                             /* the volume put back for PLAY */
         resume_save();
+        sys_power_off("sleep timer");           /* (returns when the USB cable powers us) */
+        return 0;
+    }
+    if (!sleep_at || (int32_t)(millis() - sleep_at) < 0)
+        return 0;
+    sleep_cancel();
+    log_printf("ui: sleep timer ended");
+    if (q_playing && !audio_paused && audio.on && audio.vol != 0xff) {
+        fade.on = 1;
+        fade.t0 = millis();
+        fade.v0 = fade.v = audio.vol;
+        return 1;
     }
     sys_power_off("sleep timer");               /* (returns when the USB cable powers us) */
+    return 0;
 }
 
 /* The battery shown (ETUDE §82): the mean of the last 64 readings, one a second (about a minute:
@@ -315,7 +326,7 @@ void ui_main(void)
         ui_background();
         audio_power_service();
         power_service(key_ms);
-        sleep_service();
+        int fading = sleep_service();
         int bat = battery_service();
         if (bat == BAT_REDRAW)
             full = b_dirty = 1;
@@ -367,8 +378,8 @@ void ui_main(void)
             lvl_key = play_level;
         struct key_ev e;
         int ev = key_poll(&e), k = e.key;
-        if (ev == EV_PLUG || ev == EV_UNPLUG)
-            ev = EV_NONE;                       /* logged (keys.c); no action yet */
+        if (ev == EV_PLUG || ev == EV_UNPLUG || fading)
+            ev = EV_NONE;                       /* logged (keys.c); no action yet; the fade */
         if (ev != EV_NONE) {
             t_key = ticks();
             key_ms = millis();

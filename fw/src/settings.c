@@ -224,7 +224,12 @@ static void change(int i, int d)
         break;
     case S_SLEEP:
         sleep_sel = step(sleep_sel, N(sleep_min), d);
+#ifdef ECHO_SLEEP_SECONDS
+        /* test build (the emulator's scenario sleep-fade): the minutes counted as seconds */
+        sleep_at = sleep_min[sleep_sel] ? millis() + sleep_min[sleep_sel] * 1000u : 0;
+#else
         sleep_at = sleep_min[sleep_sel] ? millis() + sleep_min[sleep_sel] * 60000u : 0;
+#endif
         if (sleep_at)
             sleep_at |= 1;                      /* never 0 when on */
         log_printf("ui: sleep timer %u min", sleep_min[sleep_sel]);
