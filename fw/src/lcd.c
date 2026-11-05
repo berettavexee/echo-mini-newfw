@@ -237,26 +237,27 @@ static int draw_glyph(int x, int y, const uint8_t *g, uint16_t fg, uint16_t bg, 
 }
 
 /* s scrolled left by 'off' pixels in [x, xmax): s, a gap of 'gap' pixels, s again */
-void lcd_text_scroll(int x, int y, const char *s, int xmax, int off, int gap, uint16_t fg,
-                     uint16_t bg)
+void lcd_text_scroll(int x, int y, const char *s, int xmax, int off, int gap, int sc,
+                     uint16_t fg, uint16_t bg)
 {
     int pos = x - off;
     for (int copy = 0; copy < 2 && pos < xmax; copy++) {
         for (const char *t = s; *t && pos < xmax;) {
             const uint8_t *g = font_glyph(utf8_next(&t));
-            if (pos + g[0] > x)
-                draw_glyph_cols(pos, y, g, fg, bg, 1, x, xmax);
-            pos += g[0];
+            int adv = g[0] * sc;
+            if (pos + adv > x)
+                draw_glyph_cols(pos, y, g, fg, bg, sc, x, xmax);
+            pos += adv;
         }
         if (!copy) {
             int a = pos > x ? pos : x, b = pos + gap < xmax ? pos + gap : xmax;
             if (b > a)
-                lcd_fill(a, y, b - a, FONT_LINE, bg);
+                lcd_fill(a, y, b - a, FONT_LINE * sc, bg);
             pos += gap;
         }
     }
     if (pos < xmax)
-        lcd_fill(pos > x ? pos : x, y, xmax - (pos > x ? pos : x), FONT_LINE, bg);
+        lcd_fill(pos > x ? pos : x, y, xmax - (pos > x ? pos : x), FONT_LINE * sc, bg);
 }
 
 int lcd_glyph(int x, int y, uint32_t cp, uint16_t fg, uint16_t bg)
