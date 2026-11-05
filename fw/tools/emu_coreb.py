@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath
 import emu_host                                                   # noqa: E402
 
 STOP = 0x0001FFF0
+CLOCK = 0x0309f000                      # emu_fw.py's clock: microseconds, in core A's SRAM
 
 
 class Shared:
@@ -70,7 +71,10 @@ class CoreB(emu_host.Hifi):
         mmio(0x01060000, 0x20000, self.acc.rd, self.acc.wr)
         self.irqs = []
         u.mem_map_ptr(0x03000000, 0xA0000, UC_PROT_ALL, sh.sram)  # core A SRAM, shared
-        u.mem_map(0x40000000, 0x110000)
+        u.mem_map(0x40000000, 0xe0000)
+        self.t1 = {"reads": 0, "regs": {}}
+        mmio(0x400e0000, 0x1000, self._t1rd, self._t1wr)          # TIMER0/1 (as core A sees)
+        u.mem_map(0x400e1000, 0x110000 - 0xe1000)
         mmio(0x40110000, 0x1000, self._rd, self._wr)
         u.mem_map(0x40111000, 0x400000 - 0x111000)
         u.mem_map(0x60000000, 0x50000)                              # DMAC1, IMDCT36, SDMMC, ...: RAM
@@ -92,6 +96,20 @@ class CoreB(emu_host.Hifi):
         # the delay helper waits on SysTick with the frequency of the parameter block; there is
         # no SysTick here, so it gets 0 (no delay), as in emu_host.py
         struct.pack_into("<2I", sh.hr1, 0x20, 0, 0)
+
+    def _t1rd(self, uc, off, size, _):
+        """TIMER1 (CURRENT_VALUE at 0x28 / 0x2c), counting down at 24 MHz from core A's clock
+        (CLOCK, in the shared SRAM): that clock stands still while core B runs, so each read
+        also moves it on by 0.5 us, for the waits with a timeout (HIFIACC, SYNTH, FFT)"""
+        if off in (0x28, 0x2c):
+            self.t1["reads"] += 1
+            now = struct.unpack_from("<I", self.sh.sram, CLOCK - 0x03000000)[0]
+            n = now * 24 + self.t1["reads"] * 12
+            return ~(n >> (32 if off == 0x2c else 0)) & 0xffffffff
+        return self.t1["regs"].get(off, 0)
+
+    def _t1wr(self, uc, off, size, val, _):
+        self.t1["regs"][off] = val
 
     def _rd(self, uc, off, size, _):
         return self.sh.get(off & 0xfc)

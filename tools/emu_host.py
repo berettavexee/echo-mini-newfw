@@ -297,7 +297,21 @@ class Accel:
             seen.add(llp)
             sar, dar, llp, ctl, ctlh = struct.unpack("<5I", self.u.mem_read(llp, 20))
             blk.append((sar, dar, ctl, ctlh))
+        # a chain that starts from its first LLI, also in the registers (newfw's hifiacc.c,
+        # ETUDE section 66): the controller loads that LLI first, so the block runs once
+        if len(blk) > 1 and blk[1] == blk[0] and r(b + 0x10, 0) == self._first_lli(b):
+            blk.pop(0)
         return blk
+
+    def _first_lli(self, b):
+        """The LLP register when it points at an LLI equal to the registers' block, else 0"""
+        r = self.reg.get
+        llp = r(b + 0x10, 0)
+        if not llp:
+            return 0
+        sar, dar, _, ctl, ctlh = struct.unpack("<5I", self.u.mem_read(llp, 20))
+        return llp if (sar, dar, ctl, ctlh) == (r(b, 0), r(b + 8, 0), r(b + 0x18, 0),
+                                                 r(b + 0x1c, 0)) else 0
 
     def _service_loop(self):
         if not hasattr(self, "queue"):

@@ -213,6 +213,21 @@ One line per version; the measurements are in `ETUDE.md`.
      the time of the first frame;
   8. a check that the ELF matches the image (wrong symbols otherwise);
   9. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
+- The shareable test set (`fw/tools/mktestset.py`, from `testdata/goldberg`, CC0): install the
+  Musepack encoder (`mpcenc`, Debian package `musepack-tools`) on the PC and in the CI, so that
+  the set has its MPC files too (skipped today). emutest `set-*` tests play each file of a
+  folder and check the tags and the format (local; `set-ci`, 13 files, in the CI). Found:
+  - tags.c, M4A: an ilst item it does not read (covr) is passed over without `skipped()`, so
+    the tags after a cover of more than 512 KiB are lost (`covers/aac-cover1m.m4a`);
+  - an Ogg file with a big cover: its whole comment header is read for the tags before the
+    track starts (9.3 s simulated for 8 MB of PNG); past 16 MiB (17 MB of PNG, 23 MB in
+    base64) tags.c gives up, core B gets no hint and its open times out (HIFI_ETIMEOUT): the
+    file does not play (`covers/vorbis-cover17m.ogg`, `opus-cover17m.opus`); to measure on
+    the device;
+  - the emulator (fixed): a FLAC file stopped on core B, waiting for HIFIACC. The DMA model
+    ran the first block of our LLI chain twice, and core B had no TIMER1, so the 30 ms
+    timeout (and the software fallback after 3) never came. Both modelled now; `play-flac`
+    checks a FLAC played to its end, its LPC subframes on HIFIACC.
   Missing everywhere: a simulated USB host (enumeration, isochronous packets, feedback), to test
   the sound card and the HID without the device.
 - Resume a queue made by PLAY held (a tree, the whole card) after a power off: today only a

@@ -9,6 +9,7 @@ appear in the log and the emulator's output (in that order) and the ones that mu
 optional second boot on the disk the first run left, the image chosen as the stock loader does.
 Needs mtools, dosfstools and the unicorn module. The disks go to $TMPDIR and are deleted.
 """
+import json
 import math
 import os
 import re
@@ -22,6 +23,7 @@ TOOLS = os.path.dirname(os.path.abspath(__file__))
 EMU, MKDISK, READLOG, MKBAD = (os.path.join(TOOLS, n) for n in
                                ("emu_fw.py", "mkdisk.py", "readlog.py", "mkbadimg.py"))
 VOL_SECTOR = 0x81000
+GOLDBERG = os.path.join(TOOLS, "..", "..", "testdata", "goldberg", "variatio4-5s.flac")
 ALWAYS_FORBID = [r"EXCEPTION", r"!! WRITE OUTSIDE", r"(?i)hard ?fault"]
 
 
@@ -54,6 +56,10 @@ TESTS = {
     "play-wav": dict(files={"A.WAV": "wav"}, keys=keys((2000, "PLAY", 200)), ms=6500,
                      expect=[r"player: .*A\.WAV", r"player: format: 44100 Hz, 2 ch, 16 bits",
                              r"audio: running", r"player: finished"]),
+    "play-flac": dict(files={"A.FLAC": GOLDBERG}, keys=keys((2000, "PLAY", 200)), ms=20000,
+                      expect=[r"player: format: 96000 Hz, 2 ch, 24 bits",
+                              r"player: finished",
+                              r"hifiacc: .*: [1-9]\d* LPC subframes on HIFIACC, 0 in software"]),
     "install-ok": dict(files={"NEWDATE.IMG": "@NEWDATE.IMG"}, fw2=True,
                        keys=keys(*_INST, (14000, "PLAY")), ms=60000,
                        emu_args=["--expect-fw", "@NEWDATE.IMG"],
@@ -68,7 +74,135 @@ TESTS = {
 }
 
 
+MKSET = os.path.join(TOOLS, "mktestset.py")
+SET_GROUPS = ("formats", "tags", "id3", "containers", "covers")
+for _g in SET_GROUPS:                           # the test set (mktestset.py), one folder a test
+    TESTS[f"set-{_g}"] = dict(set=_g)
+SET_SECONDS = 3                                 # the files of a set made here (mktestset.py)
+# the CI's share of the set: each format once (with Unicode tags in each container), the high
+# rates, and the cover skip past the 512 KiB window (M4A: a small one, tags.c loses the tags
+# after a big covr, ROADMAP)
+TESTS["set-ci"] = dict(set="tags,formats,covers", pick=[
+    "tags/wav-unicode.wav", "tags/aiff-unicode.aiff", "tags/flac-unicode.flac",
+    "tags/mp3-unicode.mp3", "tags/vorbis-unicode.ogg", "tags/opus-unicode.opus",
+    "tags/aac-unicode.m4a", "formats/alac-24-96000.m4a", "formats/flac-24-192000.flac",
+    "covers/flac-cover1m.flac", "covers/mp3-cover1m.mp3", "covers/opus-cover1m.opus",
+    "covers/aac-coverjpg600.m4a"])
+FIELD_MAX = dict(title=96, artist=128, album=128)    # struct tags (tags.h), with the 0
+
+
+def shown(s, field):
+    """What tags.c keeps of s: whole UTF-8 characters within the field, trailing spaces off"""
+    out, n = "", 0
+    for c in s or "":
+        k = len(c.encode())
+        if n + k > FIELD_MAX[field] - 1:
+            break
+        out, n = out + c, n + k
+    return out.rstrip(" ")
+
+
+def open_ms(m):
+    """The time given to a file before PLAY held moves on: 1.5 s, more for a big Ogg (its
+    whole comment header, cover art included, read through for the tags: ~0.9 s a MB in the
+    emulator); the files last longer than that (SET_SECONDS), so the queue never moves on
+    by itself"""
+    mb = m["size"] / 1e6
+    return 1500 + int(mb * (900 if m["codec"] in ("vorbis", "opus") else 100))
+
+
+def run_set(group, t, img, elf, tmp):
+    """Every file of one folder of the test set played in turn (PLAY on the first, then PLAY
+    held for each next one, open_ms() apart); each
+    'ui: tags' line checked against the manifest, the format too (PCM, FLAC, ALAC: rate and
+    bits; the others: the rate). EMUTEST_SET: a set already made, else one is made here."""
+    src = os.environ.get("EMUTEST_SET")
+    if not src:
+        src = os.path.join(tmp, "set")
+        subprocess.run([sys.executable, MKSET, src, "--only", group, "--seconds",
+                        str(t.get("seconds", SET_SECONDS))], check=True, stdout=subprocess.DEVNULL)
+    man = [m for m in json.load(open(os.path.join(src, "manifest.json")))
+           if m["file"] in t["pick"]] if "pick" in t else \
+        [m for m in json.load(open(os.path.join(src, "manifest.json")))
+         if m["file"].startswith(group + "/")]
+    lost = sorted(set(t.get("pick", [])) - {m["file"] for m in man})
+    if lost:
+        return [f"not in the set: {', '.join(lost)}"], ""
+    disk, dump = os.path.join(tmp, "disk.img"), os.path.join(tmp, "after.img")
+    log0 = os.path.join(tmp, "NEWFWLOG.TXT")
+    open(log0, "wb").write(bytes(256 * 1024))
+    files = [f"{log0}=NEWFWLOG.TXT"]
+    names = {}
+    for i, m in enumerate(man):                 # numbered: before NEWFWLOG.TXT, in this order
+        n = f"{i:03d}-{os.path.basename(m['file'])}"
+        names[n] = m
+        files.append(f"{os.path.join(src, m['file'])}={n}")
+    total = sum(m["size"] for m in man) >> 20
+    subprocess.run([sys.executable, MKDISK, disk, img, "--synth-idb", "--size-mb",
+                    str(max(300, total * 2 + 64))] + files, check=True, stdout=subprocess.DEVNULL)
+    ks, at = [(2000, "PLAY", 200)], 2000
+    for m in man[:-1]:                          # PLAY held: the next file, once this one plays
+        at += open_ms(m)
+        ks.append((at, "PLAY", 800))
+    ms = at + open_ms(man[-1]) + 6000           # the log is written every 5 s
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--keys",
+                          keys(*ks), "--ms", str(ms), "--steps", "300000000000", "--dump-disk",
+                          dump], capture_output=True, text=True)
+    text = read_log(dump) if os.path.exists(dump) else ""
+    fails = [] if text else [f"no log (emulator: {out.stderr.strip()[-300:]!r})"]
+    seen, tags, fmt = set(), None, None
+    for line in text.splitlines():
+        if "ui: tags in " in line:
+            tags, fmt = line, None
+        elif "player: format: " in line:
+            fmt = line
+        mq = re.search(r"ui: queue \d+/\d+: (\S+) \((-?\d+)\)", line)
+        if not mq or mq.group(1) not in names or mq.group(1) in seen:
+            continue
+        m = names[mq.group(1)]
+        seen.add(mq.group(1))
+        what = f"{m['file']}: "
+        if mq.group(2) != "0":
+            fails.append(what + f"not opened ({mq.group(2)})")
+            continue
+        if m["expect"] != "any":
+            tg = m["tags"] if m["expect"] == "tags" else {}
+            track = int((tg.get("track") or "0").split("/")[0])
+            want = "'{}' / '{}' / '{}' / {}".format(*(shown(tg.get(k), k) for k in FIELD_MAX),
+                                                     track)
+            got = (tags or "").split(" us: ", 1)[-1]
+            cut = got.rstrip("\ufffd")             # a log line holds 255 bytes (log.c)
+            if got != want and not (len((tags or "").encode()) >= 240 and want.startswith(cut)):
+                fails.append(what + f"tags {got!r}, expected {want!r}")
+        mf = re.search(r"format: (\d+) Hz, (\d+) ch, (\d+) bits", fmt or "")
+        if not mf:
+            fails.append(what + "no format line")
+        elif int(mf.group(1)) != m["rate"] or int(mf.group(2)) != m["channels"] or (
+                m["codec"] in ("wav", "aiff", "flac", "alac") and int(mf.group(3)) != m["bits"]):
+            fails.append(what + f"format {mf.group(0)}, expected {m['rate']} Hz, "
+                         f"{m['channels']} ch, {m['bits']} bits")
+    for n, m in names.items():
+        if n not in seen:
+            fails.append(f"{m['file']}: never played")
+    for pat in ALWAYS_FORBID:
+        mm = re.search(pat, text + "\n" + out.stdout, re.M)
+        if mm:
+            fails.append(f"forbidden: {pat}")
+    return fails, text + "\n" + out.stdout
+
+
+def read_log(dump):
+    with open(dump, "rb") as f:
+        f.seek(VOL_SECTOR * 512 + 446 + 8)
+        off = (VOL_SECTOR + struct.unpack("<I", f.read(4))[0]) * 512
+    raw = dump + ".log"
+    subprocess.run(["mcopy", "-o", "-i", f"{dump}@@{off}", "::NEWFWLOG.TXT", raw], check=True)
+    return subprocess.run([sys.executable, READLOG, raw], capture_output=True, text=True).stdout
+
+
 def run(name, t, img, elf, tmp):
+    if "set" in t:
+        return run_set(t["set"], t, img, elf, tmp)
     disk, dump = os.path.join(tmp, "disk.img"), os.path.join(tmp, "after.img")
     log0 = os.path.join(tmp, "NEWFWLOG.TXT")
     open(log0, "wb").write(bytes(65536))
@@ -96,15 +230,7 @@ def run(name, t, img, elf, tmp):
             [sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--boot-disk", "--ms",
              str(t["reboot"]["ms"]), "--steps", "30000000000", "--dump-disk", dump],
             capture_output=True, text=True).stdout
-    text = ""
-    if os.path.exists(dump):
-        with open(dump, "rb") as f:
-            f.seek(VOL_SECTOR * 512 + 446 + 8)
-            off = (VOL_SECTOR + struct.unpack("<I", f.read(4))[0]) * 512
-        raw = os.path.join(tmp, "log.bin")
-        subprocess.run(["mcopy", "-o", "-i", f"{dump}@@{off}", "::NEWFWLOG.TXT", raw], check=True)
-        text = subprocess.run([sys.executable, READLOG, raw], capture_output=True,
-                              text=True).stdout
+    text = read_log(dump) if os.path.exists(dump) else ""
     whole = text + "\n" + out
     fails, pos = [], 0
     for pat in t.get("expect", []):

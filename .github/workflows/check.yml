@@ -38,11 +38,15 @@ jobs:
           grep '^wrote' build.log >> "$GITHUB_STEP_SUMMARY"
       - name: Emulator tests
         # the image under the Unicorn emulator, on a disk with a synthetic boot area and
-        # generated sounds (fw/tools/emutest.py; the longer installer tests run locally)
+        # generated sounds (fw/tools/emutest.py); set-ci: a share of the test set made from
+        # testdata/goldberg (fw/tools/mktestset.py), each format and container once and the
+        # cover skip; the whole set and the longer installer tests run locally
         run: |
-          apt-get install -qy --no-install-recommends mtools dosfstools
-          pip install -q unicorn==2.1.4 numpy==2.5.4
-          python3 fw/tools/emutest.py fw/build/HIFIEC70.IMG fw/build/fw.elf boot play-wav install-badcrc
+          apt-get install -qy --no-install-recommends mtools dosfstools sox flac lame \
+            vorbis-tools opus-tools ffmpeg
+          pip install -q unicorn==2.1.4 numpy==2.5.4 mutagen==1.47.0
+          python3 fw/tools/emutest.py fw/build/HIFIEC70.IMG fw/build/fw.elf boot play-wav play-flac \
+            install-badcrc set-ci
       - uses: actions/upload-artifact@v4
         with:
           name: HIFIEC70-${{ github.sha }}
