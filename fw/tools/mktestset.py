@@ -8,7 +8,7 @@ tag reader of the main core (tags.c) and the decoders of core B.
 Groups (one folder each in OUTDIR):
   formats/     each container and codec at several rates and depths, with the same plain tags
   tags/        the same tag sets (ascii, unicode, long, title only, none, ReplayGain) in each
-               format that carries tags
+               format that carries tags (Musepack: an APEv2 tag at the end)
   id3/         MP3: ID3v2.2, 2.3, 2.4, their text encodings, extended header,
                unsynchronisation, ID3v1 alone and as a fallback, big padding
   containers/  WAV: LIST INFO before / after the samples, an id3 chunk; AIFF: NAME/AUTH, an ID3
@@ -16,14 +16,14 @@ Groups (one folder each in OUTDIR):
   covers/      baseline JPEG pictures of 300x300, 600x600 and 1200x1200 (the usual ones), and PNG
                noise of 1 MB, 8 MB and 17 MB (past the 16 MiB tags.c reads at most; Ogg: 64 MiB), each
                put before the text tags, in FLAC (not 17 MB: a FLAC block holds less than
-               16 MiB), MP3, Ogg Vorbis, Opus and M4A
+               16 MiB), MP3, Ogg Vorbis, Opus, M4A and Musepack (APEv2 "Cover Art (Front)")
 
 OUTDIR/manifest.json lists each file with its format and the tags it holds ("expect": "tags"
 when tags.c should show them, "empty" when, by design, it should not, "any" when only the
 absence of a fault matters).
 Needs sox, flac, lame, oggenc, opusenc, ffmpeg and the mutagen module (Ogg and MP4 tags);
-mpcenc too for Musepack (skipped when missing). The tags of FLAC, MP3, WAV and AIFF are
-written here byte by byte, so that the order of the fields is ours.
+mpcenc too for Musepack SV8 (skipped when missing). The tags of FLAC, MP3, WAV, AIFF and
+Musepack (APEv2) are written here byte by byte, so that the order of the fields is ours.
 """
 import argparse
 import base64
@@ -333,7 +333,30 @@ FORMATS = [("wav", 44100, 16), ("wav", 96000, 24), ("wav", 192000, 24), ("aiff",
            ("mp3", 48000, 16), ("vorbis", 44100, 16), ("vorbis", 96000, 16), ("opus", 48000, 16),
            ("aac", 44100, 16), ("alac", 44100, 16), ("alac", 96000, 24), ("mpc", 44100, 16)]
 TAGGED = [("flac", 96000, 24), ("mp3", 44100, 16), ("vorbis", 44100, 16), ("opus", 48000, 16),
-          ("aac", 44100, 16), ("wav", 44100, 16), ("aiff", 44100, 16)]
+          ("aac", 44100, 16), ("wav", 44100, 16), ("aiff", 44100, 16), ("mpc", 44100, 16)]
+COVERED = [k for k in TAGGED if k[0] not in ("wav", "aiff")]   # the formats with cover art
+
+
+def apev2(t, pic=None):
+    """An APEv2 tag (version 2000), header and footer, for the end of the file: the cover art
+    item first (binary: a file name, 0, the picture), then the text items (UTF-8)"""
+    items = []
+    if pic:
+        items.append((b"Cover Art (Front)", b"cover." + pic[1].encode() + b"\0" + pic[0], 2))
+    names = dict(title=b"Title", artist=b"Artist", album=b"Album", track=b"Track")
+    items += [(names[k], v.encode(), 0) for k, v in t.items() if k in names]
+    items += [(k.encode(), v.encode(), 0) for k, v in t.get("rg", {}).items()]
+    body = b"".join(struct.pack("<II", len(v), fl) + k + b"\0" + v for k, v, fl in items)
+
+    def frame(flags):
+        return b"APETAGEX" + struct.pack("<IIII", 2000, len(body) + 32, len(items), flags) + \
+            bytes(8)
+    return frame(0xa0000000) + body + frame(0x80000000)  # has a header; is the header
+
+
+def mpc_tag(path, t, pic=None):
+    with open(path, "ab") as f:
+        f.write(apev2(t, pic))
 
 
 def carried(kind, t):
@@ -358,6 +381,8 @@ def tag(kind, path, t, pic=None, **kw):
         wav_tag(path, t, **kw)
     elif kind == "aiff":
         aiff_tag(path, t, **kw)
+    elif kind == "mpc":
+        mpc_tag(path, t, pic)
 
 
 def noise_png(side, seed):
@@ -422,10 +447,11 @@ def main():
                     print("mktestset: no mpcenc, Musepack skipped")
                     continue
                 add("formats", f"{kind}-{bits}-{rate}.{EXT[kind]}", kind, rate, bits,
-                    {} if kind == "mpc" else carried(kind, ASCII),
-                    expect="tags" if kind != "mpc" else "any")
+                    carried(kind, ASCII))
         if "tags" in groups:
             for kind, rate, bits in TAGGED:
+                if kind == "mpc" and not have("mpcenc"):
+                    continue
                 for name, t in TAGSETS.items():
                     t = carried(kind, LATIN1 if kind == "aiff" and name == "unicode" else t)
                     add("tags", f"{kind}-{name}.{EXT[kind]}", kind, rate, bits, t,
@@ -491,9 +517,11 @@ def main():
             for cname in COVERS:
                 pic = cover(tmp, cname)
                 big = len(pic[0]) > 16 * 1024 * 1024
-                for kind, rate, bits in TAGGED[:5]:
+                for kind, rate, bits in COVERED:
                     if kind == "flac" and len(pic[0]) >= 1 << 24:
                         continue                # a FLAC block holds less than 16 MiB
+                    if kind == "mpc" and not have("mpcenc"):
+                        continue
                     ogg = kind in ("vorbis", "opus")
                     add("covers", f"{kind}-cover{cname}.{EXT[kind]}", kind, rate, bits, ASCII,
                         pic=pic, expect="any" if big and not ogg else "tags",

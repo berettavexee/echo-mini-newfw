@@ -3849,3 +3849,29 @@ Limites : ces temps mêlent le stockage, le temps du cœur (qui tourne parfois s
 - Émulateur : `emutest.py uac-power` (démarrage par Power câble branché, entrée dans la carte son, appui court puis 2,5 s).
 - Sur l'appareil, en lecture (148 409 paquets, **0 perdu, 0 manque**) : appui court, écran éteint puis rallumé sans coupure ; 2 s : « uac: exit (Power 2 s) », extinction, écran de charge, redémarrage normal.
 - Remarque : le redessin de la ligne « MENU: remote on/off » bloque la boucle environ 13 ms (« longest loop gap » 12,6 ms contre 1,6 ms) ; sans effet sur le son (paquets reçus sous interruption, réserve de 10 ms stable).
+
+## 96. Tests sur l'appareil des points de l'émulateur, délais de l'émulateur comparés (image 99M, 2026-11-05)
+
+**Points validés sur l'appareil** (0.99m, qui contient tout le travail fait dans l'émulateur depuis la 0.99) :
+- **Reprise d'une file d'arbre** : toute la carte (exFAT, 244 016 Mio) en aléatoire par PLAY maintenu : **18 257 pistes dans 1 396 dossiers parcourues en 2,37 s** (2,37 à 2,57 s selon les fois ; 3,6 s simulées dans l'émulateur). Extinction, rallumage : carte montée en 253 ms, arbre reparcouru en 2,37 s, « resume: tree queue under SD card, track 806/18257 », la même piste reprise à sa position, 3,9 s après le démarrage ; la suivante est celle d'avant l'extinction.
+- **Étiquettes après une grosse pochette** (`Test_covers`, fichiers du jeu de test) : toutes lues (« Variatio 4 » / Kimiko Ishizaka / Open Goldberg Variations / 5) ; M4A 1 Mo et 8,7 Mo de pochette : 2 à 5 ms ; Ogg Vorbis 8,7 Mo : **690 ms**, 17,9 Mo : **1 420 ms** (environ 12,6 Mo/s, l'en-tête traversé jusqu'à 11,7 et 24,1 Mo). En file, cette lecture se fait pendant la fin de la piste précédente (piste suivante en attente avec 360 à 760 ms de son devant elle) : aucun blanc. Ouvert seul, un tel Ogg met donc environ 1,4 s avant le son.
+- **Messages explicites** : carte retirée puis remise, image `.IMG` tronquée (« Incomplete file / download or copy it again ») : conformes.
+
+**Délais de l'émulateur comparés à l'appareil** (journaux du jour ; émulateur sur l'image actuelle, `play-wav` et `install-ok`) :
+
+| Mesure | Appareil | Défaut | `--cycles` seul | `--cycles` + 100,20,500,90 | `--cycles` + 100,20,450,80 |
+|---|---|---|---|---|---|
+| Police prête au démarrage | 0,772 s | 1,060 s (+37 %) | 0,744 s (−4 %) | 0,826 s (+7 %) | 0,826 s (+7 %) |
+| Installation de 2 Mio | 1 444 ms (médiane de 9, 1 387 à 1 578) | 10 376 ms (×7) | 146 ms (×0,1) | 1 644 ms (+14 %) | **1 541 ms** (+7 %, dans la plage) |
+| Étiquettes, Ogg avec 8,7 Mo de pochette | 690 ms | 9,3 s (×13) | — | — | — |
+| Parcours de toute la carte (18 257 pistes) | 2,37 s | 3,6 s (×1,5) | — | — | — |
+
+Autres valeurs de l'appareil, pour de futurs réglages : changement de fréquence 7,88 ms (constant) ; montage de la carte exFAT 253 ms (15 ms quand elle reste alimentée) ; dessin complet du navigateur 12,9 ms (médiane), de l'écran de lecture 11,4 ms, partiel 3,95 ms ; dossier de 20 entrées 1 ms.
+
+**Conclusions** :
+- Le **mode par défaut** fait avancer le temps de 50 µs à chaque lecture de l'horloge, quel que soit le travail fait : les boucles de lecture du stockage, qui lisent souvent l'horloge, sortent 7 à 13 fois trop lentes. Il sert à vérifier le comportement, pas les durées ; les délais des tests (`open_ms`) en tiennent compte.
+- **`--cycles`** donne le bon temps de calcul (police à −4 %) ; avec **`--mmc-lat 100,20,450,80`**, l'installation tombe dans la plage de l'appareil. Ce réglage devient la valeur par défaut de `--mmc-lat` avec `--cycles` (`emu_fw.py`, `MMC_LAT` ; `0,0,0,0` pour s'en passer).
+- La **carte microSD** (`--sd-lat`) reste sans valeur par défaut : pour la régler sur le parcours de 2,37 s ou le montage de 253 ms, il faut une image de carte de cette taille (point 1 de l'émulateur dans la ROADMAP : volumes générés à la demande).
+- Les temps de dessin et de changement de fréquence n'ont pas été comparés : les courtes sessions de l'émulateur n'écrivent pas ces lignes.
+
+**Jeu de test : Musepack SV8.** `mktestset.py` produit 13 fichiers Musepack (`mpcenc` 1.30.1, paquet `musepack-tools`) : un dans `formats/`, les six jeux d'étiquettes dans `tags/`, six pochettes (JPEG 300, 600, 1200 px, PNG de 1, 8 et 17 Mo) dans `covers/`. L'étiquette APEv2 (version 2000, en-tête et pied) est écrite par le script, l'élément `Cover Art (Front)` (binaire : nom de fichier, 0, image) avant le texte ; vérifiée par mutagen. Émulateur : les 13 fichiers jouent avec les étiquettes attendues (17 Mo : au-delà des 16 Mio que lit `tags.c`, absence de faute seulement) ; `set-ci` en prend deux (`tags/mpc-unicode.mpc`, `covers/mpc-cover1m.mpc`) et la CI installe `musepack-tools`. Le SV7 (`mppenc`, hors paquet Debian) n'est pas dans le jeu : peu de fichiers SV7 circulent.

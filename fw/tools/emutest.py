@@ -125,15 +125,14 @@ SET_GROUPS = ("formats", "tags", "id3", "containers", "covers")
 for _g in SET_GROUPS:                           # the test set (mktestset.py), one folder a test
     TESTS[f"set-{_g}"] = dict(set=_g)
 SET_SECONDS = 3                                 # the files of a set made here (mktestset.py)
-# the CI's share of the set: each format once (with Unicode tags in each container), the high
-# rates, and the cover skip past the 512 KiB window (M4A: a small one, tags.c loses the tags
-# after a big covr, ROADMAP)
+# the CI's share of the set: each format once (with Unicode tags in each container, Musepack's
+# APEv2 included), the high rates, and the cover skip past the 512 KiB window (M4A: a small one)
 TESTS["set-ci"] = dict(set="tags,formats,covers", pick=[
     "tags/wav-unicode.wav", "tags/aiff-unicode.aiff", "tags/flac-unicode.flac",
     "tags/mp3-unicode.mp3", "tags/vorbis-unicode.ogg", "tags/opus-unicode.opus",
     "tags/aac-unicode.m4a", "formats/alac-24-96000.m4a", "formats/flac-24-192000.flac",
     "covers/flac-cover1m.flac", "covers/mp3-cover1m.mp3", "covers/opus-cover1m.opus",
-    "covers/aac-coverjpg600.m4a"])
+    "covers/aac-coverjpg600.m4a", "tags/mpc-unicode.mpc", "covers/mpc-cover1m.mpc"])
 FIELD_MAX = dict(title=96, artist=128, album=128)    # struct tags (tags.h), with the 0
 
 

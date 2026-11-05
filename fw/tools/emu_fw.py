@@ -31,7 +31,11 @@ millis() read it, busy waits cost instructions as on the device, core B runs 100
 microsecond while awake. TIMER1 (24 MHz) follows the same clock in both modes.
 --mmc-lat RC,RS,WC,WS and --sd-lat RC,RS,WC,WS (with --cycles): the eMMC / microSD answer
 after RC + RS x sectors us for a read, WC + WS x sectors us for a write (FIFO empty, data busy
-meanwhile), so that I/O-bound times show; ETUDE §94 gives the device's figures to compare.
+meanwhile), so that I/O-bound times show. With --cycles the eMMC takes 100,20,450,80 unless
+told otherwise (0,0,0,0: none), fitted on the device (ETUDE §96); the microSD card has no
+default yet (not measured). Without --cycles, the time (50 us a clock read) does not follow
+the work done: I/O-bound loops come out 7 to 13 times too slow, fine for behaviour, not for
+durations.
 --boot-disk: the image is not taken from IMG but from the disk, as the stock loader chooses it
 (ETUDE 2.2): FW1 when its RKnanoFW signature and its header copy at fw_end match, else FW2
 (no CRC); IMG then only names the ELF.
@@ -42,6 +46,11 @@ import sys
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_BLOCK
 from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
                                UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR)
+
+
+# --mmc-lat by default with --cycles: a 2 MiB install takes 1,541 ms, the device 1,387 to 1,578
+# (median 1,444); the font is ready at 0.826 s, the device 0.772 s (ETUDE §96)
+MMC_LAT = "100,20,450,80"
 
 
 def opt(flag, default):
@@ -478,8 +487,9 @@ def main():
     shots = sorted((int(t), f) for t, f in (x.split(":") for x in opt("--shots", "").split(",") if x))
     mmc = MMC(opt("--disk", None), log)
     clock_us = lambda: struct.unpack("<I", u.mem_read(CLOCK, 4))[0]  # noqa: E731
-    if opt("--mmc-lat", None):
-        mmc.now, mmc.lat = clock_us, [int(x) for x in opt("--mmc-lat", None).split(",")]
+    mmc_lat = opt("--mmc-lat", MMC_LAT if cycles else None)       # with --cycles: the device's
+    if mmc_lat:
+        mmc.now, mmc.lat = clock_us, [int(x) for x in mmc_lat.split(",")]
     if opt("--cut-after", None):
         mmc.cut, mmc.stop = int(opt("--cut-after", None)), u.emu_stop
     sdc = SDCard(opt("--sd", None), log) if opt("--sd", None) else None

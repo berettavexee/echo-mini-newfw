@@ -39,11 +39,12 @@ jobs:
       - name: Emulator tests
         # the image under the Unicorn emulator, on a disk with a synthetic boot area and
         # generated sounds (fw/tools/emutest.py); set-ci: a share of the test set made from
-        # testdata/goldberg (fw/tools/mktestset.py), each format and container once and the
-        # cover skip; the whole set and the longer installer tests run locally
+        # testdata/goldberg (fw/tools/mktestset.py), each format and container once (Musepack
+        # SV8 from mpcenc, its APEv2 tags written by the script) and the cover skip; the whole
+        # set and the longer installer tests run locally
         run: |
           apt-get install -qy --no-install-recommends mtools dosfstools sox flac lame \
-            vorbis-tools opus-tools ffmpeg
+            vorbis-tools opus-tools ffmpeg musepack-tools
           pip install -q unicorn==2.1.4 numpy==2.5.4 mutagen==1.47.0
           python3 fw/tools/emutest.py fw/build/HIFIEC70.IMG fw/build/fw.elf boot play-wav play-flac \
             install-badcrc set-ci

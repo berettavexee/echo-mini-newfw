@@ -26,6 +26,9 @@ the emulator's tests).
 | USB sound card at high speed: UAC2, 16, 24 and 32 bits, 44.1 to 96 kHz, bit-perfect (tested with Linux); UAC1 kept at full speed | 0.98 | §87 |
 | USB sound card: 176.4 and 192 kHz in every format (24/32-bit packets every 250 us); phones that ignore the feedback handled with evenly spread corrections; tested with a Pixel 6a and an iPhone | 0.99 | §90, §92, §93 |
 | Pop-free power-down of the DACs (CS43131 datasheet sequence) at the long pause and the stop | 0.99 | §91 |
+| Tags after a big cover: M4A over 512 KiB, Ogg comment headers up to 64 MiB (a 17.9 MB cover: tags in 1.4 s, read during the track before, no gap) | main (after 0.99) | §96 |
+| Plain error messages beyond playback: installer (incomplete, too large, damaged, battery), microSD card (not responding, needs FAT32 or exFAT), USB disk screen | main (after 0.99) | §96 |
+| A queue made by PLAY held (a tree, the whole card) resumes after a power off, same track, same shuffled order (18,257 tracks in 1,396 folders walked again in 2.4 s) | main (after 0.99) | §96 |
 | USB sound card as a headset remote (HID): PLAY play/pause, VOL+ or VOL- twice next or previous, MENU the remote on and off (kept); tested with VLC and YouTube on Linux | main (after 0.99) | §95 |
 | USB sound card: the Power key (screen off and on; held 2 s, the card left, then the power off) | main (after 0.99) | §95 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
@@ -55,23 +58,6 @@ the emulator's tests).
   battery and up on USB, never 100 % while charging (§82); to check: no jump when a track
   starts or the screen comes on, nothing odd when plugging and unplugging the cable. A first
   short session (full battery) showed no regression; a long one, half charged, is still needed.
-
-- Tags after a big cover (fixed in the emulator, `emutest.py set-covers`): M4A tags after a
-  cover over 512 KiB now read; an Ogg file with a cover over 16 MiB now opens (its comment
-  header crossed up to 64 MiB). On the device: the tags of `covers/aac-cover1m.m4a` and
-  `aac-cover8m.m4a`, and the time before `covers/vorbis-cover8m.ogg` and
-  `vorbis-cover17m.ogg` start playing (the `ui: tags in ... us` log line; 9.3 s simulated for
-  the 8 MB one, likely much less on the device).
-
-- Expressive messages beyond playback (emulator: `install-*` scenarios, `emutest.py sd-nofs`,
-  `sd-noreply`): the installer says what went wrong and what to do (incomplete file, image too
-  large, damaged image, unknown layout, battery level); the card "not responding" or "needs
-  FAT32 or exFAT"; the USB disk screen in plain words. On the device: a blank or exFAT-less
-  card, a card taken out and put back, a truncated .IMG.
-- A queue made by PLAY held (a tree, the whole card) resumes after a power off: the tree walked
-  again, the same track and the same shuffled order (emulator: `resume-tree`,
-  `resume-shuffle`). On the device: the whole card in shuffle, power off, power on (the time of
-  the walk at boot).
 
 ## Version history
 
@@ -168,15 +154,14 @@ One line per version; the measurements are in `ETUDE.md`.
   in a pocket or a bag (the combination, what stays active when locked and what the screen
   shows to be proposed and agreed first; the key events of keys.c make it a filter in one
   place).
-- Measure on the device a whole-tree queue on the card with a full library (some 18,000 tracks
-  in 1,400 folders: 3.6 s simulated in the emulator, which does not model the card's speed).
-- The test set: the Musepack encoder (`mpcenc`, Debian package `musepack-tools`) on the PC and
-  in the CI, so that the set has its MPC files too.
 - The emulator (`fw/tools/emu_fw.py`, `fw/tools/emutest.py`, `work/emu/scenarios.py`). Done
-  (§94): installer tests with power cuts, self-checking scenarios and a CI step (`boot`,
-  `play-wav`, `play-flac`, `install-badcrc`, `set-ci`), a clock from the instructions run
-  (`--cycles`) with TIMER1 on both cores, eMMC and microSD latency (`--mmc-lat`, `--sd-lat`),
-  the HIFIACC DMA chain. Ideas from the other projects' emulators (Podium, EchoPod, ReChord;
+  (§94, §96): installer tests with power cuts, self-checking scenarios and a CI step (`boot`,
+  `play-wav`, `play-flac`, `install-badcrc`, `set-ci`, Musepack SV8 in the test set), a clock
+  from the instructions run (`--cycles`) with TIMER1 on both cores, eMMC and microSD latency
+  (`--mmc-lat`, `--sd-lat`), the eMMC's fitted on the device and the default with `--cycles`
+  (an install within 7 %; the default mode's clock suits behaviour, not durations), the
+  HIFIACC DMA chain. To do: fit `--sd-lat` (the device walks 18,257 tracks on the card in
+  2.37 s, mounts it in 253 ms), which needs a card image of that size (1 below). Ideas from the other projects' emulators (Podium, EchoPod, ReChord;
   ideas only, their code is GPL-3), by usefulness:
   1. volumes generated on demand (a sparse disk whose files, valid FLAC frames, are made when
      read): libraries larger than the PC's RAM, cluster sizes (512 bytes), the files a Mac leaves
