@@ -59,6 +59,11 @@ the emulator's tests).
   starts or the screen comes on, nothing odd when plugging and unplugging the cable. A first
   short session (full battery) showed no regression; a long one, half charged, is still needed.
 
+- From pull requests #9 and #1 (CHEYAN): a track saved paused at position 0 now comes back
+  paused (it was lost; emulator: `emutest.py resume-paused-zero`), and a track resumed at
+  power on opens the play screen instead of the browser. On the device: "At power on: resume
+  paused", a track paused in its first two seconds, two power offs and ons.
+
 ## Version history
 
 One line per version; the measurements are in `ETUDE.md`.
