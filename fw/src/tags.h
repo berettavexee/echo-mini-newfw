@@ -16,7 +16,8 @@ struct tags {
 #define RG_NONE  (-32768)                      /* rg_gain: no tag */
 enum { RG_TRACK, RG_ALBUM };
 
-/* Reads the tags of f, a file of our codec 'codec' (hifi_proto.h) */
+/* Reads the tags of f, a file of our codec 'codec' (hifi_proto.h); not reentrant */
 void tags_read(const struct fat_file *f, uint32_t codec, struct tags *t);
+extern void (*tags_yield)(void);    /* called before each read when set (the storage task) */
 
 #endif

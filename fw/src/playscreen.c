@@ -230,7 +230,7 @@ int play_key(const struct key_ev *e)
     else if (k == KEY_PLAY && ev == EV_PRESS) {
         if (q_playing) {
             audio_pause(!audio_paused);
-            resume_save();
+            resume_save_later();
         }
         else if (q_n) {
             if (parked)
@@ -246,7 +246,7 @@ int play_key(const struct key_ev *e)
             parked = 0;                         /* PLAY plays the last track from its start */
             player_heard.time_ms = 0;
             log_printf("ui: end of the queue (next on the last track)");
-            resume_save();
+            resume_save_later();
         }
     } else if (k == KEY_BACK && ev == EV_PRESS) {
         if (q_n) {
@@ -262,7 +262,7 @@ int play_key(const struct key_ev *e)
         if (play_mode == MODE_SHUFFLE)
             q_shuffle_new(q_cur);
         rg_apply();                             /* auto: the album's, the track's in shuffle */
-        resume_save();
+        resume_save_later();
     }
     return UI_QUICK;                            /* the bands redrawn, not the title: a new track */
 }                                               /* sets a full drawing (ui_main) */

@@ -16,6 +16,7 @@ extern struct sd_card sd;
 
 int sd_present(void);           /* the card-detect switch (GPIO0_11, low: a card) */
 int sd_init(void);              /* 0, or EMMC_E* (mshc.h); logs what it finds */
+extern void (*sd_yield)(void);  /* called while the card wakes, when set (the storage task) */
 int sd_read(uint32_t sector, uint32_t count, void *buf);
 #ifdef SD_WALK
 void sd_test(void);             /* emulator test of the card (sdtest.c) */

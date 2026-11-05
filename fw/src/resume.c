@@ -79,11 +79,29 @@ static void resume_save_do(void)
     log_state_write(rs_buf);
 }
 
+static int rs_later;                            /* a save asked for the loop (below) */
+
 void resume_save(void)
 {
+    rs_later = 0;
     const char *pp = perf_begin("resume save");
     resume_save_do();
     perf_end(pp);
+}
+
+/* A save asked by a key or a track change is written by the main loop once the frame is drawn
+ * (rework step 3, ETUDE §100): the key shows at once; a power off writes it at once (rs_later
+ * above) */
+
+void resume_save_later(void)
+{
+    rs_later = 1;
+}
+
+void resume_flush(void)
+{
+    if (rs_later)
+        resume_save();
 }
 
 void ui_power_off(void)

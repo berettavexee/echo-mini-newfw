@@ -39,6 +39,7 @@ void player_drop_tail(void);
 /* Non-blocking form: open (load, open, start the output: up to ~0.4 s), then service from the
  * main loop (0 while the track plays, 1 at its end, < 0 on an error), then close */
 int player_open(const struct fat_file *file, uint32_t codec, int flags);
+int player_settled(void);       /* the open track plays, its DAC ring filled once */
 /* For the next player_open() only, Ogg: where the comment header ends (tags.h), 0: unknown */
 void player_ogg_hint(uint32_t page, uint32_t seg);
 /* For the next player_open() only: start at ms (0: at the start) */

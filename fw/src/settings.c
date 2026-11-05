@@ -338,7 +338,7 @@ static int settings_key(const struct key_ev *e)
         change(s_sel, ev == EV_PRESS ? 1 : -1);
         s_dirty = 1;
     } else if ((k == KEY_BACK || k == KEY_MENU) && ev == EV_PRESS) {
-        resume_save();
+        resume_save_later();
         return SCR_POP;
     }
     return SCR_STAY;

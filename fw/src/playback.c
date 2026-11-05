@@ -2,6 +2,7 @@
  * gapless from the main loop, skips and stops, the parked state of a long pause, the volume and
  * the seek on the bar. The screen and the resume state follow the track heard (heard_sync). */
 #include "ui_priv.h"
+#include "storage.h"
 
 /* ---- playback ---- */
 int play_level = 80;                            /* PCM_VOL: attenuation / 2 dB, start at -40 dB */
@@ -84,7 +85,7 @@ static void heard_sync(void)
     q_cur = q_dec;
     tg = tg_next;
     rg_apply();
-    resume_save();
+    resume_save_later();                        /* written by the loop, after the frame (§100) */
 }
 
 /* Why nothing could be played: shown by the main loop (a banner, then the browser) */
@@ -155,6 +156,49 @@ void fail_text(int code, uint32_t why, const char **what, const char **hint)
     }
 }
 
+/* ---- the next track prepared ahead (rework step 3, ETUDE §100): once the track playing has
+ * filled its DAC ring, the storage task opens the next one of the queue and reads its tags, a
+ * few ms each pass; q_open() then finds them ready (the 1.4 s of a 17.9 MB Ogg cover read
+ * meanwhile, no longer between the two tracks, while the DACs play the last second). Not "once
+ * its file is all read": a Musepack's APEv2 cover at the end of the file is never read. ---- */
+enum { PREP_NONE, PREP_RUNNING, PREP_READY };
+static struct {
+    int state, idx;
+    uint32_t codec, t0, ms;
+    struct fat_file f;
+    struct tags t;
+} prep;
+
+static void prep_job(void *arg)
+{
+    (void)arg;
+    tags_read(&prep.f, prep.codec, &prep.t);
+    prep.ms = (ticks() - prep.t0) / 1000;
+    prep.state = PREP_READY;
+}
+
+static void prep_next(void)
+{
+    if (prep.state != PREP_NONE || !player_settled() || storage_busy() || browser_walking())
+        return;                                 /* (the queue is being rebuilt by a walk) */
+    int n = q_next_index(q_dec, 0);
+    const struct entry *e = n >= 0 ? q_ent(n) : 0;
+    if (!e || !e->size || ((e->flags & F_SD) && !sdvol.mounted))
+        return;                                 /* (never a card mounted from here) */
+    copy_name(prep.f.name, q_name(n), sizeof prep.f.name);
+    prep.f.vol = e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT;
+    prep.f.contig = (e->flags & F_CONTIG) != 0;
+    prep.f.cluster = e->cluster;
+    prep.f.size = e->size;
+    fat_open(&prep.f);
+    prep.idx = n;
+    prep.codec = e->flags & F_CODEC;
+    prep.t0 = ticks();
+    prep.state = PREP_RUNNING;
+    if (storage_submit(prep_job, 0))
+        prep.state = PREP_NONE;
+}
+
 static int q_open(int i, int chain)
 {
     struct fat_file f;
@@ -174,10 +218,21 @@ static int q_open(int i, int chain)
     fat_open(&f);
     uint32_t t0 = ticks();
     const char *pp = perf_begin("tags");
-    tags_read(&f, flags & F_CODEC, &tg_next);
+    if (prep.state == PREP_RUNNING)
+        storage_drain();                        /* tags.c is not reentrant: the job ends first */
+    int ahead = prep.state == PREP_READY && prep.idx == i && prep.f.cluster == f.cluster &&
+                prep.f.size == f.size && prep.f.vol == f.vol;
+    if (ahead)
+        tg_next = prep.t;
+    else
+        tags_read(&f, flags & F_CODEC, &tg_next);
     perf_end(pp);
     log_printf("ui: tags in %u us: '%s' / '%s' / '%s' / %u", ticks() - t0, tg_next.title,
                tg_next.artist, tg_next.album, tg_next.track);
+    if (ahead)
+        log_printf("ui: tags read ahead, over %u ms of the track before; storage stack %u bytes "
+                   "never used", prep.ms, storage_stack_free());
+    prep.state = PREP_NONE;
     int was_on = audio.on;
     (void)chain;
     player_ogg_hint(tg_next.ogg_end_page, tg_next.ogg_end_seg);  /* core B skips the comment header */
@@ -283,8 +338,10 @@ void ui_background(void)
     }
     int r = player_service();
     heard_sync();
-    if (r == 0)
+    if (r == 0) {
+        prep_next();                            /* the next track's tags, once this one plays */
         return;
+    }
     if (r == 1 && audio_paused && play_mode == MODE_ORDER && q_dec + 1 >= q_n)
         return;                                 /* end of the queue in a pause: drained after it */
     player_close(0);                            /* end of the track (or an error) */
@@ -360,7 +417,7 @@ void seek_end(int go)
                parked ? " (parked)" : "");
     if (parked) {
         parked_ms = sk_ms;
-        resume_save();
+        resume_save_later();
         return;
     }
     player_seek_hint(sk_ms);

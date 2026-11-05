@@ -992,6 +992,11 @@ void player_close(int stopped)
     }
 }
 
+int player_settled(void)
+{
+    return ps.open && ps.full;
+}
+
 int player_is_open(void)
 {
     return ps.open;

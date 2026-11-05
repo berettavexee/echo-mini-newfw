@@ -2,6 +2,7 @@
  * sorted folders first then files in natural order, the path from the top, the card set up on
  * first use and followed by its detect switch, the browser screen and its keys. */
 #include "ui_priv.h"
+#include "storage.h"
 
 /* ---- names ---- */
 static int lower(int c)
@@ -140,7 +141,10 @@ static int collect(const struct fat_dirent *d, void *ctx)
                   (uint16_t)((d->attr & FAT_ATTR_DIR ? F_DIR : codec) |
                              (d->vol == FAT_VOL_SD ? F_SD : 0) | (d->contig ? F_CONTIG : 0))))
         return 0;
-    if (!(l->n & 31) && !l->quiet)
+    if (storage_in_task()) {
+        if (!(l->n & 7))
+            storage_yield();                    /* the loop serves the music, draws, meanwhile */
+    } else if (!(l->n & 31) && !l->quiet)
         ui_background();                        /* keep the music going while we read */
     return 0;
 }
@@ -318,9 +322,62 @@ static void draw_row(int r, int sel, int mark)
 }
 
 /* "selected/count" right-aligned on the first line */
+/* ---- a tree walk (PLAY held on a folder) in the storage task (rework step 3, ETUDE §100): the
+ * screen and the music go on; no folder is read by the loop meanwhile (fat.c keeps the folder
+ * being walked in a static buffer across the task's yields), so the browser's keys wait ---- */
+static struct {
+    struct fat_dir d;
+    char nm[64];
+    int state;                                  /* WALK_* */
+    uint32_t t0;
+} walk;
+enum { WALK_NONE, WALK_RUNNING, WALK_DONE, WALK_FAILED };
+
+static void walk_job(void *arg)
+{
+    (void)arg;
+    if (walk.d.vol == FAT_VOL_SD && sd_open()) {
+        walk.state = WALK_FAILED;
+        return;
+    }
+    q_from_tree(&walk.d, walk.nm);
+    walk.state = WALK_DONE;
+}
+
+int browser_walking(void)
+{
+    return walk.state == WALK_RUNNING;
+}
+
+int browser_walk_poll(void)
+{
+    if (walk.state == WALK_DONE) {
+        walk.state = WALK_NONE;
+        b_dirty = 1;
+        log_printf("ui: tree walk in the storage task: %u ms, the loop free meanwhile; storage "
+                   "stack %u bytes never used", (ticks() - walk.t0) / 1000, storage_stack_free());
+        if (q_n) {
+            play_index(0);
+            return UI_FULL | UI_TO_PLAYING;
+        }
+        return UI_FULL;
+    }
+    if (walk.state == WALK_FAILED) {
+        walk.state = WALK_NONE;
+        dir_load(&path[depth].dir);             /* "SD card (not responding)" ... */
+        b_dirty = 1;
+        return UI_FULL;
+    }
+    return 0;
+}
+
 static void draw_count(int sel)
 {
     char b[24], *p = b;
+    if (walk.state == WALK_RUNNING) {
+        text_right(LCD_W - 110, LCD_W - 4, 0, "reading...", DIM, BG);
+        return;
+    }
     if (dir_n) {
         p = put_dec(p, (uint32_t)sel + 1);
         *p++ = '/';
@@ -486,7 +543,7 @@ static void enter(int i)
     copy_name(path[depth].name, ent_name(i), sizeof path[depth].name);
     dir_load(&d);
     card_failed();
-    resume_save();
+    resume_save_later();
 }
 
 static void leave(void)
@@ -497,7 +554,7 @@ static void leave(void)
     dir_load(&path[depth].dir);
     card_failed();
     b_dirty = 1;
-    resume_save();
+    resume_save_later();
 }
 
 /* The card-detect switch, every 250 ms, a change taken after two equal reads. Removed: what
@@ -538,7 +595,7 @@ int sd_watch(void)
     if (path[depth].sel >= dir_n)
         path[depth].sel = path[depth].top = 0;
     b_dirty = 1;
-    resume_save();
+    resume_save_later();
     return 1 + stopped;
 }
 
@@ -568,14 +625,14 @@ int browser_key(const struct key_ev *e)
             struct fat_dir d;
             dir_of_entry(ent(sel), &d);
             b_dirty = 1;
-            if (d.vol != FAT_VOL_SD || !sd_open()) {
-                q_from_tree(&d, nm);
-                if (q_n) {
-                    play_index(0);
-                    return UI_FULL | UI_TO_PLAYING;
-                }
-            } else
-                dir_load(&path[depth].dir);     /* "SD card (not responding)" ... */
+            if (walk.state == WALK_NONE) {      /* in the storage task: the loop free meanwhile */
+                walk.d = d;
+                copy_name(walk.nm, nm, sizeof walk.nm);
+                walk.t0 = ticks();
+                walk.state = WALK_RUNNING;
+                if (storage_submit(walk_job, 0))
+                    walk.state = WALK_NONE;
+            }
         } else if (ev == EV_PRESS && !ent(sel)->size) {
             play_failed(ent_name(sel), Q_EEMPTY); /* empty (grey): not played, the queue kept */
         } else if (ev == EV_PRESS) {

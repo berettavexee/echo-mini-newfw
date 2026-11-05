@@ -53,6 +53,8 @@ static void host_setup(void)
     REG(B + MSHC_PWREN) = 1;
 }
 
+void (*sd_yield)(void);                         /* between two ACMD41 (the storage task), or 0 */
+
 int sd_init(void)
 {
     int r;
@@ -71,6 +73,8 @@ int sd_init(void)
         if ((r = acmd(41, (v2 ? 0x40000000u : 0) | 0x00ff8000u, R3)))
             goto fail;
         sd.ocr = REG(B + MSHC_RESP(0));
+        if (sd_yield && !(sd.ocr & 0x80000000u))
+            sd_yield();                         /* the card wakes (up to 200 ms): the loop runs */
         if (ticks() - t0 > 1000000) {
             r = EMMC_ETIMEOUT;
             goto fail;

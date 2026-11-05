@@ -112,6 +112,8 @@ void draw_browser(void);
 #define MQ_PAUSE 1500000u
 #define MQ_STEP  33000u
 void browser_marquee_tick(void);
+int browser_walking(void);                      /* a tree walk runs in the storage task */
+int browser_walk_poll(void);                    /* its end: UI_* (playing from its first track) */
 int browser_key(const struct key_ev *e);
 
 /* ---- queue.c ---- */
@@ -214,6 +216,8 @@ void settings_get(const uint32_t *w);           /* from it, when valid; then app
 
 /* ---- resume.c ---- */
 void resume_save(void);
+void resume_save_later(void);   /* the same, written by the loop after the frame */
+void resume_flush(void);        /* that save, now, if one is asked */
 void resume_load(void);
 
 /* ---- uidraw.c ---- */

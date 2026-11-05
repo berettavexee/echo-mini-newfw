@@ -4,6 +4,9 @@
  * MENU switches between the browser and now playing, MENU held opens the main menu. Playback
  * runs in the background: the main loop services the player between two key polls. */
 #include "ui_priv.h"
+#include "storage.h"
+
+#define STORAGE_BUDGET_US 4000                  /* the storage task per pass of the loop */
 
 /* ---- the loop ---- */
 enum { SCR_BROWSER, SCR_PLAYING };
@@ -263,6 +266,8 @@ static void menu_action(int m, int *scr)
     else if (m == M_PLAYING)
         *scr = SCR_PLAYING;
     else if (m >= M_USB_RO) {
+        resume_flush();                         /* before the USB session, an install, a reboot */
+        storage_drain();
         play_stop(STOP_NOW);                    /* the rest needs the audio and core B */
         if (m == M_USB_RO || m == M_USB_RW)
             sys_usb(m == M_USB_RW);
@@ -310,6 +315,8 @@ void ui_main(void)
     int lvl_key = play_level;                   /* the volume before a VOL key: undone by a chord */
     uint32_t t_draw = 0, t_key = ticks(), t_save = millis(), key_ms = millis();
     uint32_t banner_ms = 0;                     /* a banner is shown (low battery, cannot play) */
+    tags_yield = storage_yield;                 /* a tag read in the storage task gives way */
+    sd_yield = storage_yield;                   /* so does a card mounted there */
     depth = 0;
     fat_root(VOL_TOP, &path[0].dir);
     copy_name(path[0].name, "Storage", sizeof path[0].name);
@@ -388,6 +395,14 @@ void ui_main(void)
         int ev = key_poll(&e), k = e.key;
         if (ev == EV_PLUG || ev == EV_UNPLUG || fading)
             ev = EV_NONE;                       /* logged (keys.c); no action yet; the fade */
+        int wr = browser_walk_poll();           /* a tree walk ended: its queue plays */
+        if (wr) {
+            full = b_dirty = 1;
+            if (wr & UI_TO_PLAYING)
+                scr = SCR_PLAYING;
+        }
+        if (browser_walking() && ev != EV_NONE && !sys_screen_is_off())
+            ev = EV_NONE;                       /* no folder read meanwhile (§100): keys wait */
         if (ev != EV_NONE) {
             t_key = ticks();
             key_ms = millis();
@@ -460,6 +475,10 @@ void ui_main(void)
             else
                 browser_marquee_tick();
         }
+        resume_flush();                         /* a save asked meanwhile, after the frame */
+        pp = perf_begin("storage");
+        storage_run(STORAGE_BUDGET_US);         /* the long reads, a few ms each pass (§100) */
+        perf_end(pp);
         cpu_wait();                             /* until the next 1 ms tick */
     }
 }
