@@ -39,6 +39,18 @@
 #define UI_QUICK      2                         /* redraw its bands soon */
 #define UI_TO_PLAYING 4                         /* show the play screen */
 
+/* The stack of screens above the browser and the play screen (ui.c, ETUDE §99): the main loop
+ * gives the top one its keys and lets it draw what changed, each pass; the screens that stop the
+ * music (USB, install, sound card, system) still run their own loops, called from the menu */
+enum { SCR_STAY, SCR_POP };
+struct screen {
+    void (*enter)(void);                /* pushed: from its start */
+    void (*shown)(void);                /* on top again (the one above it closed): all redrawn */
+    int (*key)(const struct key_ev *e); /* SCR_STAY or SCR_POP */
+    int (*draw)(void);                  /* each pass, the screen on: what changed; SCR_POP too */
+};
+void scr_push(const struct screen *s);
+
 /* ---- browser.c: listing entries (also the queue's) ---- */
 #define DIR_MAX   1000
 #define F_DIR     0x8000
@@ -172,8 +184,8 @@ int seek_key(const struct key_ev *e);
 /* ---- menu.c ---- */
 enum { M_FILES, M_PLAYING, M_SETTINGS, M_USB_RO, M_USB_RW, M_USB_DAC, M_INSTALL, M_SYSTEM,
        M_LOADER, M_COUNT };
-int main_menu(void);
-void clock_screen(void);
+extern const struct screen menu_screen, clock_screen;
+extern int menu_choice;              /* the main menu's choice once closed, -1: none */
 
 /* ---- uac.c ---- */
 void uac_mode(void);            /* the USB sound card, until BACK held or the cable is out */
@@ -196,7 +208,7 @@ extern uint32_t sleep_at;                       /* the sleep timer ends (millis)
 uint32_t screen_timeout_us(void);               /* 0xffffffff: never */
 uint32_t auto_off_ms(void);                     /* 0: never */
 void sleep_cancel(void);
-void settings_screen(void);
+extern const struct screen settings_screen;
 uint32_t settings_put(uint32_t *w);             /* into the state sector (64 words): its sum */
 void settings_get(const uint32_t *w);           /* from it, when valid; then applied */
 

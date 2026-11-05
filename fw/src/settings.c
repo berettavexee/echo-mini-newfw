@@ -266,60 +266,73 @@ static void draw_row(int i, int top, int sel)
     text_right(x, x1, y, b, DIR_FG, bg);
 }
 
-void settings_screen(void)
+/* A screen of the stack (ui.c, ETUDE §99) */
+static int s_sel, s_top, s_dirty, s_page;
+static uint32_t s_shown;                        /* live() shown */
+
+static void settings_enter(void)
 {
-    int sel = 0, top = 0, dirty = 1, page = 1;
-    uint32_t shown = 0;                         /* live() shown */
-    for (;;) {
-        const char *pp = perf_begin("settings draw");
-        if (page) {
-            lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text(4, 0, "Settings", TITLE_FG, BG);
-            page = 0;
-            dirty = 1;
-        }
-        if (dirty || live() != shown) {
-            char b[16];
-            char *p = put_dec(b, (uint32_t)sel + 1);
-            p = put_str(p, "/");
-            p = put_dec(p, S_COUNT);
-            *p = 0;
-            text_right(LCD_W - 70, LCD_W - 4, 0, b, DIM, BG);
-            for (int i = top; i < S_COUNT && i < top + ROWS; i++)
-                draw_row(i, top, sel);
-            list_scrollbar(ROW_Y0, ROWS, top, S_COUNT);
-            shown = live();
-            dirty = 0;
-        }
-        perf_end(pp);
-        sys_idle();
-        ui_background();
-        struct key_ev e;
-        int ev = key_poll(&e), k = e.key;
-        if (ev == EV_NONE) {
-            cpu_wait();
-            continue;
-        }
-        if (k == KEY_VOLUP && ev != EV_LONG) {
-            int t = top;
-            list_move(&sel, &top, S_COUNT, ROWS, -1);
-            dirty = 1;
-            page = t != top;
-        } else if (k == KEY_VOLDOWN && ev != EV_LONG) {
-            int t = top;
-            list_move(&sel, &top, S_COUNT, ROWS, 1);
-            dirty = 1;
-            page = t != top;
-        } else if (k == KEY_PLAY && ev == EV_PRESS && sel == S_CLOCK) {
-            clock_screen();
-            page = 1;
-        } else if (k == KEY_PLAY && sel != S_CLOCK &&
-                   (ev == EV_PRESS || (ev == EV_LONG && sel != S_DEFAULTS))) {
-            change(sel, ev == EV_PRESS ? 1 : -1);
-            dirty = 1;
-        } else if ((k == KEY_BACK || k == KEY_MENU) && ev == EV_PRESS) {
-            resume_save();
-            return;
-        }
-    }
+    s_sel = s_top = 0;
+    s_dirty = s_page = 1;
+    s_shown = 0;
 }
+
+static void settings_shown(void)
+{
+    s_page = 1;
+}
+
+static int settings_draw(void)
+{
+    const char *pp = perf_begin("settings draw");
+    if (s_page) {
+        lcd_fill(0, 0, LCD_W, LCD_H, BG);
+        lcd_text(4, 0, "Settings", TITLE_FG, BG);
+        s_page = 0;
+        s_dirty = 1;
+    }
+    if (s_dirty || live() != s_shown) {
+        char b[16];
+        char *p = put_dec(b, (uint32_t)s_sel + 1);
+        p = put_str(p, "/");
+        p = put_dec(p, S_COUNT);
+        *p = 0;
+        text_right(LCD_W - 70, LCD_W - 4, 0, b, DIM, BG);
+        for (int i = s_top; i < S_COUNT && i < s_top + ROWS; i++)
+            draw_row(i, s_top, s_sel);
+        list_scrollbar(ROW_Y0, ROWS, s_top, S_COUNT);
+        s_shown = live();
+        s_dirty = 0;
+    }
+    perf_end(pp);
+    return SCR_STAY;
+}
+
+static int settings_key(const struct key_ev *e)
+{
+    int ev = e->type, k = e->key;
+    if (k == KEY_VOLUP && ev != EV_LONG) {
+        int t = s_top;
+        list_move(&s_sel, &s_top, S_COUNT, ROWS, -1);
+        s_dirty = 1;
+        s_page = t != s_top;
+    } else if (k == KEY_VOLDOWN && ev != EV_LONG) {
+        int t = s_top;
+        list_move(&s_sel, &s_top, S_COUNT, ROWS, 1);
+        s_dirty = 1;
+        s_page = t != s_top;
+    } else if (k == KEY_PLAY && ev == EV_PRESS && s_sel == S_CLOCK) {
+        scr_push(&clock_screen);
+    } else if (k == KEY_PLAY && s_sel != S_CLOCK &&
+               (ev == EV_PRESS || (ev == EV_LONG && s_sel != S_DEFAULTS))) {
+        change(s_sel, ev == EV_PRESS ? 1 : -1);
+        s_dirty = 1;
+    } else if ((k == KEY_BACK || k == KEY_MENU) && ev == EV_PRESS) {
+        resume_save();
+        return SCR_POP;
+    }
+    return SCR_STAY;
+}
+
+const struct screen settings_screen = { settings_enter, settings_shown, settings_key,
+                                        settings_draw };

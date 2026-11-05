@@ -225,14 +225,30 @@ static void draw_stats(int browser, int whole, uint32_t us)
     __builtin_memset(st, 0, sizeof st);
 }
 
-/* MENU held: the main menu, then what was chosen in it */
-static void menu_open(int *scr)
+/* ---- the stack of screens (ui_priv.h): above the browser and the play screen ---- */
+#define SCR_DEPTH 4
+static const struct screen *scr_stack[SCR_DEPTH];
+static int scr_n;
+
+void scr_push(const struct screen *s)
 {
-    int m = main_menu();
+    if (scr_n == SCR_DEPTH) {
+        log_printf("ui: screen stack full");
+        return;
+    }
+    scr_stack[scr_n++] = s;
+    s->enter();
+}
+
+/* What the main menu chose, once it is off the stack */
+static void menu_action(int m, int *scr)
+{
+    if (m < 0)
+        return;
     if (m == M_FILES)
         *scr = SCR_BROWSER;
     else if (m == M_SETTINGS)
-        settings_screen();
+        scr_push(&settings_screen);
     else if (m == M_PLAYING)
         *scr = SCR_PLAYING;
     else if (m >= M_USB_RO) {
@@ -256,6 +272,24 @@ static void menu_open(int *scr)
             q_clear();
         }
     }
+}
+
+/* The top screen closed: the one below it drawn again, or the browser and the play screen (after
+ * the main menu, what it chose); UI_FULL when the home screens show again */
+static int scr_pop(int *scr)
+{
+    const struct screen *top = scr_stack[--scr_n];
+    if (top == &menu_screen) {
+        int m = menu_choice;
+        menu_choice = -1;
+        menu_action(m, scr);
+    }
+    if (scr_n) {
+        scr_stack[scr_n - 1]->shown();
+        return 0;
+    }
+    b_dirty = 1;
+    return UI_FULL;
 }
 
 void ui_main(void)
@@ -310,6 +344,8 @@ void ui_main(void)
         if (banner_ms && millis() - banner_ms > 3000) {
             banner_ms = 0;
             full = b_dirty = 1;
+            if (scr_n)
+                scr_stack[scr_n - 1]->shown();
         }
         int sw = sd_watch();
         if (sw)
@@ -340,15 +376,18 @@ void ui_main(void)
                 sys_screen_set(1);
                 ev = EV_NONE;
             }
-        } else if (!sys_screen_is_off() && ticks() - t_key > screen_timeout_us())
-            sys_screen_set(0);
+        } else if (!scr_n && !sys_screen_is_off() && ticks() - t_key > screen_timeout_us())
+            sys_screen_set(0);                  /* (not over a screen of the stack, as before) */
         if (sk_on && (millis() - sk_key_ms > SEEK_IDLE_MS || sk_cur != q_cur ||
                       (!q_playing && !parked))) {
             seek_end(1);                        /* no key for a while: go there (or the track */
             full = 1;                           /* changed meanwhile: nothing) */
         }
         int r = 0;
-        if (ev == EV_CHORD) {
+        if (scr_n) {                            /* a screen of the stack: its keys */
+            if (ev != EV_NONE && ev != EV_CHORD && scr_stack[scr_n - 1]->key(&e) == SCR_POP)
+                r = scr_pop(&scr);
+        } else if (ev == EV_CHORD) {
             if (scr == SCR_PLAYING && !sk_on) {
                 play_level = lvl_key;           /* the steps of a VOL key held before it undone */
                 volume(0);
@@ -360,11 +399,9 @@ void ui_main(void)
         else if (ev != EV_NONE) {
             if (sk_on)
                 seek_end(0);
-            if (k == KEY_MENU && ev == EV_LONG) {
-                menu_open(&scr);
-                r = UI_FULL;
-                b_dirty = 1;
-            } else if (k == KEY_MENU && ev == EV_PRESS) {
+            if (k == KEY_MENU && ev == EV_LONG)
+                scr_push(&menu_screen);         /* drawn by the loop, acted on when closed */
+            else if (k == KEY_MENU && ev == EV_PRESS) {
                 scr = scr == SCR_BROWSER ? SCR_PLAYING : SCR_BROWSER;
                 r = UI_FULL;
                 b_dirty = 1;
@@ -385,7 +422,10 @@ void ui_main(void)
         }
         /* Drawing: at most one frame every 33 ms (30/s, key repeat included), the periodic
          * refresh 4/s (play screen) or 2/s, nothing while the screen is off */
-        if (!sys_screen_is_off() && !banner_ms) {
+        if (scr_n && !sys_screen_is_off() && !banner_ms) {
+            if (scr_stack[scr_n - 1]->draw() == SCR_POP && (scr_pop(&scr) & UI_FULL))
+                full = b_dirty = 1;
+        } else if (!sys_screen_is_off() && !banner_ms) {
             uint32_t since = ticks() - t_draw;
             if (((full || quick) && since >= 33000) || since > (scr == SCR_PLAYING ? 250000u : 500000u)) {
                 t_draw = ticks();
