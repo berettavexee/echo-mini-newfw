@@ -828,7 +828,7 @@ static uint32_t ms_of(uint32_t bytes, uint32_t per_s)
 
 static void perf_report(const char *name)
 {
-    uint32_t pcm_s = player.rate * ps.fb;
+    uint32_t pcm_s = audio.rate * audio.frame_bytes;   /* the DACs' rate (a low rate is raised) */
     uint32_t in_s = player.length_ms ? (uint32_t)((uint64_t)own_file.size * 1000 /
                                                   player.length_ms) : 0;
     const struct perf_gap *a = &perf_play, *l = &perf_loop;
