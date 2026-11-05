@@ -66,8 +66,8 @@ and checked on the device before the next; `main` stays the working firmware mea
    a small PCM ring: the screen waking (120 ms), the DACs starting (337 ms), the card mounting
    (253 ms), the tags after a big Ogg cover (up to 1.4 s measured); at 24/192 the margin is
    only 121 ms today. Left: a long device session on r4, the table in the rework document.
-2. **One loop and a stack of screens** (done in the emulator, 0.99r5-r9, ETUDE §99; the device
-   test of r9 pending): the screen wakes without blocking (the 120 ms gap gone), the main menu,
+2. **One loop and a stack of screens** (0.99r5-r9, ETUDE §99; checked on the device with r9, the
+   sleep timer still to try there): the screen wakes without blocking (the 120 ms gap gone), the main menu,
    the settings and the date and time are screens on a stack served by the main loop (its
    services run whatever the screen), the sleep timer's fade is a step of the loop, the loop's
    tasks are named in the perf lines. Left: the keys read in the SysTick interrupt (needs a
