@@ -19,7 +19,10 @@ model at once (--no-fast-fill: through VOP_DATA), the SARADC busy bit read once 
 address and lists the busiest at the end.
 --keys holds a key from a simulated time on (VOL-, VOL+, PLAY, MENU, BACK, NONE), --shots
 saves the screen at given times, --expect-fw checks FW1 (and FW2 when it fits) against a file,
---pcm saves core B's output, --dac what the DMA reads from the DAC ring (what is heard).
+--pcm saves core B's output, --dac what the DMA reads from the DAC ring (what is heard). The DMA
+reads the ring at the rate the firmware set (audio.rate, audio.frame_bytes; until 2026-11-05 at
+--rate, 44,100 Hz by default, whatever the track: 96 and 192 kHz tracks lasted 2.2 and 4.4 times
+too long); --rate only stands in without the ELF's symbol.
 --sd CARD.IMG: a microSD card (reads only); --sd-noreply: a card that never leaves its busy
 state (ACMD41), as one that does not answer.
 --cut-after N: a power cut once N sectors of the firmware area are written (the rest of that
@@ -485,6 +488,16 @@ def main():
     keyval = {"VOL-": 1, "VOL+": 126, "PLAY": 270, "MENU": 384, "BACK": 515, "NONE": 1023}
     keys = sorted((int(t), keyval[k] if k in keyval else int(k)) for t, k in (x.split(":") for x in opt("--keys", "").split(",") if x))
     shots = sorted((int(t), f) for t, f in (x.split(":") for x in opt("--shots", "").split(",") if x))
+    # The DMA reads the DAC ring at the rate the firmware set: audio.rate and audio.frame_bytes
+    # (audio.h: offsets 32 and 40), checked; else --rate (44100) and the I2S1 word length
+    rate_opt = int(opt("--rate", "44100"))
+
+    def dac_bps():
+        if "audio" in sym:
+            r, fb = struct.unpack("<I4xI", u.mem_read(sym["audio"] + 32, 12))
+            if 8000 <= r <= 192000 and fb in (4, 8):
+                return r * fb
+        return rate_opt * (4 if regs.get(0x40030000, 0) & 0x1f == 0x0f else 8)
     mmc = MMC(opt("--disk", None), log)
     clock_us = lambda: struct.unpack("<I", u.mem_read(CLOCK, 4))[0]  # noqa: E731
     mmc_lat = opt("--mmc-lat", MMC_LAT if cycles else None)       # with --cycles: the device's
@@ -555,9 +568,12 @@ def main():
             if a == 0x500100e8:
                 return 2 if opt("--vbus", "0") == "1" else 0
             if a == 0x600001b8 and "dma" in state:               # DMAC1 ch5 SAR: moves with time
-                dbase, total, t0, bps = state["dma"]
+                d = state["dma"]                                 # [base, total, t, us x bytes]
+                dbase, total = d[0], d[1]
                 now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
-                pos = (now - t0) * bps // 1000000 // 32 * 32
+                d[3] += ((now - d[2]) & 0xffffffff) * dac_bps()  # at the rate the firmware set
+                d[2] = now
+                pos = d[3] // 1000000 // 32 * 32
                 if dac_out:
                     prev = max(state.get("dac_pos", 0), pos - total)
                     while prev < pos:
@@ -600,11 +616,9 @@ def main():
                         seen.add(llp)
                         _, _, llp, _, ctlh = struct.unpack("<5I", uc.mem_read(llp, 20))
                         total += (ctlh & 0xfff) * 4
-                    fb = 4 if regs.get(0x40030000, 0) & 0x1f == 0x0f else 8
-                    rate = int(opt("--rate", "44100"))
                     now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
                     if total:
-                        state["dma"] = (dbase, total, now, rate * fb)
+                        state["dma"] = [dbase, total, now, 0]
                         state["dac_pos"] = 0
                 else:
                     state.pop("dma", None)
