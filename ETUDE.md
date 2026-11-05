@@ -3994,3 +3994,38 @@ Faite d'une traite sans l'appareil, chaque sous-étape vérifiée dans l'émulat
 - Limites de l'émulateur pour cette étape : il ne reproduit ni le délai réel de la dalle au réveil (à voir sur l'appareil : l'image doit apparaître propre, sans artefact), ni la cadence des touches dans une interruption.
 
 **Sur l'appareil (r9, 2026-11-06)** : 16 min, 170 pistes de 12 formats en lecture aléatoire et navigation, sans faute (`work/hwlog/1106_r09`) ; plus aucun « screen wake » dans les lignes `perf:` ; le pire trou du chemin audio en usage courant passe de 120-122 ms (réveil de l'écran) à 47-57 ms (AAC, MP3 : dessin, étiquettes) ; l'écran se rallume sans artefact, le menu et les réglages se comportent comme avant. Trois défauts de mesure corrigés en chemin : le trou compté depuis la session précédente pour une piste lancée à froid (8,2 s de navigation), l'ouverture non nommée (« open » : une recherche Musepack lit 2 Mo, 432 ms), la réserve de l'anneau DAC des WAV à basse fréquence convertie à la fréquence du fichier et non des DAC. La minuterie de sommeil reste à essayer sur l'appareil.
+
+## 100. Refonte, étape 3 : une tâche « stockage » pour les lectures longues (images 99R10 à 99R15, 2026-11-06, émulateur)
+
+Faite sans l'appareil, comme l'étape 2 ; une image de test à la fin, `NEWFWR15`.
+
+**La tâche** (`storage.c`). Transformer chaque lecteur (étiquettes, FAT, exFAT, parcours d'arbre) en machine à états aurait été une réécriture lourde. C'est une **coroutine** : une pile à elle (6 Kio, peinte au départ, le mot du bas vérifié à chaque reprise), un échange de contexte de cinq instructions (`push {r4-r11, lr}`, le pointeur de pile sauvé, l'autre pris, `pop {r4-r11, pc}`), pas d'ordonnanceur ni d'interruption : la boucle principale la reprend 4 ms par passage, elle rend la main quand son budget est épuisé ou ses travaux finis. Une interruption prise pendant qu'elle tourne utilise sa pile (la taille en tient compte).
+
+**La règle de sécurité.** La couche FAT et les pilotes gardent des tampons statiques (`sec`, `dir`) et un cache de FAT par volume. La tâche ne cède la main **qu'entre deux appels**, jamais au milieu d'un : `storage_yield()` est appelée par les lecteurs avant une lecture (`tags.c`, crochet `tags_yield`), entre deux entrées d'un dossier (`browser.c`, comme l'appel à `ui_background()` qui s'y faisait déjà, et que l'appareil pratique depuis la 0.95), et pendant l'attente du réveil de la carte (`sd.c`, crochet `sd_yield`). La boucle, elle, continue de lire le fichier joué (`fat_pread`) entre deux reprises, comme avant. Deux interdits en découlent :
+- `tags.c` n'est pas réentrant : avant de l'utiliser, la boucle termine le travail en cours (`storage_drain()`) ;
+- pendant un parcours d'arbre, la tâche garde le secteur de dossier dans le tampon statique de `fat.c` à travers ses pauses : la boucle ne lit aucun dossier (les touches du navigateur attendent, l'écran affiche « reading... »), et la préparation de la piste suivante est suspendue.
+
+**r11 — la piste suivante préparée en avance.** Dès que la piste jouée a rempli son anneau DAC, la tâche ouvre la suivante de la file et lit ses étiquettes ; `q_open()` les trouve prêtes (le contrôle : même index, même cluster, même taille, même volume ; sinon, lecture directe comme avant). Premier déclencheur essayé, « le fichier entier est dans l'anneau d'entrée » : il ne se déclenche jamais après un Musepack dont l'étiquette APEv2 (8,7 Mo de pochette) est à la fin du fichier, que le cœur B ne lit pas. Résultat (`perf-covers`, `--cycles`) : la pochette de 17,9 Mo lue pendant 1,47 s de la piste précédente, le passage d'une piste à l'autre à 0,1 ms dans la boucle, **plus de tour perdu** (un avant) ; pile de la tâche : 576 octets utilisés au plus sur 6 144.
+
+**r12 — le parcours d'arbre.** PLAY maintenu sur un dossier soumet le parcours à la tâche (le montage de la carte compris) ; la boucle lance la lecture à sa fin. 540 pistes en 45 dossiers : 55 ms simulées (35 ms d'un bloc) ; les mêmes files qu'avant.
+
+**r13 — les écritures différées.** Les sauvegardes de la reprise demandées par une touche (pause, saut, dossier, réglages) ou par un changement de piste (`heard_publish`, dans le chemin audio) sont écrites par la boucle après le dessin de l'image (`resume_save_later()`, `resume_flush()`), l'idée d'EchoPod (§98) ; une extinction, une mise à l'arrêt et les écrans exclusifs (avant une session USB ou une installation) écrivent tout de suite.
+
+**r14 — le montage de la carte.** L'attente du réveil de la carte (ACMD41, jusqu'à 200 ms) cède la main quand le montage se fait dans la tâche (un parcours sur la carte, le cas mesuré à 253 ms au §97) ; un montage demandé par la boucle (ouvrir la carte depuis le haut du navigateur) reste bloquant.
+
+**Reste bloquant** : la recherche dans un Musepack sans table de positions (432 ms, le son coupé de toute façon), l'ouverture d'un dossier par le navigateur (1 à 30 ms), un montage demandé par la boucle.
+
+**Vérification de la r15 dans l'émulateur** (`work/emu/regress_r15.txt`, `perf_r15.txt`) :
+- 12 tests `emutest` PASS (dont les reprises d'arbre, qui passent par le parcours dans la tâche) ; 31 scénarios sur la r9 et la r15 sans faute, **49 captures identiques sur 54** ; les 5 autres : la barre de progression (1 à 19 pixels), l'écriture de l'installateur, l'ordre aléatoire tiré de l'horloge ;
+- scénarios de mesure (`--cycles`) :
+
+| Cas | Plus long trou du chemin audio, r9 | r15 |
+|---|---|---|
+| Ogg Vorbis, pochette 17,9 Mo (étiquettes de la suivante) | 1 350 ms (étiquettes), 1 tour perdu | **26 ms** (ouverture), 0 |
+| Opus, pochette 8,7 Mo | 664 ms (étiquettes) | **21 ms** (ouverture) |
+| AAC, MP3, Musepack, FLAC, pochettes de 8 Mo | 4 à 19 ms | 4 à 15 ms |
+| Chaîne de formats, 24/192 compris | 8 à 14 ms | 7 à 13 ms |
+
+- le pire passage de la boucle hors démarrage à froid des DAC (290 ms, une fois par session) : 26 ms (ouverture d'un Ogg de 24 Mo par le cœur B), au-dessus des 20 ms visés de peu ; tout le reste sous 16 ms ;
+- pile de la tâche : 576 octets au plus utilisés sur 6 144 (lecture d'étiquettes, parcours d'arbre) ; elle pourra être réduite si la BSS en a besoin (3,5 Kio de marge) ;
+- le blocage de 500 ms (`perf-stall`) et la minuterie (`sleep-fade`) PASS.
