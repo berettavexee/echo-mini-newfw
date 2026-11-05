@@ -13,6 +13,7 @@
 #include "ui_priv.h"
 #include "sys_priv.h"
 #include "usb.h"
+#include "remote.h"
 
 #define TARGET_MS   10
 #define WINDOW_US   4000                        /* drift corrected beyond this (a fallback) */
@@ -84,8 +85,19 @@ static const uint32_t rates2[] = { 44100, 48000, 88200, 96000, 176400, 192000 };
     8, 0x25, 1, 0, 0, 0, 0, 0,                                                                   \
     7, 5, 0x81, 0x11, 4, 0, 4                           /* IN 1: feedback, 1 ms */
 
+/* High speed: a HID interface (2) beside the sound card, the headset remote (remote.h), whose
+ * interrupt IN endpoint 2 runs on the non-periodic TX FIFO (the core has one periodic IN endpoint,
+ * the feedback's): consumer control, a bit per key (RC_*), validated on the device with 0.99uh */
+#define CFG_HS_LEN  283
+static const uint8_t hid_report[] = {
+    0x05, 0x0c, 0x09, 0x01, 0xa1, 0x01,                 /* consumer page, consumer control */
+    0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x03,     /* three bits */
+    0x09, 0xcd, 0x09, 0xb5, 0x09, 0xb6, 0x81, 0x02,     /* play/pause, next, previous */
+    0x95, 0x05, 0x81, 0x01, 0xc0,                       /* 5 bits of padding */
+};
+
 static const uint8_t cfg_hs[] = {
-    9, 2, 258 & 0xff, 258 >> 8, 2, 1, 0, 0x80, 250,     /* 2 interfaces, bus powered, 500 mA */
+    9, 2, CFG_HS_LEN & 0xff, CFG_HS_LEN >> 8, 3, 1, 0, 0x80, 250,  /* 3 interfaces, 500 mA */
     8, 0x0b, 0, 2, 1, 0, 0x20, 0,                       /* association: audio, interfaces 0-1 */
     9, 4, 0, 0, 0, 1, 1, 0x20, 0,                       /* audio control, UAC 2 */
     9, 0x24, 1, 0x00, 0x02, 0x01, 64, 0, 0,             /* header: 2.00, desktop speaker */
@@ -97,8 +109,11 @@ static const uint8_t cfg_hs[] = {
     FORMAT2(1, 2, 16, MPS2_16, 3),                      /* 500 us */
     FORMAT2(2, 4, 24, MPS2_32, 2),                      /* 250 us */
     FORMAT2(3, 4, 32, MPS2_32, 2),
+    9, 4, 2, 0, 1, 3, 0, 0, 0,                          /* HID, no boot protocol */
+    9, 0x21, 0x11, 0x01, 0, 1, 0x22, sizeof hid_report, 0,         /* HID 1.11, its report */
+    7, 5, 0x82, 0x03, 8, 0, 8,                          /* IN 2: interrupt, 16 ms */
 };
-_Static_assert(sizeof cfg_hs == 258, "UAC2 configuration length");
+_Static_assert(sizeof cfg_hs == CFG_HS_LEN, "UAC2 configuration length");
 
 /* ---- the host's side ---- */
 static volatile int alt, alt_new = -1;          /* streaming alternate: 0 off, 1 16-bit, 2 24-bit */
@@ -308,6 +323,8 @@ static int uac_setup(const uint8_t *s, uint8_t *r)
     uint8_t type = s[0], req = s[1], cs = s[3];
     uint16_t index = s[4] | s[5] << 8, value = s[2] | s[3] << 8;
     int hs = usb.high_speed;
+    if ((index & 0xff) == 2 && (type & 0x1f) == 1)     /* the HID: SET_IDLE accepted */
+        return (type & 0x60) == 0 ? (req == 10 ? (r[0] = 0, 1) : 0) : req == 0x0a ? 0 : -1;
     if ((type & 0x60) == 0) {                           /* SET_INTERFACE, GET_INTERFACE */
         if ((index & 0xff) == 0)
             return req == 10 ? (r[0] = 0, 1) : 0;
@@ -585,6 +602,7 @@ static const struct usb_class uac = {
     .keep_audio_pins = 1,                               /* toggling them while playing clicks */
     .rx_fifo_words = 256, .ptx_fifo_words = 16, .setup = uac_setup, .setup_out = uac_setup_out,
     .iso_out = uac_iso_out, .iso_in_done = uac_iso_in_done, .reset = uac_reset,
+    .report = hid_report, .report_len = sizeof hid_report,
 };
 
 /* The output at the host's format: the rate and the ring's frame (16 or 32-bit words) */
@@ -786,6 +804,58 @@ static void diag_steps(uint32_t max_gap)
 }
 #endif
 
+/* ---- the headset remote (remote.h): a key's report, then the empty one (the key released),
+ * one at a time on endpoint 2; MENU turns it on and off (kept in the settings) ---- */
+static struct {
+    int open, down;             /* endpoint 2 opened; a key's report sent, the release owed */
+    unsigned queue;             /* RC_* to send */
+    int step;                   /* the last volume key's step (undone by a double press) */
+    struct rc_state rc;
+} hid;
+
+static void remote_line(void)
+{
+    sys_line(116, cfg.uac_remote ? "MENU: remote on" : "MENU: remote off",
+             cfg.uac_remote ? FG : DIM);
+}
+
+static void hid_send(unsigned bits)
+{
+    if (cfg.uac_remote && hid.open)
+        hid.queue |= bits;
+}
+
+static void hid_poll(void)
+{
+    if (usb.configured && usb.high_speed && !hid.open) {
+        usb_irq_block(1);
+        usb_int_in_open(8);
+        usb_irq_block(0);
+        hid.open = 1;
+        hid.down = 0;
+    } else if (!usb.configured)
+        hid.open = hid.down = 0, hid.queue = 0;
+    if (!hid.open || usb.int_in_busy || (!hid.down && !hid.queue))
+        return;
+    static const char *const names[] = { "play/pause", "next", "previous" };
+    static uint8_t rep;
+    const char *what = "release";
+    rep = 0;
+    if (!hid.down) {
+        unsigned bit = hid.queue & -hid.queue;
+        hid.queue &= ~bit;
+        rep = (uint8_t)bit;
+        what = names[__builtin_ctz(bit)];
+    }
+    usb_irq_block(1);
+    int r = usb_int_in_send(&rep, 1);
+    usb_irq_block(0);
+    hid.down = r == 0 && rep;
+    if (r)
+        hid.queue = 0;                                  /* the endpoint is gone: nothing more */
+    log_printf("uac: remote: %s sent (%d), %u reports taken", what, r, usb.int_in_sent);
+}
+
 void uac_mode(void)
 {
     sys_status_reset();
@@ -796,8 +866,11 @@ void uac_mode(void)
         mdelay(2000);
         return;
     }
-    sys_line(138, "VOL+ / VOL-: volume", DIM);
-    sys_line(154, "BACK held: exit", DIM);
+    remote_line();
+    sys_line(138, "VOL+ / VOL-: volume, twice: track", DIM);
+    sys_line(154, "PLAY: play/pause, BACK held: exit", DIM);
+    hid = (typeof(hid)){ 0 };
+    uint8_t remote_was = cfg.uac_remote;
     level = cfg.uac_vol ? cfg.uac_vol - 1 : play_level;     /* its own, once set */
     rate = 48000;
     alt = 0;
@@ -830,6 +903,7 @@ void uac_mode(void)
         if (now - last > max_gap)
             max_gap = now - last;
         last = now;
+        hid_poll();
         if (usb.configured && !configured_at) {
             configured_at = millis();
             log_printf("uac: configured after %u ms, rx fifo %u words", configured_at - t0,
@@ -887,12 +961,30 @@ void uac_mode(void)
             int ev = key_poll(&e);
             timed(T_KEYS, tk);
             if ((ev == EV_PRESS || ev == EV_REPEAT) && key_is_vol(e.key)) {
-                int d = (e.key == KEY_VOLUP) != !!cfg.swap_vol ? -2 : 2;
-                level = level + d < 0 ? 0 : level + d > 0xfe ? 0xfe : level + d;
+                int d = (e.key == KEY_VOLUP) != !!cfg.swap_vol ? -2 : 2;   /* attenuation */
+                unsigned bits;
+                if (rc_vol(&hid.rc, d < 0 ? 1 : -1, ev == EV_REPEAT, cfg.uac_remote && hid.open,
+                           millis(), &bits) == RC_UNDO) {
+                    level -= hid.step;                  /* the first press's step undone */
+                    hid.step = 0;
+                    hid_send(bits);
+                } else {
+                    int n = level + d < 0 ? 0 : level + d > 0xfe ? 0xfe : level + d;
+                    hid.step = n - level;
+                    level = n;
+                }
                 vol_changed = 1;
             } else if (ev == EV_LONG && e.key == KEY_BACK) {
                 why = "BACK";
                 break;
+            } else if (ev == EV_PRESS && e.key == KEY_PLAY) {
+                hid_send(RC_PLAY);
+            } else if (ev == EV_PRESS && e.key == KEY_MENU) {
+                cfg.uac_remote = !cfg.uac_remote;
+                if (!cfg.uac_remote)
+                    hid.queue = 0;                      /* a release owed still goes */
+                remote_line();
+                log_printf("uac: remote %s", cfg.uac_remote ? "on" : "off");
             }
         }
         if (now - t_draw > 100000) {                    /* a line every 100 ms */
@@ -924,7 +1016,7 @@ void uac_mode(void)
     usb_stop();
     audio_volume(0xff, 0);
     audio_stop();
-    if (cfg.uac_vol != level + 1) {
+    if (cfg.uac_vol != level + 1 || cfg.uac_remote != remote_was) {
         cfg.uac_vol = (uint8_t)(level + 1);
         resume_save();                                  /* the settings' block with it */
     }

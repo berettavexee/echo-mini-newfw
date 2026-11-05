@@ -48,6 +48,7 @@ def wav(path, seconds=3, rate=44100):
     open(path, "wb").write(hdr + frames)
 
 
+_LINE, _SKIP = r"^[^\n]*", r"(?:[^\n]*\n)*?[^\n]*"   # a line's start; lines between
 _INST = [(2000, "MENU", 1500)] + [(4000 + 300 * i, "VOL-") for i in range(6)] + \
         [(6300, "PLAY"), (7600, "PLAY")]
 TESTS = {
@@ -60,6 +61,40 @@ TESTS = {
                       expect=[r"player: format: 96000 Hz, 2 ch, 24 bits",
                               r"player: finished",
                               r"hifiacc: .*: [1-9]\d* LPC subframes on HIFIACC, 0 in software"]),
+    # a blank card (no volume), a card that never answers: the top level says which
+    "sd-nofs": dict(files={"A.WAV": "wav"}, sd=True, ms=11000,
+                    keys=keys((2000, "BACK"), (3000, "VOL-"), (4000, "PLAY")),
+                    expect=[r"ui: card not readable: no FAT32 or exFAT volume"]),
+    "sd-noreply": dict(files={"A.WAV": "wav"}, sd=True, emu_args=["--sd-noreply"], ms=11000,
+                       keys=keys((2000, "BACK"), (3000, "VOL-"), (4000, "PLAY")),
+                       expect=[r"ui: card not readable: no reply"]),
+    # a queue made by PLAY held on a folder (two levels), two tracks on, then a reboot: the same
+    # queue rebuilt, the same track playing, then the one after it in that queue
+    "resume-tree": dict(files={"ALBUM/CD1/A1.WAV": "wav10", "ALBUM/CD1/A2.WAV": "wav10",
+                               "ALBUM/CD1/A3.WAV": "wav10", "ALBUM/CD2/B1.WAV": "wav10",
+                               "ALBUM/CD2/B2.WAV": "wav10"},
+                        keys=keys((2000, "PLAY", 900), (5000, "PLAY", 900), (7000, "PLAY", 900)),
+                        ms=13000,
+                        expect=[r"ui: 5 tracks in 2 folders under ALBUM",
+                                r"ui: queue 3/5: A3.WAV",               # the log: both boots
+                                r"ui: resume: tree queue under ALBUM, track 3/5$",
+                                r"ui: queue 3/5: A3.WAV", r"ui: queue 4/5: B1.WAV"],
+                        reboot=dict(ms=20000)),
+    # the same in shuffle (BACK held three times): Y, then Z, BACK to Y; after the reboot Y
+    # plays again and Z comes after it (the order kept: the same seed and start)
+    "resume-shuffle": dict(files={"ALBUM/CD1/A1.WAV": "wav10", "ALBUM/CD1/A2.WAV": "wav10",
+                                  "ALBUM/CD1/A3.WAV": "wav10", "ALBUM/CD2/B1.WAV": "wav10",
+                                  "ALBUM/CD2/B2.WAV": "wav10"},
+                           keys=keys((2000, "PLAY", 900), (3500, "BACK", 900),
+                                     (4500, "BACK", 900), (5500, "BACK", 900),
+                                     (6500, "PLAY", 900), (8000, "PLAY", 900), (9000, "BACK")),
+                           ms=14000,
+                           expect=[_LINE + r"ui: queue (\d)/5: (\S+) \(0\)\n" + _SKIP +
+                                   r"ui: queue (\d)/5: (\S+) \(0\)\n" + _SKIP +
+                                   r"ui: queue \1/5: \2 \(0\)\n" + _SKIP +
+                                   r"ui: resume: tree queue under ALBUM, track \1/5\n" + _SKIP +
+                                   r"ui: queue \3/5: \4 \(0\)"],
+                           reboot=dict(ms=20000)),
     "install-ok": dict(files={"NEWDATE.IMG": "@NEWDATE.IMG"}, fw2=True,
                        keys=keys(*_INST, (14000, "PLAY")), ms=60000,
                        emu_args=["--expect-fw", "@NEWDATE.IMG"],
@@ -104,11 +139,11 @@ def shown(s, field):
 
 def open_ms(m):
     """The time given to a file before PLAY held moves on: 1.5 s, more for a big Ogg (its
-    whole comment header, cover art included, read through for the tags: ~0.9 s a MB in the
+    whole comment header, cover art included, read through for the tags: ~0.8 s a MB in the
     emulator); the files last longer than that (SET_SECONDS), so the queue never moves on
     by itself"""
     mb = m["size"] / 1e6
-    return 1500 + int(mb * (900 if m["codec"] in ("vorbis", "opus") else 100))
+    return 1500 + int(mb * (1200 if m["codec"] in ("vorbis", "opus") else 100))
 
 
 def run_set(group, t, img, elf, tmp):
@@ -213,22 +248,28 @@ def run(name, t, img, elf, tmp):
     at = lambda v: os.path.join(tmp, "bad", v[1:]) if v.startswith("@") else v  # noqa: E731
     files = [f"{log0}=NEWFWLOG.TXT"]
     for dst, src in t["files"].items():
-        if src == "wav":
-            src = os.path.join(tmp, dst)
-            wav(src)
+        if src.startswith("wav"):               # "wav", or "wav10": its length in seconds
+            src = os.path.join(tmp, dst.replace("/", "_"))
+            wav(src, int(src_len) if (src_len := t["files"][dst][3:]) else 3)
         files.append(f"{at(src)}={dst}")
     subprocess.run([sys.executable, MKDISK, disk, img, "--synth-idb", "--size-mb", "300"] +
                    (["--fw2"] if t.get("fw2") else []) + files, check=True,
                    stdout=subprocess.DEVNULL)
+    sd = []
+    if t.get("sd"):                             # a blank card: 64 MiB of zeros (sparse)
+        sd = ["--sd", os.path.join(tmp, "sd.img")]
+        with open(sd[1], "wb") as f:
+            f.truncate(64 << 20)
     out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--keys",
                           t["keys"], "--ms", str(t["ms"]), "--steps", "30000000000",
-                          "--dump-disk", dump] + [at(a) for a in t.get("emu_args", [])],
+                          "--dump-disk", dump] + sd + [at(a) for a in t.get("emu_args", [])],
                          capture_output=True, text=True).stdout
     if "reboot" in t and os.path.exists(dump):
         shutil.move(dump, disk)
         out += "\n-- reboot\n" + subprocess.run(
             [sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--boot-disk", "--ms",
-             str(t["reboot"]["ms"]), "--steps", "30000000000", "--dump-disk", dump],
+             str(t["reboot"]["ms"]), "--steps", "30000000000", "--dump-disk", dump] +
+            (["--keys", t["reboot"]["keys"]] if t["reboot"].get("keys") else []),
             capture_output=True, text=True).stdout
     text = read_log(dump) if os.path.exists(dump) else ""
     whole = text + "\n" + out

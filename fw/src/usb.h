@@ -18,6 +18,8 @@ struct usb_state {
     uint32_t iso_in_sent, iso_in_late;  /* isochronous IN packets sent, frames re-aimed */
     uint32_t irqs, irq_max_us;  /* interrupt mode: interrupts taken, the longest, us */
     uint32_t rx_fifo;           /* GRXFSIZ read back after the set-up, words */
+    uint32_t int_in_sent;       /* interrupt IN packets taken by the host (endpoint 2) */
+    volatile int int_in_busy;   /* one queued, not taken yet */
 };
 
 /* A class other than mass storage: its descriptors and requests. setup() gets the class requests
@@ -42,6 +44,8 @@ struct usb_class {
     void (*iso_out)(uint32_t n);
     void (*iso_in_done)(void);  /* the isochronous IN packet went: usb_iso_in_send() the next */
     void (*reset)(void);        /* a bus reset: the stream stops */
+    const uint8_t *report;      /* a HID report descriptor (GET_DESCRIPTOR 0x22), or 0 */
+    uint16_t report_len;
 };
 
 #define USB_RX_FIFO 0x60081000u
@@ -58,6 +62,11 @@ void usb_iso_out_open(uint32_t mps, uint32_t every);   /* endpoint 1 OUT, isochr
 void usb_iso_out_close(void);
 void usb_iso_in_open(uint32_t mps, uint32_t every);    /* endpoint 1 IN, periodic TX FIFO 1 */
 void usb_iso_watch(void);       /* high speed: a parity turned over after 2 ms with nothing */
+/* Endpoint 2 IN, interrupt, on the shared non-periodic TX FIFO (the core has one periodic IN
+ * endpoint only, taken by the feedback): opened at the configuration, a packet queued at a time
+ * (with the interrupt blocked: endpoint 0 writes the same FIFO); -1 while one is waiting */
+void usb_int_in_open(uint32_t mps);
+int usb_int_in_send(const void *data, uint32_t n);
 void usb_iso_in_close(void);
 void usb_iso_in_send(const void *data, uint32_t n);    /* the next packet, n <= mps */
 void usb_stop(void);            /* soft disconnect */

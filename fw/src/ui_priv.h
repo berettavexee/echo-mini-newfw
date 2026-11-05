@@ -108,6 +108,14 @@ int q_prev_index(int i);                        /* the track before i (BACK), or
 void q_shuffle_new(int from);                   /* another shuffled order, from track 'from' */
 void q_from_dir(int start);
 void q_from_tree(const struct fat_dir *top, const char *name);
+/* A queue made by PLAY held, for the resume state: the folder held and the shuffled order */
+struct q_state {
+    uint32_t cluster, size, seed, base;
+    uint8_t vol, contig, tree, pad;
+    int32_t cur, n;
+};
+int q_state_get(struct q_state *s);             /* 1 when the queue is a tree */
+int q_state_set(const struct q_state *s, const char *name);    /* rebuilt: 0, else -1 */
 void q_clear(void);
 int q_on_sd(void);                              /* the queue is on the card */
 /* Track i: its entry and name (read again from its folder when needed; 0 / "" if unreadable) */
@@ -174,6 +182,7 @@ struct settings {
     uint8_t swap_vol;                           /* VOL+ and VOL- swapped (the volume) */
     int8_t rg_pre;                              /* ReplayGain preamp, dB */
     uint8_t uac_vol;                            /* USB sound card's volume + 1, 0: the playback's */
+    uint8_t uac_remote;                         /* USB sound card: the keys sent to the host (HID) */
 };
 extern struct settings cfg;
 extern uint32_t sleep_at;                       /* the sleep timer ends (millis), 0: off */

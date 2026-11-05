@@ -17,6 +17,27 @@ struct resume {
 static uint32_t rs_buf[128];
 static uint32_t rs_last_sum;
 
+/* A queue made by PLAY held (a tree): after the resume state, with its own magic and sum, so
+ * that a state written before it (0.99) still reads; the settings start at word 64 */
+#define RQ_WORD 44
+struct resume_q {
+    char magic[4];                              /* "QTR1" */
+    struct q_state q;
+    char name[32];                              /* the folder held, shown on the play screen */
+    uint32_t sum;
+};
+_Static_assert(RQ_WORD * 4 + sizeof(struct resume_q) <= 64 * 4, "resume_q overlaps the settings");
+_Static_assert(sizeof(struct resume) <= RQ_WORD * 4, "resume overlaps resume_q");
+
+static uint32_t rq_sum(const struct resume_q *r)
+{
+    const uint32_t *w = (const uint32_t *)r;
+    uint32_t s = 0x51545231;
+    for (unsigned i = 0; i < offsetof(struct resume_q, sum) / 4; i++)
+        s = (s << 5 | s >> 27) ^ w[i];
+    return s;
+}
+
 static uint32_t rs_sum(const struct resume *r)
 {
     const uint32_t *w = (const uint32_t *)r;
@@ -45,7 +66,13 @@ void resume_save(void)
     r->mode = (uint32_t)(play_mode | rg_mode << 8);    /* rg_mode 0 (album) before 0.55 */
     r->pos_ms = parked ? parked_ms : q_playing ? player_heard.time_ms : 0;
     r->sum = rs_sum(r);
-    uint32_t sum = r->sum ^ settings_put(rs_buf + 64);
+    struct resume_q *rq = (struct resume_q *)(rs_buf + RQ_WORD);
+    if (qe && q_state_get(&rq->q)) {
+        __builtin_memcpy(rq->magic, "QTR1", 4);
+        copy_name(rq->name, q_folder, sizeof rq->name);
+        rq->sum = rq_sum(rq);
+    }
+    uint32_t sum = r->sum ^ rq->sum ^ settings_put(rs_buf + 64);
     if (sum == rs_last_sum)
         return;                                 /* nothing changed: no write */
     rs_last_sum = sum;
@@ -71,7 +98,50 @@ static int find_entry(const struct fat_dirent *d, void *ctx)
     return 0;
 }
 
-/* At boot: back to the last folder, its selection, the track (where it was) */
+/* The queue's track q_cur again, where it was: playing (the setting) or parked */
+static void resume_track(const struct resume *r)
+{
+    uint32_t pos = r->playing && r->pos_ms > 2000 ? r->pos_ms - 2000 : r->playing ? 0 :
+                   r->pos_ms;                   /* playing: two seconds before */
+    if (r->playing && cfg.start == START_PLAY) {
+        player_seek_hint(pos);
+        play_index(q_cur);
+    } else if (r->playing || pos) {             /* paused: PLAY goes on from there */
+        parked = 1;
+        parked_ms = pos;
+    }
+}
+
+/* A tree queue (PLAY held) walked again, its track found (by its place, else by its cluster) */
+static void resume_tree(const struct resume *r, struct resume_q *rq)
+{
+    rq->name[sizeof rq->name - 1] = 0;
+    if ((rq->q.vol == FAT_VOL_SD && sd_open()) || q_state_set(&rq->q, rq->name)) {
+        log_printf("ui: resume: the tree queue is gone");
+        return;
+    }
+    int i = q_cur;
+    const struct entry *e = q_ent(i);
+    if (!e || e->cluster != r->track) {         /* tracks added or removed: look for it */
+        for (i = 0; i < q_n; i++)
+            if ((e = q_ent(i)) && e->cluster == r->track)
+                break;
+        if (i == q_n) {
+            log_printf("ui: resume: track %x not in the tree queue (%d tracks)", r->track, q_n);
+            q_clear();
+            return;
+        }
+        q_cur = i;
+    }
+    log_printf("ui: resume: tree queue under %s, track %d/%d%s", rq->name, q_cur + 1, q_n,
+               q_n == rq->q.n ? "" : " (the tree changed: order from here)");
+    if (q_n != rq->q.n && play_mode == MODE_SHUFFLE)
+        q_shuffle_new(q_cur);
+    resume_track(r);
+}
+
+/* At boot: back to the last folder, its selection, the track (where it was); a tree queue
+ * (PLAY held) walked again */
 void resume_load(void)
 {
     struct resume *r = (struct resume *)rs_buf;
@@ -83,7 +153,9 @@ void resume_load(void)
         return;
     /* state 2 (before 0.58): no top level, index 0 was the internal root */
     int old = r->magic[11] == '2', saved = (int)(r->depth & 0xff) + old, v = (int)(r->depth >> 8);
-    rs_last_sum = r->sum ^ settings_put(rs_buf + 64);
+    struct resume_q *rq = (struct resume_q *)(rs_buf + RQ_WORD);
+    rs_last_sum = r->sum ^ rq->sum ^ settings_put(rs_buf + 64);
+    int tree = !__builtin_memcmp(rq->magic, "QTR1", 4) && rq->sum == rq_sum(rq) && rq->q.tree;
     if (r->level <= 0xfe)
         play_level = (int)r->level;
     if ((r->mode & 0xff) < MODE_COUNT)
@@ -99,6 +171,8 @@ void resume_load(void)
         if (path[0].sel >= dir_n)
             path[0].sel = 0;
         log_printf("ui: resume: top level (%d saved)", saved);
+        if (tree && r->track && cfg.start != START_BROWSER)
+            resume_tree(r, rq);
         return;
     }
     path_root(v);
@@ -122,23 +196,21 @@ void resume_load(void)
     log_printf("ui: resume: %s, depth %d (%d saved), track %x at %u ms, playing %u, -%u dB",
                v == FAT_VOL_SD ? "card" : "internal", depth, saved, r->track, r->pos_ms,
                r->playing, (uint32_t)play_level / 2);
-    if (!r->track || depth != saved || cfg.start == START_BROWSER)
+    if (!r->track || cfg.start == START_BROWSER)
         return;                                 /* (the setting: the folder only) */
+    if (tree) {
+        resume_tree(r, rq);
+        return;
+    }
+    if (depth != saved)
+        return;
     for (int i = 0; i < dir_n; i++)
         if (!(ent(i)->flags & F_DIR) && ent(i)->cluster == r->track) {
             path[depth].sel = i;
             if (path[depth].sel < path[depth].top || path[depth].sel >= path[depth].top + ROWS)
                 path[depth].top = i > ROWS / 2 ? i - ROWS / 2 : 0;
             q_from_dir(i);
-            uint32_t pos = r->playing && r->pos_ms > 2000 ? r->pos_ms - 2000 : r->playing ? 0 :
-                           r->pos_ms;           /* playing: two seconds before */
-            if (r->playing && cfg.start == START_PLAY) {
-                player_seek_hint(pos);
-                play_index(q_cur);
-            } else if (r->playing || pos) {     /* paused: PLAY goes on from there */
-                parked = 1;
-                parked_ms = pos;
-            }
+            resume_track(r);
             return;
         }
 }

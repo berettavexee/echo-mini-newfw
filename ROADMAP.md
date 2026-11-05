@@ -3,7 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-01, version 0.99.
+Last update: 2026-11-05, version 0.99 (and the emulator's tests).
 
 ## Done, validated on the device
 
@@ -44,7 +44,7 @@ Last update: 2026-11-01, version 0.99.
 | Musepack SV7 and SV8, APEv2 tags, exact seek | 0.80 | §61 |
 | Decoders hardened against damaged files; a fuzzing bench (Ogg, Vorbis, Opus, MP3, AAC, MP4, tags, FAT) | 0.81-0.83, 0.91 | §62-§64 |
 | The chip's accelerators: FLAC LPC (HIFIACC), MP3 synthesis (SYNTH), Vorbis IMDCT (HIFIACC FFT), AAC IMDCT FFTs (HIFIACC), Musepack synthesis (SYNTH): 28 to 65 % less core B load | 0.85-0.93 | §66-§77 |
-| Automatic checks (`make check`, pre-commit hook, GitHub Actions); images reproducible byte for byte | 0.91, 0.92 | — |
+| Automatic checks (`make check`, pre-commit hook, GitHub Actions); images reproducible byte for byte; emulator tests in the CI on a shareable test set (CC0 recording) | 0.91, 0.92, 0.99 | §94 |
 
 ## Waiting for a test on the device
 
@@ -52,6 +52,28 @@ Last update: 2026-11-01, version 0.99.
   battery and up on USB, never 100 % while charging (§82); to check: no jump when a track
   starts or the screen comes on, nothing odd when plugging and unplugging the cable. A first
   short session (full battery) showed no regression; a long one, half charged, is still needed.
+
+- Tags after a big cover (fixed in the emulator, `emutest.py set-covers`): M4A tags after a
+  cover over 512 KiB now read; an Ogg file with a cover over 16 MiB now opens (its comment
+  header crossed up to 64 MiB). On the device: the tags of `covers/aac-cover1m.m4a` and
+  `aac-cover8m.m4a`, and the time before `covers/vorbis-cover8m.ogg` and
+  `vorbis-cover17m.ogg` start playing (the `ui: tags in ... us` log line; 9.3 s simulated for
+  the 8 MB one, likely much less on the device).
+
+- Expressive messages beyond playback (emulator: `install-*` scenarios, `emutest.py sd-nofs`,
+  `sd-noreply`): the installer says what went wrong and what to do (incomplete file, image too
+  large, damaged image, unknown layout, battery level); the card "not responding" or "needs
+  FAT32 or exFAT"; the USB disk screen in plain words. On the device: a blank or exFAT-less
+  card, a card taken out and put back, a truncated .IMG.
+- A queue made by PLAY held (a tree, the whole card) resumes after a power off: the tree walked
+  again, the same track and the same shuffled order (emulator: `resume-tree`,
+  `resume-shuffle`). On the device: the whole card in shuffle, power off, power on (the time of
+  the walk at boot).
+- The sound card's remote (HID): PLAY play/pause, VOL+ twice next track, VOL- twice previous
+  (the first press's volume step undone), a single press or a held key the device's volume,
+  MENU the remote on and off (kept in the settings, now version 2; version 1 still read), BACK
+  held to leave (host test: `remote_test`). On the device: each key with VLC and a browser,
+  the remote off, the setting kept after a power off, the settings of 0.99 kept.
 
 ## Version history
 
@@ -110,9 +132,6 @@ One line per version; the measurements are in `ETUDE.md`.
 
 ## To do
 
-- More expressive messages beyond playback (a second step of 0.94's): the firmware installer
-  (wrong CRC, another model, an image too large, low battery), the microSD card (a file system
-  not read: "FAT32 or exFAT needed"), the USB session.
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64); more varied seeds for the FAT
   target (its coverage stops growing after 20 minutes).
 - The accelerators still to map (`docs/HIFIACC.md`, `docs/MP3ACC.md`): HIFIACC's ALAC filter
@@ -123,59 +142,22 @@ One line per version; the measurements are in `ETUDE.md`.
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
 - USB access to the microSD card (step S5 of §36).
-- USB DAC mode: the player as a USB sound card for a computer or a phone, chosen on the USB
-  screen above when the cable comes in (as the stock firmware's "USB Connection Options"). The
-  stock firmware (UAC1, 16 bits, 48 kHz only, adaptive, HID media keys) and EchoPod (UAC1, 16
-  and 24 bits, 44.1 and 48 kHz, adaptive, a sample dropped or repeated against the drift) are
-  compared in §83; neither has a rate feedback or goes over 48 kHz. Plan, in steps:
-  1. Done in 0.97 (§84): UAC1 at full speed, 16 and 24 bits, 44.1 and 48 kHz, the PCM straight
-     into the DAC ring (core A only), the host's volume on the DACs' attenuation; entered from
-     the main menu for now; its own volume, kept in the settings. Left: the choice on the USB
-     screen at the cable's coming.
-  2. Done in 0.97 (§85): asynchronous, a feedback endpoint whose value comes from a
-     proportional-integral control of the ring's fill (10 ms); bit-perfect on Linux (no sample
-     dropped or repeated in 13 minutes); dropping or repeating kept as a fallback.
-  3. a. Done in 0.97 (§86): the sound card on the USB controller's interrupt (5), the loop only
-     for the screen, keys, volume and log; the same results as step 2.
-     b. Done in 0.98 (§87): UAC2 at high speed, 44.1 to 96 kHz in 16, 24 and 32 bits, a packet
-     every 500 us; UAC1 at full speed kept for older hosts. The RX FIFO cannot be resized (147
-     words): 176.4 and 192 kHz in 24 bits need a packet every 250 us. Done since test image 99J
-     (§93): the 24- and 32-bit alternates at 250 us, all six rates in every format, no frame
-     dropped with Linux, 65 us per interrupt at most.
-  4. Use: HID media keys (play/pause, next, previous, volume to the host or to the DACs), a
-     screen with the format received, the rate fed back, an "untouched stream" mark and two VU
-     meters, one per channel (peaks of the samples received, so a silent channel shows at a
-     glance); power saving off in this mode (USB-powered).
-  5. Phones (first tests with 0.99b, log `work/hwlog/1031_099b_phones`):
-     - Android (Pixel 6a), 48 kHz: clean (no packet lost, no ring underrun), but the host
-       ignores the feedback. Diagnostic image (`make EXTRA=-DECHO_UACDIAG`, 99D, §90): every
-       packet is exactly 24 frames although the feedback asks -1 %, while the feedback endpoint
-       is read every millisecond; the phone sends 48,002.7 Hz against our 48,000.3 (about
-       50 ppm), and the fallback drops 152 frames, one a packet, every 70 s (inaudible, not
-       bit-perfect). The Linux PC follows a +/-0.5 % feedback step to the frame.
-       Since test image 99I: such a host is detected (the control 10 s at its 1 % limit), the
-       feedback goes back to the nominal and the drift is corrected one frame at a time, 100 ms
-       apart at least (about one every 0.4 s at 50 ppm) instead of bursts (§92). To do: check
-       the offload (`adb shell dumpsys media.audio_flinger`) and try a commercial
-       asynchronous DAC on the Pixel. Reported to Google:
-       https://issuetracker.google.com/issues/579970942 (similar: issue 423658602).
-     - iPhone, 44.1 kHz, 32 bits: sound on the right channel only was the iPhone's Balance
-       setting (all to the right): the diagnostic image read the left channel at exactly 0;
-       centred, both channels play (§90). The iPhone, like the Pixel, ignores the feedback
-       (always 22.05 frames per packet, 44,100 Hz on its own clock). Test image 99G (§90): no
-       change with a +/-0.5 % or +0.05 % step in 16.16 per microframe, nor in 16.16 per ms or
-       10.14 per ms; a 3-byte feedback packet makes it stop the stream. It reads the feedback
-       packets but ignores their value, in any format: not our format's fault.
-  Power: 500 mA declared with a computer, to charge while playing; a phone powers the bus from
-  its own battery and may refuse a device asking that much (iPhone): 100 mA declared there, the
-  player on its own battery, charging off.
-  How to tell a computer from a phone (to declare 500 or 100 mA) is still open.
-  Tests: the first prototypes on a Linux PC only (ALSA, `aplay -D hw:` for bit-perfect checks,
-  `/proc/asound/card*/stream*`); then Android (USB OTG) and iPhone (USB-C, or the Lightning
-  camera adapter), with the power question above; no Windows host at hand, Windows to be
-  reported by users.
-  Later: DSD over PCM (DoP), if the link to the CS43131 allows it; a composite device, sound card
-  and mass storage at once.
+- USB sound card (done so far: the table above; history in `docs/USB_AUDIO.md`, §83-§93):
+  - entered from the USB screen when the cable comes in (the main menu only today);
+  - HID media keys, as a headset remote: play/pause checked on the device (0.99uh: every report
+    taken by a Linux PC, VLC and YouTube follow); next and previous (VOL+ or VOL- pressed twice)
+    and MENU to turn the remote on and off, to test on the device;
+  - a screen with the format received, the rate fed back, an "untouched stream" mark and two
+    VU meters, one per channel (a silent channel shows at a glance); power saving off in this
+    mode (USB-powered);
+  - phones: the Pixel 6a and the iPhone ignore the feedback (handled since 0.99, §92); on the
+    Pixel, check the offload (`adb shell dumpsys media.audio_flinger`) and try a commercial
+    asynchronous DAC; reported to Google: https://issuetracker.google.com/issues/579970942;
+  - power: 500 mA declared with a computer (charging while playing), 100 mA with a phone,
+    which may refuse more (iPhone); how to tell them apart is still open;
+  - Windows: no host at hand, to be reported by users;
+  - later: DSD over PCM (DoP), if the link to the CS43131 allows it; a composite device, sound
+    card and mass storage at once.
 - A diagnostics, telemetry and remote-control module over the USB link with the PC, to automate
   the tests on the device: read the log and the state live (playback, buffers, core B load,
   battery, keys), send key events and commands (play a file, seek, change a setting), and run
@@ -190,49 +172,24 @@ One line per version; the measurements are in `ETUDE.md`.
   place).
 - Measure on the device a whole-tree queue on the card with a full library (some 18,000 tracks
   in 1,400 folders: 3.6 s simulated in the emulator, which does not model the card's speed).
-- The emulator (`fw/tools/emu_fw.py`, `work/emu/scenarios.py`); ideas from the other projects'
-  emulators and simulators (Podium's Unicorn emulator, EchoPod's SDL simulator, ReChord's QEMU
-  set-up; ideas only, their code is GPL-3), by usefulness:
-  Points 1 to 4 implemented on 2026-11-05 (ETUDE §94, not committed yet): 11 installer scenarios
-  pass, power cuts included; `fw/tools/emutest.py` and a CI step; `--cycles`, `--mmc-lat`.
-  1. installer tests: FW2 written before FW1 and the header last, wrong images refused with
-     nothing written (EchoPod, stock, RECHO, the running image again), and a power cut in the
-     middle of the writes followed by a reboot on the half-written disk;
-  2. scenarios that check themselves: expected log lines and screen hashes per scenario, a
-     pass/fail result, a few short ones in the CI;
-  3. a clock from the instructions run and the core's frequency (following the PLL), SysTick and
-     TIMER1 modelled, instead of `ticks()` advancing 50 us a call: real latencies (key to sound,
-     the longest UI gap), `clock_measure()` testable;
-  4. eMMC and microSD latency per command and per block, so that I/O-bound times show (cold
-     boot, a big folder, the whole-tree queue);
-  5. volumes generated on demand (a sparse disk whose files, valid FLAC frames, are made when
+- The test set: the Musepack encoder (`mpcenc`, Debian package `musepack-tools`) on the PC and
+  in the CI, so that the set has its MPC files too.
+- The emulator (`fw/tools/emu_fw.py`, `fw/tools/emutest.py`, `work/emu/scenarios.py`). Done
+  (§94): installer tests with power cuts, self-checking scenarios and a CI step (`boot`,
+  `play-wav`, `play-flac`, `install-badcrc`, `set-ci`), a clock from the instructions run
+  (`--cycles`) with TIMER1 on both cores, eMMC and microSD latency (`--mmc-lat`, `--sd-lat`),
+  the HIFIACC DMA chain. Ideas from the other projects' emulators (Podium, EchoPod, ReChord;
+  ideas only, their code is GPL-3), by usefulness:
+  1. volumes generated on demand (a sparse disk whose files, valid FLAC frames, are made when
      read): libraries larger than the PC's RAM, cluster sizes (512 bytes), the files a Mac leaves
      (Spotlight, fseventsd, `._` files);
-  6. sector reads counted by phase (FAT or data), to catch regressions;
-  7. a finer panel model: drawing windows and sweeps followed, full redraws and flicker counted,
+  2. sector reads counted by phase (FAT or data), to catch regressions;
+  3. a finer panel model: drawing windows and sweeps followed, full redraws and flicker counted,
      the time of the first frame;
-  8. a check that the ELF matches the image (wrong symbols otherwise);
-  9. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
-- The shareable test set (`fw/tools/mktestset.py`, from `testdata/goldberg`, CC0): install the
-  Musepack encoder (`mpcenc`, Debian package `musepack-tools`) on the PC and in the CI, so that
-  the set has its MPC files too (skipped today). emutest `set-*` tests play each file of a
-  folder and check the tags and the format (local; `set-ci`, 13 files, in the CI). Found:
-  - tags.c, M4A: an ilst item it does not read (covr) is passed over without `skipped()`, so
-    the tags after a cover of more than 512 KiB are lost (`covers/aac-cover1m.m4a`);
-  - an Ogg file with a big cover: its whole comment header is read for the tags before the
-    track starts (9.3 s simulated for 8 MB of PNG); past 16 MiB (17 MB of PNG, 23 MB in
-    base64) tags.c gives up, core B gets no hint and its open times out (HIFI_ETIMEOUT): the
-    file does not play (`covers/vorbis-cover17m.ogg`, `opus-cover17m.opus`); to measure on
-    the device;
-  - the emulator (fixed): a FLAC file stopped on core B, waiting for HIFIACC. The DMA model
-    ran the first block of our LLI chain twice, and core B had no TIMER1, so the 30 ms
-    timeout (and the software fallback after 3) never came. Both modelled now; `play-flac`
-    checks a FLAC played to its end, its LPC subframes on HIFIACC.
-  Missing everywhere: a simulated USB host (enumeration, isochronous packets, feedback), to test
-  the sound card and the HID without the device.
-- Resume a queue made by PLAY held (a tree, the whole card) after a power off: today only a
-  queue of one folder resumes (the top level is shown). To save: the folder held, the shuffle
-  seed and order position, the track (its folder and cluster, to check it is the same).
+  4. a check that the ELF matches the image (wrong symbols otherwise);
+  5. a simulated USB host (enumeration, isochronous packets, feedback), to test the sound card
+     and the HID without the device;
+  6. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
 - Output and DAC settings (CS43131 registers, little code each):
   - headphone gain low / high (low suits sensitive in-ear monitors);
   - volume limiter (an adjustable ceiling);

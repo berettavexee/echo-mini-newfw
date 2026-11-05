@@ -16,6 +16,7 @@
 #define SCAN_MAX (512 * 1024)                   /* never look further into a file (past the */
                                                 /* samples of WAV and AIFF: further than them) */
 #define SKIP_MAX (16u << 20)                    /* ... nor, with the parts skipped, past 16 MiB */
+#define OGG_SKIP_MAX (64u << 20)                /* Ogg: 64 MiB, for the end of the comment header */
 
 /* ---- reading the file ---- */
 static struct {
@@ -25,6 +26,7 @@ static struct {
     uint32_t len;
     uint32_t chunk;                             /* bytes read per miss: 2 KiB, 16 KiB for Ogg */
     uint32_t lim;                               /* SCAN_MAX, or that much past the samples */
+    uint32_t skip_max;                          /* SKIP_MAX, OGG_SKIP_MAX */
     uint8_t buf[16384] __attribute__((aligned(4)));
 } rd;
 
@@ -51,11 +53,13 @@ static int rd_at(uint32_t pos, uint32_t n, const uint8_t **p)
 }
 
 /* n bytes skipped by their declared size (cover art), never read: the window goes on that much
- * further, up to SKIP_MAX (fields after a big picture) */
+ * further, up to SKIP_MAX (fields after a big picture). Ogg up to OGG_SKIP_MAX: without the end
+ * of its comment header, core B gets no hint and its open times out on a cover of 16 MiB or more
+ * (the test set's covers/vorbis-cover17m.ogg); 64 MiB bounds a damaged length. */
 static void skipped(uint32_t n)
 {
-    if (rd.lim < SKIP_MAX)
-        rd.lim = n < SKIP_MAX - rd.lim ? rd.lim + n : SKIP_MAX;
+    if (rd.lim < rd.skip_max)
+        rd.lim = n < rd.skip_max - rd.lim ? rd.lim + n : rd.skip_max;
 }
 
 static uint32_t syncsafe(const uint8_t *p) { return p[0] << 21 | p[1] << 14 | p[2] << 7 | p[3]; }
@@ -640,8 +644,10 @@ static void mp4(struct tags *t)
         if (c == 0xa96e616d) { dst = t->title; max = sizeof t->title; }         /* ©nam */
         else if (c == 0xa9415254) { dst = t->artist; max = sizeof t->artist; }  /* ©ART */
         else if (c == 0xa9616c62) { dst = t->album; max = sizeof t->album; }    /* ©alb */
-        else if (c != 0x74726b6e && c != 0x2d2d2d2d)                            /* trkn, ---- */
+        else if (c != 0x74726b6e && c != 0x2d2d2d2d) {                          /* trkn, ---- */
+            skipped(next - pos);                /* covr and the rest: the window goes on */
             continue;
+        }
         char key[32];
         key[0] = 0;
         if (c == 0x2d2d2d2d) {                  /* ----: mean, name, data */
@@ -727,6 +733,7 @@ void tags_read(const struct fat_file *f, uint32_t codec, struct tags *t)
     rd.chunk = codec == HP_CODEC_VORBIS || codec == HP_CODEC_OPUS ? sizeof rd.buf : 2048;
     rd.f = f;
     rd.lim = SCAN_MAX;
+    rd.skip_max = codec == HP_CODEC_VORBIS || codec == HP_CODEC_OPUS ? OGG_SKIP_MAX : SKIP_MAX;
     rd.c.index = rd.c.cluster = 0;
     rd.pos = rd.len = 0;
     if (codec == HP_CODEC_MP3) {

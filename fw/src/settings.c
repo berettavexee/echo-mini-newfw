@@ -3,8 +3,8 @@
  * (since 0.55); the sleep timer is not kept. */
 #include "ui_priv.h"
 
-static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0 };
-struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0 };
+static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1 };
+struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1 };
 uint32_t sleep_at;
 
 static const uint16_t screen_s[] = { 10, 30, 60, 120, 300, 0 };     /* 0: never */
@@ -32,18 +32,19 @@ void sleep_cancel(void)
     sleep_sel = 0;
 }
 
-/* ---- storage: 64 words, "NEWFWSET 1", the values, a sum ---- */
+/* ---- storage: 64 words, "NEWFWSET 2", the values, a sum. Version 1 (up to 0.99) had the first
+ * 8 bytes of the values, its sum in word 5: read, the others at their defaults ---- */
 struct set_block {
     char magic[12];
     struct settings s;
     uint32_t sum;
 };
+#define SET_V1_WORDS 5
 
-static uint32_t set_sum(const struct set_block *b)
+static uint32_t set_sum(const uint32_t *w, unsigned n)
 {
-    const uint32_t *w = (const uint32_t *)b;
     uint32_t s = 0x4e465343;
-    for (unsigned i = 0; i < __builtin_offsetof(struct set_block, sum) / 4; i++)
+    for (unsigned i = 0; i < n; i++)
         s = (s << 5 | s >> 27) ^ w[i];
     return s;
 }
@@ -51,17 +52,23 @@ static uint32_t set_sum(const struct set_block *b)
 uint32_t settings_put(uint32_t *w)
 {
     struct set_block *b = (struct set_block *)w;
-    __builtin_memcpy(b->magic, "NEWFWSET 1  ", 12);
+    __builtin_memset(b, 0, sizeof *b);          /* the padding too: it is in the sum */
+    __builtin_memcpy(b->magic, "NEWFWSET 2  ", 12);
     b->s = cfg;
-    b->sum = set_sum(b);
+    b->sum = set_sum(w, __builtin_offsetof(struct set_block, sum) / 4);
     return b->sum;
 }
 
 void settings_get(const uint32_t *w)
 {
     const struct set_block *b = (const struct set_block *)w;
-    if (!__builtin_memcmp(b->magic, "NEWFWSET 1  ", 12) && b->sum == set_sum(b)) {
-        cfg = b->s;                             /* each value checked: a bad one, its default */
+    int v2 = !__builtin_memcmp(b->magic, "NEWFWSET 2  ", 12) &&
+             b->sum == set_sum(w, __builtin_offsetof(struct set_block, sum) / 4);
+    int v1 = !__builtin_memcmp(b->magic, "NEWFWSET 1  ", 12) &&
+             w[SET_V1_WORDS] == set_sum(w, SET_V1_WORDS);
+    if (v1 || v2) {
+        cfg = defaults;                         /* each value checked: a bad one, its default */
+        __builtin_memcpy(&cfg, &b->s, v2 ? sizeof cfg : 8);
         if (cfg.screen >= N(screen_s))
             cfg.screen = defaults.screen;
         if (cfg.bright < 1 || cfg.bright > 10)
@@ -74,9 +81,11 @@ void settings_get(const uint32_t *w)
         cfg.swap_vol = cfg.swap_vol != 0;
         if (cfg.rg_pre < -6 || cfg.rg_pre > 6)
             cfg.rg_pre = 0;
-        log_printf("ui: settings: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
-                   "off %u, swap %u", cfg.screen, bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags",
-                   cfg.rg_pre, cfg.start, cfg.auto_off, cfg.swap_vol);   /* RG mode: resume.c */
+        cfg.uac_remote = cfg.uac_remote != 0;
+        log_printf("ui: settings %u: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
+                   "off %u, swap %u, remote %u", v2 ? 2 : 1, cfg.screen, bright_pct[cfg.bright - 1],
+                   cfg.names ? "names" : "tags", cfg.rg_pre, cfg.start, cfg.auto_off, cfg.swap_vol,
+                   cfg.uac_remote);   /* RG mode: resume.c */
     }
     lcd_brightness(bright_pct[cfg.bright - 1]); /* (ReplayGain: when a track is heard) */
 }

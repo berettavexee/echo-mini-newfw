@@ -176,7 +176,8 @@ int list_load(struct listing *l, const struct fat_dir *d)
 }
 
 /* The top level (ETUDE §38): the internal volume, then the card when one is in */
-static int sd_bad;                              /* the card in did not mount */
+static int sd_bad;                              /* the card in did not mount: SD_NOREPLY, SD_NOFS */
+enum { SD_NOREPLY = 1, SD_NOFS = 2 };
 
 static void top_entry(const char *name, uint16_t flags)
 {
@@ -195,7 +196,8 @@ int dir_load(const struct fat_dir *d)
         dir_l.used = 0;
         top_entry("Internal", 0);
         if (sd_present())
-            top_entry(sd_bad ? "SD card (not readable)" : "SD card", F_SD);
+            top_entry(sd_bad == SD_NOREPLY ? "SD card (not responding)" :
+                      sd_bad == SD_NOFS ? "SD card (needs FAT32 or exFAT)" : "SD card", F_SD);
     } else {
         r = list_load(&dir_l, d);
         if (r < 0 && d->vol == FAT_VOL_SD) {    /* a read error: mounted again at the next */
@@ -368,9 +370,14 @@ int sd_open(void)
     if (!sd_present())
         return -1;
     uint32_t t0 = ticks();
-    if (sd_init() || fat_mount_sd()) {
-        sd_bad = 1;
-        log_printf("ui: card not readable");
+    if (sd_init()) {
+        sd_bad = SD_NOREPLY;
+        log_printf("ui: card not readable: no reply (take it out and put it back)");
+        return -1;
+    }
+    if (fat_mount_sd()) {
+        sd_bad = SD_NOFS;
+        log_printf("ui: card not readable: no FAT32 or exFAT volume");
         return -1;
     }
     sd_bad = 0;
@@ -380,7 +387,7 @@ int sd_open(void)
     return 0;
 }
 
-/* A folder of the card could not be read: the top level, "SD card (not readable)" */
+/* A folder of the card could not be read: the top level, "SD card (not responding)" ... */
 static void card_failed(void)
 {
     if (!sd_bad || !depth || path[depth].dir.vol != FAT_VOL_SD)
@@ -400,7 +407,7 @@ static void enter(int i)
     dir_of_entry(e, &d);
     b_dirty = 1;
     if (d.vol == FAT_VOL_SD && sd_open()) {
-        dir_load(&path[depth].dir);             /* "SD card (not readable)" */
+        dir_load(&path[depth].dir);             /* "SD card (not responding)" ... */
         return;
     }
     depth++;
@@ -498,7 +505,7 @@ int browser_key(const struct key_ev *e)
                     return UI_FULL | UI_TO_PLAYING;
                 }
             } else
-                dir_load(&path[depth].dir);     /* "SD card (not readable)" */
+                dir_load(&path[depth].dir);     /* "SD card (not responding)" ... */
         } else if (ev == EV_PRESS && !ent(sel)->size) {
             play_failed(ent_name(sel), Q_EEMPTY); /* empty (grey): not played, the queue kept */
         } else if (ev == EV_PRESS) {

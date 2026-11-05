@@ -115,7 +115,8 @@ static void firmware_menu(void)
         log_printf("install: %s, %u bytes: check %d (%s)", l.f[sel].name, l.f[sel].size, r,
                    r ? upd_error(r) : "valid");
         if (r) {
-            sys_line(112, upd_error(r), WARN);
+            sys_line(112, upd_title(r), WARN);
+            sys_line(130, upd_hint(r), FG);
             sys_line(154, "BACK: return", DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();
@@ -131,7 +132,13 @@ static void firmware_menu(void)
         sys_line(54, info.two_copies ? "writes FW2, then FW1" : "too big for FW2: writes FW1 only", FG);
         unsigned mv = battery_mv();
         if (!vbus() && mv < 3600) {
-            sys_line(80, "battery too low: plug the USB cable", WARN);
+            p = put_str(b, "Battery too low (");
+            p = put_dec(p, battery_pct(mv));
+            p = put_str(p, " %)");
+            *p = 0;
+            sys_line(80, b, WARN);
+            sys_line(98, "plug the USB cable", FG);
+            log_printf("install: battery %u mV: refused", mv);
             sys_line(154, "BACK: return", DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();
@@ -152,8 +159,8 @@ static void firmware_menu(void)
         log_printf("install: result %d (%s) in %u ms", r, r ? upd_error(r) : "ok", millis() - t0);
         log_flush();
         if (r) {
-            sys_line(112, upd_error(r), WARN);
-            sys_line(130, "restart, then install again", WARN);
+            sys_line(112, upd_title(r), WARN);
+            sys_line(130, upd_hint(r), WARN);
             sys_line(154, "BACK: return", DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();

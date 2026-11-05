@@ -14,7 +14,7 @@ Groups (one folder each in OUTDIR):
   containers/  WAV: LIST INFO before / after the samples, an id3 chunk; AIFF: NAME/AUTH, an ID3
                chunk; M4A: moov before / after mdat
   covers/      baseline JPEG pictures of 300x300, 600x600 and 1200x1200 (the usual ones), and PNG
-               noise of 1 MB, 8 MB and 17 MB (past the 16 MiB tags.c reads at most), each
+               noise of 1 MB, 8 MB and 17 MB (past the 16 MiB tags.c reads at most; Ogg: 64 MiB), each
                put before the text tags, in FLAC (not 17 MB: a FLAC block holds less than
                16 MiB), MP3, Ogg Vorbis, Opus and M4A
 
@@ -496,10 +496,10 @@ def main():
                         continue                # a FLAC block holds less than 16 MiB
                     ogg = kind in ("vorbis", "opus")
                     add("covers", f"{kind}-cover{cname}.{EXT[kind]}", kind, rate, bits, ASCII,
-                        pic=pic, expect="any" if big else "tags",
+                        pic=pic, expect="any" if big and not ogg else "tags",
                         note=f"{len(pic[0])} bytes of {pic[1].upper()} before the text" +
                         (" (base64 in the comment header)" if ogg else "") +
-                        (", past the 16 MiB tags.c reads" if big else ""))
+                        (", past the 16 MiB tags.c reads (Ogg: 64 MiB)" if big else ""))
     for m in man:
         m["seconds"] = a.seconds
     with open(os.path.join(a.out, "manifest.json"), "w") as f:

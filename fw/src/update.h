@@ -7,7 +7,7 @@
 
 enum {
     UPD_EREAD = -10, UPD_ENOTFW = -11, UPD_ECOPY = -12, UPD_ESIZE = -13, UPD_ECRC = -14,
-    UPD_EWRITE = -15, UPD_EVERIFY = -16,
+    UPD_EWRITE = -15, UPD_EVERIFY = -16, UPD_ESHORT = -17, UPD_EBIG = -18,
 };
 
 struct fw_info {
@@ -23,6 +23,8 @@ typedef void (*progress_fn)(int stage, uint32_t done, uint32_t total);
 
 int fw_check(struct fat_file *f, struct fw_info *info, progress_fn progress);
 int fw_install(struct fat_file *f, const struct fw_info *info, progress_fn progress);
-const char *upd_error(int e);
+const char *upd_error(int e);   /* the cause, for the log */
+const char *upd_title(int e);   /* what went wrong, then what to do: the installer's screen */
+const char *upd_hint(int e);
 
 #endif

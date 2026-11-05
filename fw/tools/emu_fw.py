@@ -20,6 +20,8 @@ address and lists the busiest at the end.
 --keys holds a key from a simulated time on (VOL-, VOL+, PLAY, MENU, BACK, NONE), --shots
 saves the screen at given times, --expect-fw checks FW1 (and FW2 when it fits) against a file,
 --pcm saves core B's output, --dac what the DMA reads from the DAC ring (what is heard).
+--sd CARD.IMG: a microSD card (reads only); --sd-noreply: a card that never leaves its busy
+state (ACMD41), as one that does not answer.
 --cut-after N: a power cut once N sectors of the firmware area are written (the rest of that
 write lost, the emulation stopped); with --dump-disk, the half-written disk is kept.
 --cycles: the time comes from the instructions run instead (ETUDE §94): core A runs in slices
@@ -302,6 +304,7 @@ class SDCard(MMC):
     def __init__(self, path, log):
         super().__init__(path, log)
         self.app = False
+        self.noreply = "--sd-noreply" in sys.argv
         self.f.seek(0, 2)
         self.size = self.f.tell() // 512
 
@@ -316,7 +319,7 @@ class SDCard(MMC):
         elif idx == 55:
             self.app, r[0x30] = True, 0x920
         elif idx == 41 and app:
-            r[0x30] = 0xC0FF8000
+            r[0x30] = 0x00FF8000 if self.noreply else 0xC0FF8000   # --sd-noreply: always busy
         elif idx == 3:
             r[0x30] = 0x12340500
         elif idx == 9:                                            # CSD 2.0

@@ -289,6 +289,23 @@ void usb_iso_in_open(uint32_t mps, uint32_t every)
     ptx_flush();
 }
 
+void usb_int_in_open(uint32_t mps)
+{
+    REG(DIEPCTL(2)) = 3u << 18 | EP_ACTIVE | EP_SD0PID | EP_SNAK | mps;    /* interrupt, FIFO 0 */
+    REG(DIEPINT(2)) = 0xff;
+    usb.int_in_busy = 0;
+}
+
+int usb_int_in_send(const void *data, uint32_t n)
+{
+    if (usb.int_in_busy || !(REG(DIEPCTL(2)) & EP_ACTIVE))
+        return -1;
+    usb.int_in_busy = 1;
+    REG(DIEPTSIZ(2)) = 1u << 19 | n;
+    REG(DIEPCTL(2)) |= EP_ENA | EP_CNAK;
+    return fifo_write(2, data, n);
+}
+
 void usb_iso_in_close(void)
 {
     if (REG(DIEPCTL(1)) & EP_ENA)
@@ -374,6 +391,12 @@ static void handle_setup(void)
             case 3:
                 if ((value & 0xff) < sizeof strings / sizeof *strings)
                     ep0_send(tmp, string_desc(value & 0xff, tmp), length);
+                else
+                    ep0_stall();
+                break;
+            case 0x22:                                  /* a HID report descriptor */
+                if (cls && cls->report && (type & 0x1f) == 1)
+                    ep0_send(cls->report, cls->report_len, length);
                 else
                     ep0_stall();
                 break;
@@ -591,6 +614,14 @@ void usb_service(void)
                 cls->iso_in_done();
             } else if (i & INT_XFERCOMPL)
                 in_done = 1;
+        }
+        if (d & 4u) {
+            uint32_t i = REG(DIEPINT(2));
+            REG(DIEPINT(2)) = i;
+            if (i & INT_XFERCOMPL) {
+                usb.int_in_sent++;
+                usb.int_in_busy = 0;
+            }
         }
     }
 }
@@ -813,7 +844,7 @@ void usb_start_class(const struct usb_class *c)
     REG(DOEPINT(0)) = 0xff;
     REG(DIEPMSK) = INT_XFERCOMPL;
     REG(DOEPMSK) = INT_XFERCOMPL | INT_SETUP;
-    REG(DAINTMSK) = 0x00030003;
+    REG(DAINTMSK) = 0x00030007;                     /* endpoints 0, 1 (and 2 IN) */
     REG(GINTMSK) = 0;                                   /* polled */
     REG(GINTSTS) = 0xffffffff;
     REG(DCTL) &= ~DCTL_SFTDISCON;                       /* connect */

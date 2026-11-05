@@ -60,8 +60,9 @@ static void usb_mode(int writable)
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
     sys_line(0, writable ? "USB disk (read/write)" : "USB disk (read only)", writable ? WARN : TITLE);
     if (storage_err || volume_err || emmc_sectors(&total) || total <= vol.base) {
-        sys_line(36, "internal volume not available", WARN);
-        mdelay(2000);
+        sys_line(36, "No FAT32 volume on the internal memory", WARN);
+        sys_line(54, "nothing to share over USB", FG);
+        mdelay(2500);
         return;
     }
     if (!vbus()) {
@@ -73,7 +74,8 @@ static void usb_mode(int writable)
     if (writable)
         sys_line(122, "eject on the computer before unplugging", WARN);
     if (msc_start(vol.base, total - vol.base, writable)) {
-        sys_line(36, "write fence refused: volume inside the system area", WARN);
+        sys_line(36, "Cannot share the internal memory", WARN);
+        sys_line(54, "its volume overlaps the firmware area", FG);
         log_printf("usb: write fence refused for %x + %u", vol.base, total - vol.base);
         mdelay(3000);
         return;

@@ -243,6 +243,9 @@ int q_prev_index(int i)                  /* the track before i (BACK), or -1 */
 }
 
 /* ---- building the queue ---- */
+static struct fat_dir q_top;                    /* the folder held (q_tree) */
+static int q_tree;
+
 static void q_done(const char *name, uint32_t t0)
 {
     q_n = 0;
@@ -281,6 +284,7 @@ void q_from_dir(int start)
 {
     uint32_t t0 = ticks();
     q_clear();
+    q_tree = 0;
     qd_set(0, &path[depth].dir, 0);
     qd_n = 1;
     if (ql_load(0) == 0)
@@ -310,6 +314,8 @@ void q_from_tree(const struct fat_dir *top, const char *name)
     uint32_t t0 = ticks();
     int lost = 0;
     q_clear();
+    q_tree = 1;
+    q_top = *top;
     qd_set(0, top, 0);
     qd_n = 1;
     ql.quiet = 0;
@@ -345,4 +351,40 @@ void q_from_tree(const struct fat_dir *top, const char *name)
         log_printf("ui: %d folders left out (%d at most)", lost, Q_DIRS);
     q_done(name, t0);
     q_cur = play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;     /* shuffle: from anywhere */
+}
+
+/* ---- the resume state of a tree queue (resume.c) ---- */
+int q_state_get(struct q_state *s)
+{
+    s->cluster = q_top.cluster;
+    s->size = q_top.size;
+    s->vol = (uint8_t)q_top.vol;
+    s->contig = (uint8_t)q_top.contig;
+    s->tree = (uint8_t)q_tree;
+    s->pad = 0;
+    s->seed = q_seed;
+    s->base = (uint32_t)q_base;
+    s->cur = q_cur;
+    s->n = q_n;
+    return q_tree && q_n;
+}
+
+/* The same tree walked again: its order is kept when it holds as many tracks (the shuffle needs
+ * the same q_n); the caller checks the track at s->cur */
+int q_state_set(const struct q_state *s, const char *name)
+{
+    struct fat_dir d;
+    d.cluster = s->cluster;
+    d.size = s->size;
+    d.vol = s->vol;
+    d.contig = s->contig;
+    q_from_tree(&d, name);
+    if (!q_n)
+        return -1;
+    if (q_n == s->n) {
+        q_seed = s->seed;
+        q_base = (int)s->base;
+        q_cur = s->cur >= 0 && s->cur < q_n ? s->cur : 0;
+    }
+    return 0;
 }

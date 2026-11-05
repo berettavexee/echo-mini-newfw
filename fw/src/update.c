@@ -47,18 +47,44 @@ static int same(const uint32_t *a, const uint32_t *b, uint32_t words)
     return 1;
 }
 
+static const struct { int e; const char *cause, *title, *hint; } upd_msg[] = {
+    { UPD_EREAD, "read error", "Cannot read the file", "copy it to the player again" },
+    { UPD_ENOTFW, "not an RKnanoFW image", "Not a firmware image", "use an ECHO MINI .IMG file" },
+    { UPD_ESHORT, "file shorter than its image", "Incomplete file", "download or copy it again" },
+    { UPD_EBIG, "image larger than the firmware area", "Image too large for this player",
+      "8 GB ECHO MINI images only" },
+    { UPD_ESIZE, "size / layout not accepted", "Unknown image layout",
+      "not an image for this player" },
+    { UPD_ECOPY, "header copy mismatch", "Damaged image", "download it again" },
+    { UPD_ECRC, "CRC mismatch", "Damaged image", "download it again" },
+    { UPD_EWRITE, "flash write failed", "Flash write failed", "restart, then install again" },
+    { UPD_EVERIFY, "flash verify failed", "Flash write failed", "restart, then install again" },
+};
+
+static int upd_find(int e)
+{
+    for (unsigned i = 0; i < sizeof upd_msg / sizeof *upd_msg; i++)
+        if (upd_msg[i].e == e)
+            return (int)i;
+    return -1;
+}
+
 const char *upd_error(int e)
 {
-    switch (e) {
-    case UPD_EREAD: return "read error";
-    case UPD_ENOTFW: return "not an RKnanoFW image";
-    case UPD_ECOPY: return "header copy mismatch";
-    case UPD_ESIZE: return "size / layout not accepted";
-    case UPD_ECRC: return "CRC mismatch";
-    case UPD_EWRITE: return "flash write failed";
-    case UPD_EVERIFY: return "flash verify failed";
-    default: return "error";
-    }
+    int i = upd_find(e);
+    return i < 0 ? "error" : upd_msg[i].cause;
+}
+
+const char *upd_title(int e)
+{
+    int i = upd_find(e);
+    return i < 0 ? "Install failed" : upd_msg[i].title;
+}
+
+const char *upd_hint(int e)
+{
+    int i = upd_find(e);
+    return i < 0 ? "restart, then try again" : upd_msg[i].hint;
 }
 
 int fw_check(struct fat_file *f, struct fw_info *info, progress_fn progress)
@@ -79,9 +105,12 @@ int fw_check(struct fat_file *f, struct fw_info *info, progress_fn progress)
     info->year = h[0] | h[1] << 8;
     info->day = h[2];
     info->month = h[3];
-    if (info->fw_end < 0x200 || info->fw_end % 512 || info->fw_end + 0x200 > info->fw_size ||
-        f->size < info->fw_size + 4 || info->fw_size / 512 > emmc.p)
+    if (info->fw_end < 0x200 || info->fw_end % 512 || info->fw_end + 0x200 > info->fw_size)
         return UPD_ESIZE;
+    if (info->fw_size / 512 > emmc.p)
+        return UPD_EBIG;
+    if (f->size < info->fw_size + 4)
+        return UPD_ESHORT;
     info->two_copies = info->fw_size / 512 <= emmc.r;
 
     /* one pass: CRC over fw_size bytes, header copy compared on the way */
