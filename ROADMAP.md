@@ -190,8 +190,31 @@ One line per version; the measurements are in `ETUDE.md`.
   place).
 - Measure on the device a whole-tree queue on the card with a full library (some 18,000 tracks
   in 1,400 folders: 3.6 s simulated in the emulator, which does not model the card's speed).
-- The emulator: a virtual FAT disk built on demand from a list of paths, for test libraries
-  larger than the PC's RAM (the disks of `scenarios.py` are made in `/tmp`, in RAM).
+- The emulator (`fw/tools/emu_fw.py`, `work/emu/scenarios.py`); ideas from the other projects'
+  emulators and simulators (Podium's Unicorn emulator, EchoPod's SDL simulator, ReChord's QEMU
+  set-up; ideas only, their code is GPL-3), by usefulness:
+  Points 1 to 4 implemented on 2026-11-05 (ETUDE §94, not committed yet): 11 installer scenarios
+  pass, power cuts included; `fw/tools/emutest.py` and a CI step; `--cycles`, `--mmc-lat`.
+  1. installer tests: FW2 written before FW1 and the header last, wrong images refused with
+     nothing written (EchoPod, stock, RECHO, the running image again), and a power cut in the
+     middle of the writes followed by a reboot on the half-written disk;
+  2. scenarios that check themselves: expected log lines and screen hashes per scenario, a
+     pass/fail result, a few short ones in the CI;
+  3. a clock from the instructions run and the core's frequency (following the PLL), SysTick and
+     TIMER1 modelled, instead of `ticks()` advancing 50 us a call: real latencies (key to sound,
+     the longest UI gap), `clock_measure()` testable;
+  4. eMMC and microSD latency per command and per block, so that I/O-bound times show (cold
+     boot, a big folder, the whole-tree queue);
+  5. volumes generated on demand (a sparse disk whose files, valid FLAC frames, are made when
+     read): libraries larger than the PC's RAM, cluster sizes (512 bytes), the files a Mac leaves
+     (Spotlight, fseventsd, `._` files);
+  6. sector reads counted by phase (FAT or data), to catch regressions;
+  7. a finer panel model: drawing windows and sweeps followed, full redraws and flicker counted,
+     the time of the first frame;
+  8. a check that the ELF matches the image (wrong symbols otherwise);
+  9. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
+  Missing everywhere: a simulated USB host (enumeration, isochronous packets, feedback), to test
+  the sound card and the HID without the device.
 - Resume a queue made by PLAY held (a tree, the whole card) after a power off: today only a
   queue of one folder resumes (the top level is shown). To save: the folder held, the shuffle
   seed and order position, the track (its folder and cluster, to check it is the same).

@@ -36,6 +36,13 @@ jobs:
         run: |
           make -C fw -j"$(nproc)" | tee build.log
           grep '^wrote' build.log >> "$GITHUB_STEP_SUMMARY"
+      - name: Emulator tests
+        # the image under the Unicorn emulator, on a disk with a synthetic boot area and
+        # generated sounds (fw/tools/emutest.py; the longer installer tests run locally)
+        run: |
+          apt-get install -qy --no-install-recommends mtools dosfstools
+          pip install -q unicorn==2.1.4 numpy==2.5.4
+          python3 fw/tools/emutest.py fw/build/HIFIEC70.IMG fw/build/fw.elf boot play-wav install-badcrc
       - uses: actions/upload-artifact@v4
         with:
           name: HIFIEC70-${{ github.sha }}

@@ -7,6 +7,11 @@ copied anywhere else), our firmware in FW1, an MBR at 0x81000 and a FAT32 volume
   (NAME may hold folders, A/B/C.MP3: they are made)
   (--boot defaults to $ECHO_BOOTDUMP, else BOOTDUMP.BIN in the current directory)
   mkdisk.py OUT.img FW.IMG --vol VOLUME.img        (a FAT32 volume made beforehand)
+  --synth-idb: no dump: a boot area holding only what the firmware reads of the IDB (emmc_init:
+  the signature at sector 64, "NANO" and the firmware area's size in MiB in its 2nd sector), no
+  loader code; for the CI, where no device dump may be used
+  --fw2: the firmware in FW2 too (FW1 + R, R = half the firmware area given by the IDB), as an
+  install leaves it
 """
 import os
 import struct
@@ -43,6 +48,12 @@ def main():
         i = a.index("--boot"); boot = a[i + 1]; del a[i:i + 2]
     if "--size-mb" in a:
         i = a.index("--size-mb"); size = int(a[i + 1]); del a[i:i + 2]
+    synth = "--synth-idb" in a
+    if synth:
+        a.remove("--synth-idb")
+    fw2 = "--fw2" in a
+    if fw2:
+        a.remove("--fw2")
     volfile = None
     if "--vol" in a:
         i = a.index("--vol"); volfile = a[i + 1]; del a[i:i + 2]
@@ -56,14 +67,31 @@ def main():
     mbr = bytearray(512)
     mbr[446:462] = bytes([0, 0, 0, 0, 0x0c, 0, 0, 0]) + struct.pack("<II", 64, len(v) // 512)
     mbr[510:512] = b"\x55\xaa"
+    if synth:                                   # 54 MiB of firmware area, as on the device
+        b = bytearray(0x2000 * 512)
+        struct.pack_into("<I", b, 64 * 512, 0xfcdc8c3b)
+        struct.pack_into("<H", b, 65 * 512 + 2, 54)
+        b[65 * 512 + 0x0a:65 * 512 + 0x0e] = b"NANO"
+        bootarea = bytes(b)
+    else:
+        bootarea = open(boot, "rb").read()
     with open(out, "wb") as f:
-        f.write(open(boot, "rb").read())
+        f.write(bootarea)
         f.seek(0x2000 * 512)
         f.write(open(fw, "rb").read())
+        if fw2:                                 # R from the IDB (emmc_init): MiB at +0x202 of
+            mib = struct.unpack_from("<H", bootarea, 65 * 512 + 2)[0]   # its 2nd sector
+            f.seek((0x2000 + mib * 1024) * 512)
+            f.write(open(fw, "rb").read())
         f.seek(0x81000 * 512)
         f.write(mbr)
-        f.seek((0x81000 + 64) * 512)
-        f.write(v)
+        base = (0x81000 + 64) * 512                     # sparse: the empty blocks skipped
+        for o in range(0, len(v), 65536):
+            blk = v[o:o + 65536]
+            if blk.count(0) != len(blk):
+                f.seek(base + o)
+                f.write(blk)
+        f.truncate(base + len(v))
     print(f"{out}: {os.path.getsize(out) // 512} sectors, files: {', '.join(files) or '-'}")
 
 

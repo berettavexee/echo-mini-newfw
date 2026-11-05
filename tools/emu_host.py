@@ -36,8 +36,6 @@ from unicorn.arm_const import (UC_ARM_REG_APSR, UC_ARM_REG_R0, UC_ARM_REG_R1, UC
                                UC_ARM_REG_R12, UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_PC,
                                UC_ARM_REG_XPSR)
 
-sys.path.insert(0, __file__.rsplit("/", 3)[0])
-from rknanofw import overlays                                     # noqa: E402
 
 MBOX, STOP = 0x40110000, 0x0001FFF0
 DESC = 0x03010000                                                 # descriptor in main-core RAM
@@ -338,6 +336,8 @@ class Accel:
 class Hifi:
     def __init__(self, img, m, path, trace):
         d = open(img, "rb").read()
+        sys.path.insert(0, __file__.rsplit("/", 3)[0])            # rknanofw.py, outside the
+        from rknanofw import overlays                             # repository: the stock modules
         c, base, ents = overlays(d)
         cl, ce, cs, dl, de, ds, be, bs = ents[m]
         code = c[cl - base:cl - base + cs]

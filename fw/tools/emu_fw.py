@@ -20,6 +20,19 @@ address and lists the busiest at the end.
 --keys holds a key from a simulated time on (VOL-, VOL+, PLAY, MENU, BACK, NONE), --shots
 saves the screen at given times, --expect-fw checks FW1 (and FW2 when it fits) against a file,
 --pcm saves core B's output, --dac what the DMA reads from the DAC ring (what is heard).
+--cut-after N: a power cut once N sectors of the firmware area are written (the rest of that
+write lost, the emulation stopped); with --dump-disk, the half-written disk is kept.
+--cycles: the time comes from the instructions run instead (ETUDE §94): core A runs in slices
+of --slice instructions (20000), each one advancing the clock by slice / cpu_hz (the
+firmware's own variable, so it follows the PLL and the clocks on the crystal); ticks() and
+millis() read it, busy waits cost instructions as on the device, core B runs 100 instructions a
+microsecond while awake. TIMER1 (24 MHz) follows the same clock in both modes.
+--mmc-lat RC,RS,WC,WS and --sd-lat RC,RS,WC,WS (with --cycles): the eMMC / microSD answer
+after RC + RS x sectors us for a read, WC + WS x sectors us for a write (FIFO empty, data busy
+meanwhile), so that I/O-bound times show; ETUDE §94 gives the device's figures to compare.
+--boot-disk: the image is not taken from IMG but from the disk, as the stock loader chooses it
+(ETUDE 2.2): FW1 when its RKnanoFW signature and its header copy at fw_end match, else FW2
+(no CRC); IMG then only names the ELF.
 """
 import os
 import struct
@@ -153,6 +166,21 @@ class MMC:
         self.rint, self.auto, self.cmds = 0, 0, 0
         self.order = []                                           # write runs, in order
         self.p = 0x1b000                                          # from the IDB of BOOTDUMP
+        self.cut, self.fw_written, self.stop = None, 0, None      # --cut-after
+        self.cut_done = False
+        self.now, self.lat = None, None                           # --mmc-lat / --sd-lat
+        self.pending, self.ready_at, self.wbusy_until = None, 0, 0
+
+    def tick(self):
+        """--*-lat: the data of a read shows, a write ends, once its time has come"""
+        if not self.lat:
+            return
+        t = self.now()
+        if self.pending is not None and t >= self.ready_at:
+            self.rq, self.pending = self.pending, None
+        if self.wbusy_until and t >= self.wbusy_until:
+            self.wbusy_until = 0
+            self.rint |= 8 | (0x4000 if self.auto else 0)
 
     def sector(self, n):
         if n in self.written:
@@ -163,6 +191,9 @@ class MMC:
         return self.f.read(512).ljust(512, b"\0")
 
     def read(self, off):
+        self.tick()
+        if off == 0x48 and (self.pending is not None or self.wbusy_until):
+            return 1 << 9 | (4 if not self.rq else 0)              # data busy, FIFO empty
         if off == 0x2c:
             return self.regs.get(0x2c, 0) & 0x7fffffff
         if off == 0x00:
@@ -193,13 +224,25 @@ class MMC:
                     lba = self.wlba + i
                     if not FW1 <= lba < FW1 + self.p and not 0x81000 <= lba:
                         self.log.append(f"!! WRITE OUTSIDE THE FIRMWARE AREA: sector {lba:#x}")
+                    if self.cut is not None and FW1 <= lba < FW1 + self.p:
+                        if self.fw_written >= self.cut:           # the power is gone
+                            self.log.append(f"POWER CUT after {self.fw_written} firmware "
+                                            f"sectors, at sector {lba:#x}")
+                            self.cut, self.cut_done = None, True
+                            if self.stop:
+                                self.stop()
+                            break
+                        self.fw_written += 1
                     self.written[lba] = data[512 * i:512 * (i + 1)]
                 if self.order and self.order[-1][1] == self.wlba:
                     self.order[-1][1] += len(data) // 512
                 else:
                     self.order.append([self.wlba, self.wlba + len(data) // 512])
                 self.wq = []
-                self.rint |= 8 | (0x4000 if self.auto else 0)
+                if self.lat:                                      # the write takes its time
+                    self.wbusy_until = self.now() + self.lat[2] + self.lat[3] * (len(data) // 512)
+                else:
+                    self.rint |= 8 | (0x4000 if self.auto else 0)
 
     def command(self, val):
         idx, arg = val & 0x3f, self.regs.get(0x28, 0)
@@ -224,6 +267,9 @@ class MMC:
         else:
             raw = b"".join(self.sector(arg + i) for i in range(n))
             self.rq = list(struct.unpack("<%dI" % (len(raw) // 4), raw))
+            if self.lat:                                          # held until its time
+                self.pending, self.rq = self.rq, []
+                self.ready_at = self.now() + self.lat[0] + self.lat[1] * n
 
     def report(self, expect):
         if not self.written:
@@ -238,6 +284,8 @@ class MMC:
         print(f"eMMC: {self.cmds} commands, {len(lbas)} sectors written: " +
               ", ".join(f"{a:#x}-{b:#x}" for a, b in runs))
         print("  order: " + ", ".join(f"{a:#x}-{b - 1:#x}" for a, b in self.order))
+        fw = sum(1 for lba in lbas if FW1 <= lba < FW1 + self.p)
+        print(f"  firmware area: {fw} sectors written" if fw else "  firmware area: untouched")
         if expect:
             img = open(expect, "rb").read()
             fw_end = struct.unpack_from("<I", img, 0x1f4)[0]
@@ -283,9 +331,35 @@ class SDCard(MMC):
         super().command(val)
 
 
+def boot_from_disk(path):
+    """The stock loader's choice (ETUDE 2.2): FW1, else FW2; the copy's bytes and its name"""
+    f = open(path, "rb")
+
+    def rd(lba, n):
+        f.seek(lba * 512)
+        return f.read(n * 512).ljust(n * 512, b"\0")
+    mib = struct.unpack_from("<H", rd(65, 1), 2)[0]
+    for name, base in (("FW1", FW1), ("FW2", FW1 + mib * 1024)):
+        h = rd(base, 1)
+        fw_end = struct.unpack_from("<I", h, 0x1f4)[0]
+        if h[0x1f8:0x200] != b"RKnanoFW" or not 0 < fw_end < mib * 1024 * 512:
+            print(f"boot: {name} rejected (no signature)")
+            continue
+        f.seek(base * 512 + fw_end)
+        if f.read(512) != h:
+            print(f"boot: {name} rejected (header copy at fw_end differs)")
+            continue
+        print(f"boot: {name}")
+        return rd(base, (fw_end + 512 + 511) // 512), name
+    print("boot: no valid copy, the device would not start")
+    sys.exit(3)
+
+
 def main():
     img = sys.argv[1]
     d = open(img, "rb").read()
+    if "--boot-disk" in sys.argv:
+        d, _ = boot_from_disk(opt("--disk", None))
     sym = symbols(opt("--elf", img.rsplit("/", 1)[0] + "/fw.elf"))
     steps = int(opt("--steps", "60000000"))
     stop_us = int(opt("--ms", "0")) * 1000                      # --ms: stop at this simulated time
@@ -307,7 +381,11 @@ def main():
     # Unicorn handles the system space itself and has no running SysTick: ticks() is replaced
     # by a counter that advances by 50 us per call (stored in unused PMU-SRAM).
     t = sym["ticks"] & ~1
-    stub = bytes.fromhex("0249" "0868" "3230" "0860" "7047" "00bf") + struct.pack("<I", CLOCK)
+    cycles = "--cycles" in sys.argv
+    # --cycles: a read only (ldr, ldr, nop, nop, bx lr): a store back could, when a slice ends
+    # between the load and the store, put the clock back to its value before the slice
+    stub = bytes.fromhex("0249" "0868" + ("00bf00bf" if cycles else "32300860") + "7047" "00bf") + \
+        struct.pack("<I", CLOCK)                  # else: adds r0, #50; str r0, [r1]
     if t & 2:
         stub = bytes.fromhex("00bf") + stub
     u.mem_write(t, stub)
@@ -352,6 +430,10 @@ def main():
         cap["start"] = last
 
     def coreb_tick(uc, addr, size, _):
+        if stop_us and struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] >= stop_us:
+            uc.emu_stop()                         # --ms, also in a busy wait (no cpu_wait)
+        if cycles:
+            return                                # --cycles: core B runs per slice
         if sh.b and not sh.b.sleeping:
             sh.b.step(5000)
         if pcm_out and sh.b:
@@ -392,7 +474,14 @@ def main():
     keys = sorted((int(t), keyval[k] if k in keyval else int(k)) for t, k in (x.split(":") for x in opt("--keys", "").split(",") if x))
     shots = sorted((int(t), f) for t, f in (x.split(":") for x in opt("--shots", "").split(",") if x))
     mmc = MMC(opt("--disk", None), log)
+    clock_us = lambda: struct.unpack("<I", u.mem_read(CLOCK, 4))[0]  # noqa: E731
+    if opt("--mmc-lat", None):
+        mmc.now, mmc.lat = clock_us, [int(x) for x in opt("--mmc-lat", None).split(",")]
+    if opt("--cut-after", None):
+        mmc.cut, mmc.stop = int(opt("--cut-after", None)), u.emu_stop
     sdc = SDCard(opt("--sd", None), log) if opt("--sd", None) else None
+    if sdc and opt("--sd-lat", None):
+        sdc.now, sdc.lat = clock_us, [int(x) for x in opt("--sd-lat", None).split(",")]
     sd_out = int(opt("--sd-out", "0")) or None                    # ms: the card is removed
     adc0_at = sorted(tuple(int(v) for v in x.split(":"))            # MS:VALUE, ... (mV * 1024 / 5000)
                      for x in opt("--adc0-at", "").split(",") if x)
@@ -434,6 +523,9 @@ def main():
                 return int.from_bytes(r[k:k + 4], "little")
             if a == 0x40180004:
                 return regs.get(a, 0) | 0x0400                   # PLL locked (bit 10)
+            if a in (0x400e0028, 0x400e002c):                    # TIMER1 counts down at 24 MHz
+                n = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] * 24 + state.get("t1frac", 0)
+                return ~(n >> (32 if a == 0x400e002c else 0)) & 0xffffffff
             if a == 0x400d0000:
                 events(uc)
                 return adc[state["adc_ch"]]
@@ -570,7 +662,26 @@ def main():
     u.reg_write(UC_ARM_REG_R1, sp)
     u.reg_write(UC_ARM_REG_R2, pc)
     try:
-        u.emu_start(pc, 0xffffffff, count=steps)
+        if not cycles:
+            u.emu_start(pc, 0xffffffff, count=steps)
+        else:                                     # slices: the clock from the instructions
+            k, done, now = int(opt("--slice", "20000")), 0, 0.0
+            hz_at = sym.get("cpu_hz")
+            cur = pc
+            while done < steps:
+                u.emu_start(cur | 1, 0xffffffff, count=k)
+                done += k
+                hz = struct.unpack("<I", u.mem_read(hz_at, 4))[0] if hz_at else 24000000
+                clk = struct.unpack("<I", u.mem_read(CLOCK, 4))[0]
+                now = max(now, float(clk)) + k * 1e6 / max(hz, 1000000)
+                u.mem_write(CLOCK, struct.pack("<I", int(now) & 0xffffffff))
+                if sh.b and not sh.b.sleeping:
+                    sh.b.step(int(k * 1e8 / max(hz, 1000000)))
+                if pcm_out and sh.b:
+                    capture()
+                if (stop_us and now >= stop_us) or mmc.cut_done:
+                    break
+                cur = u.reg_read(UC_ARM_REG_PC)
     except Exception as ex:                                       # noqa: BLE001
         log.append(f"EXCEPTION {ex} at pc {u.reg_read(UC_ARM_REG_PC):#x}, sp "
                    f"{u.reg_read(UC_ARM_REG_SP):#x}, lr {u.reg_read(UC_ARM_REG_LR):#x}")
@@ -600,9 +711,17 @@ def main():
         panel.png(opt("--png", "screen.png"))
     mmc.report(opt("--expect-fw", None))
     if opt("--dump-disk", None):                                  # disk with the writes applied
-        import shutil
         out = opt("--dump-disk", None)
-        shutil.copyfile(opt("--disk", None), out)
+        with open(opt("--disk", None), "rb") as src, open(out, "wb") as dst:   # sparse copy
+            while True:
+                blk = src.read(1 << 16)
+                if not blk:
+                    break
+                if blk.count(0) == len(blk):
+                    dst.seek(len(blk), 1)
+                else:
+                    dst.write(blk)
+            dst.truncate()
         with open(out, "r+b") as f:
             for lba, data in mmc.written.items():
                 f.seek(lba * 512)
