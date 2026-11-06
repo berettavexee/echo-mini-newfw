@@ -4029,3 +4029,24 @@ Faite sans l'appareil, comme l'étape 2 ; une image de test à la fin, `NEWFWR15
 - le pire passage de la boucle hors démarrage à froid des DAC (290 ms, une fois par session) : 26 ms (ouverture d'un Ogg de 24 Mo par le cœur B), au-dessus des 20 ms visés de peu ; tout le reste sous 16 ms ;
 - pile de la tâche : 576 octets au plus utilisés sur 6 144 (lecture d'étiquettes, parcours d'arbre) ; elle pourra être réduite si la BSS en a besoin (3,5 Kio de marge) ;
 - le blocage de 500 ms (`perf-stall`) et la minuterie (`sleep-fade`) PASS.
+
+## 101. Refonte, étape 3 sur l'appareil (r15) et corrections (image 99R16, 2026-11-06)
+
+**Session de la r15 sur l'appareil** (`work/hwlog/2026-11-06_0.99r15/`, 1 703 lignes, 78 pistes) :
+- **Lecture aléatoire de toute la carte** (PLAY maintenu, carte non montée) : montage de la carte (253 ms) et parcours de 18 257 pistes dans 1 396 dossiers en **3,2 s dans la tâche**, la piste en cours continuant : plus long trou du chemin audio **27 ms** (25 ms de tâche), aucun tour perdu. Avec la r9 la même opération gelait la boucle environ 3 s (§97).
+- **Étiquettes de la piste suivante lues en avance** à chaque enchaînement (« tags read ahead ») ; pile de la tâche : 648 octets au plus utilisés sur 6 144.
+- **Reprise après extinction** : deux fois juste (file d'arbre reconstruite, piste et position).
+- Hors refonte, déjà connus : l'album dont les Ogg refusent de s'ouvrir (-51, déjà dans les journaux d'octobre), la recherche Musepack sans table (398 ms), 500 ms d'« open » sur une piste FLAC qui cumulent les huit échecs précédents.
+
+| Format (r15, appareil) | Pistes | Trou max du chemin audio | Tours perdus |
+|---|---|---|---|
+| FLAC, ALAC, AAC, AIFF, WAV, Vorbis, MP3 | 56 | 25 à 132 ms (ouverture par le cœur B, hors démarrage des DAC et cas ci-dessus) | 0 |
+| Opus 48/16 | 18 | **2 147 ms** (étiquettes 2 049 ms, recherche) | **2** |
+
+**Défaut trouvé : la recherche relit les étiquettes.** Une recherche (VOL+ et VOL- ensemble) rouvre la piste en cours ; `q_open()` relisait ses étiquettes, de façon bloquante : sur un Opus dont l'en-tête de commentaires fait 13,8 Mo, 2 049 ms, deux tours de l'anneau DAC perdus. La lecture anticipée ne couvrait que la piste suivante.
+
+**r16 — correction.** `q_open()` garde la clé du fichier dont les étiquettes sont dans `tg_next` (cluster, taille, volume) ; le même fichier rouvert (recherche, piste mise en veille longue rejouée) les reprend sans lecture (« ui: tags kept »). Scénario `perf-seek-cover` (Opus, pochette de 17 Mo, `--cycles`) : **1 408 ms → 85 ms** (il reste l'ouverture au point visé par le cœur B, 78 ms), plus de tour perdu.
+
+**r16 — barre de progression vide à la reprise.** Après une extinction, une piste reprise en pause (« parked ») n'est pas ouverte : sa durée (`player_heard.length_ms`) était inconnue, la barre vide et la recherche refusée jusqu'à la lecture. La durée est maintenant sauvegardée dans l'état de reprise (deux mots après la somme, avec leur propre contrôle : un état écrit par une version plus ancienne se relit, sans barre) et rendue par `len_ms()` au même titre que la position (`now_ms()`) ; la mise en veille longue d'une pause la garde aussi. La recherche marche donc aussi sur une piste reprise en pause. Test `resume-paused-zero` : « paused at 0 ms of 10000 ».
+
+Vérification de la r16 dans l'émulateur : 17 tests `emutest` PASS, `perf-seek-cover` PASS (la r15 y échoue).

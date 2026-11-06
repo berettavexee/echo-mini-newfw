@@ -163,20 +163,20 @@ static void draw_playing_do(int full)
         p = put_str(b, "go to ");
         p = fmt_time(p, sk_ms);
         p = put_str(p, " / ");
-        p = fmt_time(p, player_heard.length_ms);
+        p = fmt_time(p, len_ms());
         p = put_str(p, sk_ms >= sk_from ? "   +" : "   -");
         p = fmt_time(p, sk_ms >= sk_from ? sk_ms - sk_from : sk_from - sk_ms);
         lcd_text_clip(4, 122, b, LCD_W, SK_FG, BG);
-        seek_bar(140, 5, now_ms(), sk_ms, player_heard.length_ms);
+        seek_bar(140, 5, now_ms(), sk_ms, len_ms());
         lcd_text_clip(4, 150, "VOL+/- move  PLAY go  BACK cancel", LCD_W, DIM, BG);
         return;
     }
     p = fmt_time(b, now_ms());
     p = put_str(p, " / ");
-    p = fmt_time(p, player_heard.length_ms);
+    p = fmt_time(p, len_ms());
     *p = 0;
     lcd_text_clip(4, 122, b, LCD_W, FG, BG);
-    progress_bar(140, 5, now_ms(), player_heard.length_ms);
+    progress_bar(140, 5, now_ms(), len_ms());
     p = put_str(b, codec_name(q_ent(q_cur) ? q_ent(q_cur)->flags & F_CODEC : 0));
     p = put_str(p, "  ");
     p = put_dec(p, player_heard.rate / 1000);

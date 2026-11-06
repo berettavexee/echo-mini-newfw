@@ -8,6 +8,8 @@
 int play_level = 80;                            /* PCM_VOL: attenuation / 2 dB, start at -40 dB */
 struct tags tg = { .rg_gain = { RG_NONE, RG_NONE } };    /* of the track heard (none yet) */
 static struct tags tg_next;                     /* of the one opened last */
+static struct { uint32_t cluster, size; int vol, ok; } tg_key;  /* its file: a seek, a parked
+                                                 * track played again reuse its tags (§101) */
 static int fresh;                               /* the output was (re)started: fade in once fed */
 static int draining;                            /* end of the queue: the DAC ring plays out */
 uint32_t heard_gen;
@@ -222,13 +224,21 @@ static int q_open(int i, int chain)
         storage_drain();                        /* tags.c is not reentrant: the job ends first */
     int ahead = prep.state == PREP_READY && prep.idx == i && prep.f.cluster == f.cluster &&
                 prep.f.size == f.size && prep.f.vol == f.vol;
+    int same = tg_key.ok && tg_key.cluster == f.cluster && tg_key.size == f.size &&
+               tg_key.vol == f.vol;             /* the same file again (a seek): kept */
     if (ahead)
         tg_next = prep.t;
-    else
+    else if (!same)
         tags_read(&f, flags & F_CODEC, &tg_next);
+    tg_key.cluster = f.cluster;
+    tg_key.size = f.size;
+    tg_key.vol = f.vol;
+    tg_key.ok = 1;
     perf_end(pp);
     log_printf("ui: tags in %u us: '%s' / '%s' / '%s' / %u", ticks() - t0, tg_next.title,
                tg_next.artist, tg_next.album, tg_next.track);
+    if (same && !ahead)
+        log_printf("ui: tags kept (the same track again)");
     if (ahead)
         log_printf("ui: tags read ahead, over %u ms of the track before; storage stack %u bytes "
                    "never used", prep.ms, storage_stack_free());
@@ -253,7 +263,7 @@ static int q_open(int i, int chain)
 /* Parked: a long pause (PARK_MS) stops the track, core B and the DACs; PLAY starts it again
  * where it was (player_seek_hint). Also the state after a resume of a paused track. */
 int parked;
-uint32_t parked_ms;
+uint32_t parked_ms, parked_len;                 /* parked: where, and the track's length */
 
 void play_stop(int how)
 {
@@ -379,9 +389,14 @@ uint32_t now_ms(void)                    /* the position shown */
     return parked ? parked_ms : player_heard.time_ms;
 }
 
+uint32_t len_ms(void)                           /* the length shown (parked: the one saved) */
+{
+    return parked ? parked_len : player_heard.length_ms;
+}
+
 void seek_begin(void)
 {
-    if (!q_n || !player_heard.length_ms || (!q_playing && !parked)) {
+    if (!q_n || !len_ms() || (!q_playing && !parked)) {
         log_printf("ui: no seek (nothing open, or no length)");
         return;
     }
@@ -400,7 +415,7 @@ void seek_move(int d, int repeat)
         return;
     sk_step_ms = now;
     uint32_t step = !repeat || held < 1500 ? 10000 : held < 4000 ? 30000 : 60000;
-    uint32_t max = player_heard.length_ms > 1000 ? player_heard.length_ms - 1000 : 0;
+    uint32_t max = len_ms() > 1000 ? len_ms() - 1000 : 0;
     if (d < 0)
         sk_ms = sk_ms > step ? sk_ms - step : 0;
     else
@@ -413,7 +428,7 @@ void seek_end(int go)
     uint32_t d = sk_ms > sk_from ? sk_ms - sk_from : sk_from - sk_ms;
     if (!go || d < 500 || sk_cur != q_cur || (!q_playing && !parked))
         return;
-    log_printf("ui: seek %u -> %u ms of %u%s", now_ms(), sk_ms, player_heard.length_ms,
+    log_printf("ui: seek %u -> %u ms of %u%s", now_ms(), sk_ms, len_ms(),
                parked ? " (parked)" : "");
     if (parked) {
         parked_ms = sk_ms;

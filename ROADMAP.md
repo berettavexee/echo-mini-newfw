@@ -3,9 +3,9 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-05, version 0.99 and `main` since (the sound card's remote and Power key,
-the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r15,
-steps 1 to 3).
+Last update: 2026-11-06, version 0.99 and `main` since (the sound card's remote and Power key,
+the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r16,
+steps 1 to 3, step 3 checked on the device).
 
 ## Done, validated on the device
 
@@ -73,11 +73,14 @@ and checked on the device before the next; `main` stays the working firmware mea
    tasks are named in the perf lines. Left: the keys read in the SysTick interrupt (needs a
    SysTick in the emulator, or the device), the screens that stop the music still in loops of
    their own (USB, install, sound card, system).
-3. **A storage task** (0.99r10-r15, ETUDE §100, in the emulator; the device test of r15
-   pending): a coroutine run by the main loop 4 ms a pass; the next track's tags read ahead
-   (a 17.9 MB Ogg cover no longer between two tracks), the tree walk and a card mounted there,
-   saves written after the frame. Left blocking: a Musepack seek without a seek table, a folder
-   opened by the browser, a card mounted from the browser.
+3. **A storage task** (0.99r10-r16, ETUDE §100-§101; checked on the device with r15): a
+   coroutine run by the main loop 4 ms a pass; the next track's tags read ahead (a 17.9 MB Ogg
+   cover no longer between two tracks), the tree walk and a card mounted there (the whole card,
+   18,257 tracks, in 3.2 s with the music on: 27 ms at most out of the audio path), saves
+   written after the frame. r16: a seek keeps the track's tags (a 2 s block on an Opus with a
+   13.8 MB cover), the bar of a track resumed paused after a power off shows its length. Left
+   blocking: a Musepack seek without a seek table, a folder opened by the browser, a card
+   mounted from the browser.
 4. Core B writes the PCM ring (64 KiB), the input ring in SYSRAM.
 5. Records in the input ring (TRACK, DATA, END, SEEK); a seek never resets an index the other
    core may publish (ReChord's crackle, ETUDE §98).

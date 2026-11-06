@@ -86,7 +86,7 @@ TESTS = {
                                ms=7000, reboot=dict(ms=7000, keys="",
                                                     state=dict(playing=0, pos_ms=0)),
                                expect=[r"track [0-9a-f]+ at 0 ms, playing 0",
-                                       r"ui: resume: paused at 0 ms"]),
+                                       r"ui: resume: paused at 0 ms of [1-9]\d+"]),
     # a queue made by PLAY held on a folder (two levels), two tracks on, then a reboot: the same
     # queue rebuilt, the same track playing, then the one after it in that queue
     "resume-tree": dict(files={"ALBUM/CD1/A1.WAV": "wav10", "ALBUM/CD1/A2.WAV": "wav10",
@@ -257,6 +257,7 @@ def read_log(dump):
 # path (DEPTH_MAX 16 clusters, sel and top), track, playing, level, mode, pos_ms and the sum
 STATE_FIELDS = dict(track=144, playing=148, level=152, mode=156, pos_ms=160)
 STATE_SUM = 164
+STATE_LEN, STATE_LEN_SUM = 168, 172             # the track's length (0.99r16), its own sum
 
 
 def patch_state(disk, fields):
@@ -275,7 +276,11 @@ def patch_state(disk, fields):
         h = 0x4e465753
         for (w,) in struct.iter_unpack("<I", bytes(s[:STATE_SUM])):
             h = ((h << 5 | h >> 27) & 0xffffffff) ^ w
+        old_sum, = struct.unpack_from("<I", s, STATE_SUM)
+        ln, ln_sum = struct.unpack_from("<II", s, STATE_LEN)
         struct.pack_into("<I", s, STATE_SUM, h)
+        if ln_sum == ~ln & 0xffffffff ^ old_sum:  # a length saved: still valid
+            struct.pack_into("<I", s, STATE_LEN_SUM, ~ln & 0xffffffff ^ h)
         f.seek(at)
         f.write(s)
 

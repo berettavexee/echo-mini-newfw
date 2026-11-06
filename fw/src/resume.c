@@ -13,6 +13,8 @@ struct resume {
     uint16_t sel[DEPTH_MAX], top[DEPTH_MAX];
     uint32_t track;                             /* cluster of the track, 0: none */
     uint32_t playing, level, mode, pos_ms, sum;
+    uint32_t len_ms, len_sum;                   /* the track's length (0.99r16), for the bar of
+                                                 * a parked track; its own sum: older states */
 };
 static uint32_t rs_buf[128];
 static uint32_t rs_last_sum;
@@ -66,6 +68,8 @@ static void resume_save_do(void)
     r->mode = (uint32_t)(play_mode | rg_mode << 8);    /* rg_mode 0 (album) before 0.55 */
     r->pos_ms = parked ? parked_ms : q_playing ? player_heard.time_ms : 0;
     r->sum = rs_sum(r);
+    r->len_ms = parked ? parked_len : q_playing ? player_heard.length_ms : 0;
+    r->len_sum = ~r->len_ms ^ r->sum;
     struct resume_q *rq = (struct resume_q *)(rs_buf + RQ_WORD);
     if (qe && q_state_get(&rq->q)) {
         __builtin_memcpy(rq->magic, "QTR1", 4);
@@ -134,7 +138,8 @@ static void resume_track(const struct resume *r)
     } else {                                    /* paused: PLAY goes on from there (even at 0) */
         parked = 1;
         parked_ms = pos;
-        log_printf("ui: resume: paused at %u ms", pos);
+        parked_len = r->len_sum == (~r->len_ms ^ r->sum) ? r->len_ms : 0;   /* 0: no bar */
+        log_printf("ui: resume: paused at %u ms of %u", pos, parked_len);
     }
 }
 

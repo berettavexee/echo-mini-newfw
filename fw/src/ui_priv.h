@@ -154,7 +154,7 @@ void rg_apply(void);
 unsigned battery_shown(void);                  /* the battery percent shown (ui.c) */
 unsigned battery_avg_mv(void);                 /* its voltage, a mean of about a minute */
 extern int parked;
-extern uint32_t parked_ms;
+extern uint32_t parked_ms, parked_len;
 enum { STOP_NOW, STOP_SKIP, STOP_DRAIN };
 void play_stop(int how);
 void play_index(int i);
@@ -173,6 +173,7 @@ void volume(int d);
 extern int sk_on, sk_cur;
 extern uint32_t sk_ms, sk_from, sk_key_ms;
 uint32_t now_ms(void);                          /* the position shown */
+uint32_t len_ms(void);                          /* the length shown */
 void seek_begin(void);
 void seek_move(int d, int repeat);
 void seek_end(int go);

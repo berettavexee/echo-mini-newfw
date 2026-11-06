@@ -23,6 +23,7 @@ static void power_service(uint32_t key_ms)
     uint32_t idle = millis() - key_ms;
     if (q_playing && audio_paused && idle > PARK_MS) {
         parked_ms = player_heard.time_ms;
+        parked_len = player_heard.length_ms;
         play_stop(STOP_NOW);
         hifi_sleep();
         parked = 1;
