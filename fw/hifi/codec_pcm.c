@@ -169,6 +169,8 @@ static int32_t sample(const uint8_t *p, uint32_t bits)
  * as it is (big-endian: the bytes of each sample swapped first); the other formats are converted
  * frame by frame from the chunk */
 static uint32_t chunk[1024];
+#define OBUF 256                                /* words (0.99r30: out_write by blocks) */
+static uint32_t obuf[OBUF];
 
 int codec_run(void)
 {
@@ -194,17 +196,24 @@ int codec_run(void)
                 chunk[i] = (w & 0x00ff00ffu) << 8 | (w >> 8 & 0x00ff00ffu);
             }
         out_write(chunk, n);
-    } else {
+    } else {                                    /* converted into obuf, written by blocks */
         const uint8_t *f = (const uint8_t *)chunk;
+        uint32_t k = 0;
         for (uint32_t i = 0; i < n; i++, f += block) {
             int32_t l = sample(f, bits), r = ch == 2 ? sample(f + bits / 8, bits) : l;
             if (fb == 4)
-                out_word((uint32_t)l >> 16 | ((uint32_t)r & 0xffff0000u));
+                obuf[k++] = (uint32_t)l >> 16 | ((uint32_t)r & 0xffff0000u);
             else {
-                out_word((uint32_t)l);
-                out_word((uint32_t)r);
+                obuf[k++] = (uint32_t)l;
+                obuf[k++] = (uint32_t)r;
+            }
+            if (k > OBUF - 2) {
+                out_write(obuf, k);
+                k = 0;
             }
         }
+        if (k)
+            out_write(obuf, k);
     }
     out_done(n);
     return 1;

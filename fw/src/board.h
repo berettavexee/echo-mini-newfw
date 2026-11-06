@@ -46,6 +46,7 @@ uint32_t millis(void);          /* milliseconds since the timer started (49 days
 void udelay(uint32_t us);
 void mdelay(uint32_t ms);
 void wdt_kick(void);
+uint32_t wdt_init(void);       /* armed: 2.7 s, its interrupt then a reset (0.99r34) */
 
 unsigned adc_read(int ch);
 int key_ladder(unsigned v);
@@ -64,5 +65,6 @@ void power_off(void);
 void SysTick_Handler(void);
 void OTG_IRQHandler(void);      /* usb.c: interrupt 5 (usbc_int, TRM table 2-1) */
 void fault_screen(const uint32_t *frame, uint32_t exc);
+void wdt_fired(const uint32_t *frame);  /* the watchdog's interrupt: record, reboot */
 
 #endif

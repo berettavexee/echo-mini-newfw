@@ -58,7 +58,11 @@
 
 /* Watchdog (DesignWare WDT) */
 #define WDT_BASE            0x40120000u
+#define WDT_CR              (WDT_BASE + 0x00)
+#define WDT_TORR            (WDT_BASE + 0x04)
 #define WDT_CRR             (WDT_BASE + 0x0c)
+#define WDT_EOI             (WDT_BASE + 0x14)
+#define IRQ_WDT             8
 #define WDT_KICK            0x76u
 
 /* VOP (MCU LCD interface) */

@@ -21,6 +21,7 @@
 #include "lcd.h"
 #include "log.h"
 #include "player.h"
+#include "perf.h"
 #include "rtc.h"
 #include "sd.h"
 #include "sys.h"
@@ -37,6 +38,18 @@
 #define UI_FULL       1                         /* draw the screen in full */
 #define UI_QUICK      2                         /* redraw its bands soon */
 #define UI_TO_PLAYING 4                         /* show the play screen */
+
+/* The stack of screens above the browser and the play screen (ui.c, ETUDE §99): the main loop
+ * gives the top one its keys and lets it draw what changed, each pass; the screens that stop the
+ * music (USB, install, sound card, system) still run their own loops, called from the menu */
+enum { SCR_STAY, SCR_POP };
+struct screen {
+    void (*enter)(void);                /* pushed: from its start */
+    void (*shown)(void);                /* on top again (the one above it closed): all redrawn */
+    int (*key)(const struct key_ev *e); /* SCR_STAY or SCR_POP */
+    int (*draw)(void);                  /* each pass, the screen on: what changed; SCR_POP too */
+};
+void scr_push(const struct screen *s);
 
 /* ---- browser.c: listing entries (also the queue's) ---- */
 #define DIR_MAX   1000
@@ -99,6 +112,11 @@ void draw_browser(void);
 #define MQ_PAUSE 1500000u
 #define MQ_STEP  33000u
 void browser_marquee_tick(void);
+int browser_walking(void);                      /* a tree walk runs in the storage task */
+int browser_walk_poll(void);                    /* its end: UI_* (playing from its first track) */
+struct q_state;
+int browser_walk_resume(const struct fat_dir *d, const char *nm, const struct q_state *qs,
+                        uint32_t track);        /* a resume: its track plays meanwhile */
 int browser_key(const struct key_ev *e);
 
 /* ---- queue.c ---- */
@@ -122,6 +140,9 @@ struct q_state {
 };
 int q_state_get(struct q_state *s);             /* 1 when the queue is a tree */
 int q_state_set(const struct q_state *s, const char *name);    /* rebuilt: 0, else -1 */
+void q_single(const struct entry *e, const char *name, const char *folder);  /* one track */
+void q_from_tree_keep(const struct fat_dir *top, const char *name);  /* that track kept meanwhile */
+int q_resume_fix(const struct q_state *s, uint32_t track);     /* its index found again, or -1 */
 void q_clear(void);
 int q_on_sd(void);                              /* the queue is on the card */
 /* Track i: its entry and name (read again from its folder when needed; 0 / "" if unreadable) */
@@ -139,7 +160,7 @@ void rg_apply(void);
 unsigned battery_shown(void);                  /* the battery percent shown (ui.c) */
 unsigned battery_avg_mv(void);                 /* its voltage, a mean of about a minute */
 extern int parked;
-extern uint32_t parked_ms;
+extern uint32_t parked_ms, parked_len;
 enum { STOP_NOW, STOP_SKIP, STOP_DRAIN };
 void play_stop(int how);
 void play_index(int i);
@@ -158,6 +179,7 @@ void volume(int d);
 extern int sk_on, sk_cur;
 extern uint32_t sk_ms, sk_from, sk_key_ms;
 uint32_t now_ms(void);                          /* the position shown */
+uint32_t len_ms(void);                          /* the length shown */
 void seek_begin(void);
 void seek_move(int d, int repeat);
 void seek_end(int go);
@@ -171,8 +193,8 @@ int seek_key(const struct key_ev *e);
 /* ---- menu.c ---- */
 enum { M_FILES, M_PLAYING, M_SETTINGS, M_USB_RO, M_USB_RW, M_USB_DAC, M_INSTALL, M_SYSTEM,
        M_LOADER, M_COUNT };
-int main_menu(void);
-void clock_screen(void);
+extern const struct screen menu_screen, clock_screen;
+extern int menu_choice;              /* the main menu's choice once closed, -1: none */
 
 /* ---- uac.c ---- */
 void uac_mode(void);            /* the USB sound card, until BACK held or the cable is out */
@@ -195,12 +217,14 @@ extern uint32_t sleep_at;                       /* the sleep timer ends (millis)
 uint32_t screen_timeout_us(void);               /* 0xffffffff: never */
 uint32_t auto_off_ms(void);                     /* 0: never */
 void sleep_cancel(void);
-void settings_screen(void);
+extern const struct screen settings_screen;
 uint32_t settings_put(uint32_t *w);             /* into the state sector (64 words): its sum */
 void settings_get(const uint32_t *w);           /* from it, when valid; then applied */
 
 /* ---- resume.c ---- */
 void resume_save(void);
+void resume_save_later(void);   /* the same, written by the loop after the frame */
+void resume_flush(void);        /* that save, now, if one is asked */
 void resume_load(void);
 
 /* ---- uidraw.c ---- */

@@ -26,10 +26,13 @@ struct player_heard {
     uint32_t rate, bps, length_ms, time_ms, gen;
 };
 extern struct player_heard player_heard;
+const char *player_file_name(void);    /* the track open (8.3 name), or "" */
 
 /* player_open() flag: keep the DACs running into the next track (same rate and frame size); the
  * track ends without a drain, player_chain_end() drains and lets the next start stop them */
 #define PLAY_CHAIN 1
+#define PLAY_ASYNC 2    /* player_open() returns once core B reads the headers; player_service()
+                           finishes the open (0.99r25) */
 void player_chain_end(void);
 /* The same without blocking, from the main loop (the end of the queue): 1 once the DMA is past
  * the last frame, 0 meanwhile */
@@ -39,6 +42,7 @@ void player_drop_tail(void);
 /* Non-blocking form: open (load, open, start the output: up to ~0.4 s), then service from the
  * main loop (0 while the track plays, 1 at its end, < 0 on an error), then close */
 int player_open(const struct fat_file *file, uint32_t codec, int flags);
+int player_settled(void);       /* the open track plays, its DAC ring filled once */
 /* For the next player_open() only, Ogg: where the comment header ends (tags.h), 0: unknown */
 void player_ogg_hint(uint32_t page, uint32_t seg);
 /* For the next player_open() only: start at ms (0: at the start) */

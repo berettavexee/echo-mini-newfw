@@ -287,6 +287,20 @@ void wdt_kick(void)
     REG(WDT_CRR) = WDT_KICK;
 }
 
+/* The watchdog armed (rework step 7, 0.99r34; TRM chapter 20): counted on pclk (the core clock
+ * / 4: 50 MHz at 200 MHz), 2^27 cycles (TORR 11: 2.7 s at 200 MHz, longer on slower clocks);
+ * response mode 1: its interrupt at the first timeout (wdt_fired(): the fault record, then a
+ * reboot), a reset at the second if the interrupt cannot run. Returns CR as the loader left it */
+uint32_t wdt_init(void)
+{
+    uint32_t was = REG(WDT_CR);
+    REG(WDT_TORR) = 11;
+    REG(WDT_CRR) = WDT_KICK;                    /* TORR takes effect at the kick */
+    REG(WDT_CR) = 2u << 2 | 2u | 1u;            /* reset 8 pclk, interrupt first, enabled */
+    REG(NVIC_ISER) = 1u << IRQ_WDT;
+    return was;
+}
+
 /* ---- ADC and keys ---- */
 /* Same sequence as the IDB loader: powering the converter up with a channel starts a
  * conversion. Wait for busy to rise, then to fall: at 200 MHz the first poll comes before
@@ -383,6 +397,12 @@ static void clock_slow(void)
 void reboot(void)
 {
     __asm volatile ("cpsid i");
+    /* SYSRESETREQ leaves the watchdog running, and it cannot be switched off (its enable bit
+     * stays set: device, 0.99r35): its longest period for the loader and what it starts
+     * (2^31 pclk: about 6 min at 24 MHz to its interrupt, ignored there, 12 min to the reset;
+     * our next boot arms it at 2.7 s again). TORR takes effect at the kick (0.99r36) */
+    REG(WDT_TORR) = 15;
+    REG(WDT_CRR) = WDT_KICK;
     REG(SYST_CSR) = 0;
     clock_slow();
     __asm volatile ("dsb");

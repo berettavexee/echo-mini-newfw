@@ -44,5 +44,13 @@ void log_poll(void);            /* writes them when enough time or text has gone
  * user interface (512 bytes, starting with "NEWFWSTATE", ui.c) */
 int log_state_read(void *buf);
 int log_state_write(const void *buf);
+/* The sector before it (0.99r32): the fault record, starting with "NEWFWCRASH" (crash.c) */
+int log_crash_read(void *buf);
+int log_crash_write(const void *buf);
+/* log_printf's formats into a buffer; returns the end of the text (not terminated) */
+#ifdef LOG_FORMAT_CHECK
+__attribute__((format(printf, 3, 4)))
+#endif
+char *log_format(char *p, char *end, const char *f, ...);
 
 #endif

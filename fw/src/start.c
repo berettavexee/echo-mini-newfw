@@ -14,6 +14,7 @@ extern int main(void);
 void Reset_Handler(void);
 void Default_Handler(void);
 void HardFault_Handler(void);
+void WDT_IRQHandler(void);
 
 uint32_t boot_regs[4];          /* r0-r3 at entry, from the loader */
 uint32_t boot_tag;              /* PMU_SYS_REG3 at entry */
@@ -35,7 +36,9 @@ void (*const vectors[48])(void) = {
     SysTick_Handler,
     [16 ... 20] = Default_Handler,
     [16 + 5] = OTG_IRQHandler,  /* the USB controller (interrupt mode: usb_irq) */
-    [22 ... 47] = Default_Handler,
+    [22 ... 23] = Default_Handler,
+    [16 + 8] = WDT_IRQHandler,  /* the watchdog's first timeout (0.99r34) */
+    [25 ... 47] = Default_Handler,
 };
 
 __attribute__((naked, noreturn)) void Reset_Handler(void)
@@ -94,6 +97,16 @@ void Default_Handler(void)
         return;
     }
     fault_screen(0, ipsr);
+}
+
+__attribute__((naked)) void WDT_IRQHandler(void)
+{
+    __asm volatile (
+        "tst   lr, #4\n"
+        "ite   eq\n"
+        "mrseq r0, msp\n"
+        "mrsne r0, psp\n"
+        "b     wdt_fired\n");
 }
 
 __attribute__((naked)) void HardFault_Handler(void)

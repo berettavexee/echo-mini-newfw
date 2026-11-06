@@ -3875,3 +3875,383 @@ Autres valeurs de l'appareil, pour de futurs réglages : changement de fréquenc
 - Les temps de dessin et de changement de fréquence n'ont pas été comparés : les courtes sessions de l'émulateur n'écrivent pas ces lignes.
 
 **Jeu de test : Musepack SV8.** `mktestset.py` produit 13 fichiers Musepack (`mpcenc` 1.30.1, paquet `musepack-tools`) : un dans `formats/`, les six jeux d'étiquettes dans `tags/`, six pochettes (JPEG 300, 600, 1200 px, PNG de 1, 8 et 17 Mo) dans `covers/`. L'étiquette APEv2 (version 2000, en-tête et pied) est écrite par le script, l'élément `Cover Art (Front)` (binaire : nom de fichier, 0, image) avant le texte ; vérifiée par mutagen. Émulateur : les 13 fichiers jouent avec les étiquettes attendues (17 Mo : au-delà des 16 Mio que lit `tags.c`, absence de faute seulement) ; `set-ci` en prend deux (`tags/mpc-unicode.mpc`, `covers/mpc-cover1m.mpc`) et la CI installe `musepack-tools`. Le SV7 (`mppenc`, hors paquet Debian) n'est pas dans le jeu : peu de fichiers SV7 circulent.
+
+## 97. Refonte, étape 1 : mesurer (branche `rework`, images 99R1 à 99R4, 2026-11-05)
+
+Première étape du plan de refonte (doc « newfw : refonte et répartition des fonctions entre les cœurs ») : obtenir le tableau des pires cas qui servira de référence aux étapes suivantes, **sans rien changer au comportement**. Branche `rework`, version `0.99rN` ; `main` reste le firmware validé.
+
+**Mesures ajoutées** (`perf.c`, `perf.h`, test sur PC `perf_test`) :
+- **le plus long trou du chemin audio** : le temps maximal entre deux appels de `own_service()` (recopie du PCM du cœur B vers l'anneau DAC, remplissage de l'anneau d'entrée) ; **le plus long trou des boucles** : entre deux `sys_idle()` ;
+- **l'attribution** : les opérations longues sont encadrées par `perf_begin("…")` / `perf_end()` (étiquettes, dossier, montage de la carte, parcours d'arbre, file de lecture, dessin du navigateur et de l'écran de lecture, menu, réglages, écriture du journal, sauvegarde de la reprise, chargement du cœur B, changement de fréquence, démarrage des DAC, réveil de l'écran) ; chaque trou garde la phase qui a pris le plus de temps en son sein, **cumulée par nom** (4 emplacements par fenêtre), pour qu'un parcours d'arbre coupé par la lecture des étiquettes ou par les services audio reste attribué en entier ; une phase de moins de 1 ms n'est pas nommée ;
+- **les anneaux**, par piste, une fois l'anneau DAC plein et l'anneau d'entrée rempli une première fois : remplissage minimal de l'anneau DAC (en ms), de l'anneau d'entrée (en octets et en ms au débit moyen du fichier), extrêmes de l'anneau de sortie du cœur B, épisodes où l'entrée et la sortie du cœur B sont vides ensemble ;
+- **les tours perdus** (`laps lost`) : la position du DMA n'est connue que modulo l'anneau ; un arrêt plus long que l'anneau (256 ms en 96/24, 124 ms en 192/24) cachait donc un tour entier, et l'ancien compteur de manques ne voyait rien. `audio_update()` compare l'avancée à celle que donne le temps écoulé et compte les tours manquants, sans corriger la position (rien ne change à la lecture) ;
+- une ligne par piste, `perf: NOM [CODEC FRÉQUENCE/BITS]: gap max … (phase …), loop gap max …; DAC min …; in min …; out min … max …; in empty …; laps lost …`, et hors lecture `perf: idle: loop gap max …` toutes les 10 s quand il dépasse 50 ms ; `fw/tools/perfreport.py` en tire le tableau des pires cas par format ;
+- build de test `ECHO_STALL` : un appui court sur Power bloque la boucle 500 ms.
+
+**Défauts trouvés et corrigés en chemin** :
+- r1 : l'anneau d'entrée d'une piste enchaînée était mesuré dès son ouverture, encore vide (« in min 0 » à tort) ; les compteurs étaient remis à zéro à l'ouverture, juste après la lecture des étiquettes, dont le coût se perdait ;
+- r2 : un trou de 122 ms sans nom : le **réveil de l'écran** (`lcd_sleep(0)` attend 120 ms, la sortie de veille de la dalle) ; nommé « screen wake » ;
+- r3 : le parcours de l'arbre (2,7 s) attribué aux étiquettes : la phase était remise à zéro à chaque alternance ; cumul par nom en r4 ;
+- **émulateur** : son DMA lisait l'anneau DAC à 44,1 kHz quelle que soit la piste (`--rate`) : les pistes à 96 et 192 kHz y duraient 2,2 et 4,4 fois trop longtemps, et le scénario de chaîne s'arrêtait sur le WAV 24/192. Il lit maintenant `audio.rate` et `audio.frame_bytes` du firmware (`emu_fw.py`).
+
+**Émulateur** (`work/emu/scenarios.py` : `perf-chain`, `perf-covers`, `perf-queue`, `perf-stall` ; `--cycles`, eMMC calée §96) :
+
+| Cas | Plus long trou du chemin audio | Anneau DAC min |
+|---|---|---|
+| Ogg Vorbis, pochette 17,9 Mo (étiquettes de la suivante) | 1 350 ms (étiquettes 1 323) | 1 085 ms |
+| Opus, pochette 8,7 Mo | 664 ms (étiquettes 642) | 998 ms |
+| AAC, MP3, Musepack, FLAC, pochettes de 8 Mo | 4 à 19 ms | 246 à 1 087 ms |
+| Changement de codec ou de fréquence | 10 à 14 ms (chargement du cœur B, changement de fréquence) | — |
+| WAV et FLAC 24/192 | 8 à 10 ms | **121 ms** |
+| Démarrage à froid des DAC | 290 ms (boucle) | — |
+| Blocage de 500 ms, MP3 44,1/16 | 621 ms | 470 ms |
+| Blocage de 500 ms, FLAC 96/24 | 506 ms | 0, **1 tour perdu** |
+
+Les étiquettes des Ogg à grosse pochette : 643 ms (8,7 Mo) et 1 323 ms (17,9 Mo) dans l'émulateur, 690 et 1 420 ms sur l'appareil (§96) : l'émulateur calé reproduit ces durées à 7 % près.
+
+**Appareil** (r1 à r3, lecture aléatoire de toute la carte, navigation pendant la lecture ; journaux dans `work/hwlog/1105_r01` à `1105_r03`) :
+
+| Opération | Plus long trou du chemin audio |
+|---|---|
+| Réveil de l'écran | **120 ms**, à chaque fois |
+| Démarrage à froid des DAC | 337 ms (boucle) |
+| Montage de la carte (pendant la lecture, PLAY maintenu sur la carte) | 253 ms |
+| Parcours de toute la carte (18 257 pistes) | 2,4 à 2,7 s pour la boucle, le chemin audio servi pendant ce temps |
+| Étiquettes de la piste suivante (bibliothèque) | 20 à 33 ms |
+| Lecture d'un dossier | 6 ms |
+| Dessin complet d'un écran | 9 à 13 ms |
+
+Anneau DAC jamais sous **880 ms** en lecture continue (MP3, Opus, Vorbis). Les seuls manques (5 à 15 Ko, 30 à 80 ms) sont au **début d'une piste lancée à la main** (PLAY maintenu, saut, recherche) : l'anneau est vidé à 12 ms et le premier PCM du cœur B arrive 47 à 358 ms plus tard ; ce petit silence existe déjà sur `main`.
+
+**Session longue en r4** (77 min, 29 pistes, lecture aléatoire de toute la carte et navigation ; `work/hwlog/1105_r04`) :
+
+| Format | Pistes | Plus long trou du chemin audio | Plus long trou de la boucle | Anneau DAC min | Tours perdus |
+|---|---|---|---|---|---|
+| MP3 44,1/16 | 22 | 122 ms (réveil de l'écran 120) | 135 ms (réveil de l'écran) | 969 ms | 0 |
+| Opus 48/16 | 6 | 122 ms (réveil de l'écran 120) | 2 805 ms (dossiers 2 333) | 880 ms | 0 |
+| Vorbis 44,1/16 | 1 | 122 ms (réveil de l'écran 120) | 136 ms | 969 ms | 0 |
+
+- Le **réveil de l'écran** est le pire trou du chemin audio en usage courant, à chaque fois et pour tous les formats.
+- Le trou de 2,8 s de la boucle est le parcours de toute la carte au lancement de la lecture aléatoire (18 257 pistes en 2,39 s) ; avec le cumul par nom (r4), il est attribué à la **lecture des 1 396 dossiers** (2 333 ms, la phase « folder » imbriquée dans « tree walk ») : c'est la lecture des répertoires, pas le tri ni la file, qui coûte.
+- Aucun tour perdu ; les manques (4 à 15 Ko, une fois par piste) restent tous au début d'une piste lancée à la main.
+
+**Ce que la refonte doit sortir du chemin audio** (avant l'anneau PCM de 64 Kio de l'étape 4, 371 ms en 16/44,1, 43 ms en 24/192) :
+1. le réveil de l'écran (120 ms) : attente sans blocage, ou dalle laissée éveillée et rétroéclairage seul coupé ;
+2. le démarrage des DAC (337 ms) et le changement de fréquence (8 à 10 ms) ;
+3. le montage de la carte (253 ms) ;
+4. les étiquettes des grosses pochettes Ogg (jusqu'à 1,4 s mesurées, environ 5 s au plafond de 64 Mio) : lecture par tranches (étape 3) ;
+5. le parcours de l'arbre (2,4 à 2,7 s), déjà compatible avec le son mais qui bloque l'interface.
+En 24/192, la marge actuelle n'est que de 121 ms : tout blocage de plus de 120 ms y fait déjà un manque, le réveil de l'écran compris.
+
+## 98. Les projets voisins, revue du 2026-11-05 (idées seulement : ReChord, EchoPod et Podium sont sous GPL-3)
+
+Revue des commits depuis le 29 octobre, pour ce qui touche la refonte.
+
+**ReChord** (brnomt/ReChord) :
+- **Le cœur B décode et produit l'anneau PCM** ; le cœur A sert le fichier par un anneau A→B (`bfs_poll`) et vide l'anneau PCM dans l'**interruption TX de l'I2S1** (sans DMA, anneau de 32 Kio, environ 85 ms à 96 kHz). C'est l'architecture visée par notre étape 4, avec la DMA en plus chez nous. Leur conclusion : « le travail de l'interface ne peut plus affamer le son ».
+- **Pièges notés** : l'ouverture d'un fichier sur la carte bloque la boucle et peut affamer l'anneau de fichier pendant la préparation de la piste suivante (notre montage de la carte et nos étiquettes, même cause) ; **un saut qui remettait les indices de l'anneau PCM à zéro pendant un tour de décodage du cœur B** laissait l'écriture loin devant la lecture (craquements jusqu'au changement de piste) : correction en arrêtant l'interruption et le cœur B, puis en remettant les indices après l'accusé du SEEK. À reprendre comme règle dans notre protocole (étape 5, enregistrement SEEK) : jamais de remise à zéro d'un indice que l'autre cœur peut publier.
+- **Télémétrie** semblable à notre étape 1 : une ligne `tel:` toutes les 5 s (manques de l'interruption, charge du cœur B décodage contre attente, minimum des anneaux, plus long trou entre deux `bfs_poll`, plus lente lecture SD) et une ligne `trk:` par piste. Leur cas limite : FLAC 24/96 avec l'égaliseur, cœur B à 86 %.
+- **Cœur B en WFI** avec une SysTick de 1 ms au lieu d'une scrutation à 200 MHz (le nôtre dort déjà en WFI, réveillé par la mailbox) ; boucle du cœur A qui ne sert le lecteur qu'une fois par tick.
+- **Trace de faute** : les fautes du cœur A écrivent PC, LR, xPSR, registres de faute et dernières lignes du journal **directement dans les secteurs d'un fichier préalloué** (`/.rechord/CRASH`, sans FAT), puis écran de faute et extinction ; le démarrage suivant le note. Plus durable que notre trace prévue en PMU-SRAM (perdue à l'extinction) : à retenir pour l'étape 7 (notre journal a déjà ses secteurs connus).
+- Lectures multi-secteurs (CMD18) : nous les avons déjà (`emmc.c`, `mshc.c`).
+
+**EchoPod** (BasilSkyWalk/echopod, 0.10.1) :
+- **Écrans immobiles non redessinés** (sauf toutes les 100 ms, sur une touche ou une animation) et WFI de la boucle quand l'écran allumé est immobile ; menus qui agissent à l'appui ; **sauvegarde de la reprise différée après le dessin de l'image** : notre « écritures différées » de l'étape 3.
+- **Réveil** : la première image est dessinée avant le rétroéclairage, qui monte en 200 ms : leur réveil ne bloque pas le son derrière la sortie de veille de la dalle. Piste pour notre point 1 ci-dessus.
+- Horloge du cœur A : 200 MHz écran allumé ou son en cours, 96 MHz au plus bas.
+- Égaliseur (7 bandes, sur le cœur 1 pour FLAC et ALAC), lecture des fréquences de 8 à 32 kHz relevées vers une fréquence prise en charge (nous l'avons, §59-§60), extinction sans craquement.
+- Carte son USB : UAC1 pleine vitesse, synchronisation adaptative par niveau de l'anneau (environ 20 ms), sans retour d'horloge ; notre carte son asynchrone UAC2 va plus loin.
+
+**Podium** (velppa/podium, 4.5.7, Snowsky ECHO grand modèle) :
+- **Télécommande filaire du casque** : lecture du contact micro du jack 3,5 mm (comme le firmware d'origine 2.0.0) : VOL± au tap, saut au maintien, bouton central pause, saut, retour. Idée de fonction pour nous (hors refonte).
+- Double-clic pour sauter une piste, recherche par VOL± maintenu ; volume en 60 pas de 1 dB.
+- **Code froid compilé pour la taille** pour tenir dans la fenêtre de code : rejoint notre risque de fenêtre de 192 Kio (la pile d'écrans et les tâches ajoutent du code).
+- Tests d'installation dans un émulateur, comme les nôtres.
+
+**Conséquences pour notre plan** : la direction des étapes 3 et 4 est confirmée par ReChord, qui y est arrivé par la même mesure ; deux règles à ajouter (SEEK sans remise à zéro concurrente des indices ; trace de faute dans des secteurs préalloués plutôt qu'en PMU-SRAM seule) ; le réveil de l'écran et les écrans immobiles sont des gains simples, indépendants de la refonte du son.
+
+## 99. Refonte, étape 2 : une boucle, une pile d'écrans (images 99R5 à 99R9, 2026-11-05, émulateur)
+
+Faite d'une traite sans l'appareil, chaque sous-étape vérifiée dans l'émulateur (devenu assez représentatif, §96-§97) : `make check`, les 12 tests `emutest`, les scénarios privés comparés **capture par capture** à la 0.99r4, puis une seule image de test pour l'appareil, `NEWFWR09`.
+
+**r5 — le réveil de l'écran sans blocage.** `lcd_sleep(0)` attendait 120 ms entre SLPOUT et DISPON (le délai du contrôleur ST7789), à chaque réveil : le pire trou du chemin audio en usage courant (§97). `lcd_service()`, appelée par `sys_power_poll()` (donc par toutes les boucles, celle de la carte son comprise), envoie maintenant chaque commande une fois le délai du contrôleur passé (120 ms après SLPOUT, 5 ms après SLPIN, une mise en veille demandée pendant un réveil attendant la fin de celui-ci) ; `lcd_wake_lit()` demande le réveil puis le rétroéclairage, allumé avec le DISPON : la première image est dessinée pendant l'attente (l'idée d'EchoPod, §98). `lcd_settle()` attend seulement avant une extinction (« power off », « Battery empty »), pour que le dernier message se voie.
+
+**r6 — la pile d'écrans.** Le menu principal, les réglages et l'écran de la date et de l'heure n'ont plus de boucle à eux : ce sont des écrans (`enter`, `shown`, `key`, `draw` ; `key` et `draw` rendent « rester » ou « fermer ») sur une pile de 4 au-dessus du navigateur et de l'écran de lecture, servis par la boucle de `ui_main()`. Conséquences :
+- les services de la boucle (mise à l'arrêt après une longue pause, minuterie de sommeil, batterie, surveillance de la carte, sauvegarde périodique) tournent quel que soit l'écran ; avant, ils s'arrêtaient dans le menu et les réglages ;
+- le choix du menu est exécuté une fois le menu fermé ; les écrans qui arrêtent la musique (disque USB, installation, carte son, écran système, mode chargeur) gardent leur propre boucle, appelée de là : exception assumée, leur logique matérielle a ses propres délais (la carte son surtout) ;
+- les messages de l'horloge (« clock set », « no clock found ») ne bloquent plus : affichés, puis l'écran se ferme ;
+- l'extinction automatique de l'écran ne s'applique toujours pas au-dessus d'un écran de la pile (comme avant).
+
+**r7 — la minuterie de sommeil.** Le fondu de 5 s avant l'extinction était une boucle dans la boucle ; c'est maintenant un pas de la boucle à chaque passage (les touches ignorées pendant le fondu, comme avant). Build de test `ECHO_SLEEP_SECONDS` (les minutes de la minuterie comptées en secondes) et scénario `sleep-fade` : fin à 26,66 s, pause 5,00 s plus tard, extinction.
+
+**r8 — les tâches nommées, l'horloge des réglages.** Les tâches de la boucle portent leur phase `perf` (« player », « power », « battery », « card watch ») : le pire passage dit quelle tâche l'a pris. L'écran des réglages lisait l'horloge temps réel par I2C (environ 1,9 ms) **à chaque passage** pour savoir si la minute affichée avait changé : 4 fois par seconde maintenant.
+
+**Écart au plan.** Les touches devaient être lues dans l'interruption SysTick, rangées dans une file. L'émulateur n'a pas de SysTick sur le cœur A (`cpu_wait()` y est un simple retour) : sans lui, aucune touche n'aurait pu être testée. Elles restent lues par la boucle, désormais en un seul endroit qui les donne à l'écran du dessus de la pile ; le passage en interruption (avec la lecture de la batterie dans la même interruption, le SARADC étant partagé, et les lignes « keys: » écrites par la boucle) attend un essai sur l'appareil ou un SysTick dans l'émulateur.
+
+**Vérification de la r9 dans l'émulateur** (`work/emu/regress_r09.txt`, `perf_r09.txt`) :
+- 12 tests `emutest` PASS ; 31 scénarios sur la r4 et la r9 sans faute, **43 captures identiques sur 54** ; les 11 autres : 9 fois une colonne de la barre de progression (1 pixel d'avance) ou la progression de l'écriture de l'installateur, l'horloge du mode par défaut avançant à chaque lecture (`lcd_service()` en ajoute une par passage) ; et l'ordre aléatoire de `queue-big`, tiré de l'horloge (la piste suivante et le retour en arrière retombent sur les mêmes positions de la file) ;
+- scénarios de mesure en `--cycles` : les mêmes pires cas qu'en r4 (§97) ; les trous des boucles portent maintenant le nom de la tâche (« player » pour un changement de piste, 5 à 10 ms) ; le blocage de 500 ms (`perf-stall`) et la minuterie (`sleep-fade`) PASS.
+- Limites de l'émulateur pour cette étape : il ne reproduit ni le délai réel de la dalle au réveil (à voir sur l'appareil : l'image doit apparaître propre, sans artefact), ni la cadence des touches dans une interruption.
+
+**Sur l'appareil (r9, 2026-11-06)** : 16 min, 170 pistes de 12 formats en lecture aléatoire et navigation, sans faute (`work/hwlog/1106_r09`) ; plus aucun « screen wake » dans les lignes `perf:` ; le pire trou du chemin audio en usage courant passe de 120-122 ms (réveil de l'écran) à 47-57 ms (AAC, MP3 : dessin, étiquettes) ; l'écran se rallume sans artefact, le menu et les réglages se comportent comme avant. Trois défauts de mesure corrigés en chemin : le trou compté depuis la session précédente pour une piste lancée à froid (8,2 s de navigation), l'ouverture non nommée (« open » : une recherche Musepack lit 2 Mo, 432 ms), la réserve de l'anneau DAC des WAV à basse fréquence convertie à la fréquence du fichier et non des DAC. La minuterie de sommeil reste à essayer sur l'appareil.
+
+## 100. Refonte, étape 3 : une tâche « stockage » pour les lectures longues (images 99R10 à 99R15, 2026-11-06, émulateur)
+
+Faite sans l'appareil, comme l'étape 2 ; une image de test à la fin, `NEWFWR15`.
+
+**La tâche** (`storage.c`). Transformer chaque lecteur (étiquettes, FAT, exFAT, parcours d'arbre) en machine à états aurait été une réécriture lourde. C'est une **coroutine** : une pile à elle (6 Kio, peinte au départ, le mot du bas vérifié à chaque reprise), un échange de contexte de cinq instructions (`push {r4-r11, lr}`, le pointeur de pile sauvé, l'autre pris, `pop {r4-r11, pc}`), pas d'ordonnanceur ni d'interruption : la boucle principale la reprend 4 ms par passage, elle rend la main quand son budget est épuisé ou ses travaux finis. Une interruption prise pendant qu'elle tourne utilise sa pile (la taille en tient compte).
+
+**La règle de sécurité.** La couche FAT et les pilotes gardent des tampons statiques (`sec`, `dir`) et un cache de FAT par volume. La tâche ne cède la main **qu'entre deux appels**, jamais au milieu d'un : `storage_yield()` est appelée par les lecteurs avant une lecture (`tags.c`, crochet `tags_yield`), entre deux entrées d'un dossier (`browser.c`, comme l'appel à `ui_background()` qui s'y faisait déjà, et que l'appareil pratique depuis la 0.95), et pendant l'attente du réveil de la carte (`sd.c`, crochet `sd_yield`). La boucle, elle, continue de lire le fichier joué (`fat_pread`) entre deux reprises, comme avant. Deux interdits en découlent :
+- `tags.c` n'est pas réentrant : avant de l'utiliser, la boucle termine le travail en cours (`storage_drain()`) ;
+- pendant un parcours d'arbre, la tâche garde le secteur de dossier dans le tampon statique de `fat.c` à travers ses pauses : la boucle ne lit aucun dossier (les touches du navigateur attendent, l'écran affiche « reading... »), et la préparation de la piste suivante est suspendue.
+
+**r11 — la piste suivante préparée en avance.** Dès que la piste jouée a rempli son anneau DAC, la tâche ouvre la suivante de la file et lit ses étiquettes ; `q_open()` les trouve prêtes (le contrôle : même index, même cluster, même taille, même volume ; sinon, lecture directe comme avant). Premier déclencheur essayé, « le fichier entier est dans l'anneau d'entrée » : il ne se déclenche jamais après un Musepack dont l'étiquette APEv2 (8,7 Mo de pochette) est à la fin du fichier, que le cœur B ne lit pas. Résultat (`perf-covers`, `--cycles`) : la pochette de 17,9 Mo lue pendant 1,47 s de la piste précédente, le passage d'une piste à l'autre à 0,1 ms dans la boucle, **plus de tour perdu** (un avant) ; pile de la tâche : 576 octets utilisés au plus sur 6 144.
+
+**r12 — le parcours d'arbre.** PLAY maintenu sur un dossier soumet le parcours à la tâche (le montage de la carte compris) ; la boucle lance la lecture à sa fin. 540 pistes en 45 dossiers : 55 ms simulées (35 ms d'un bloc) ; les mêmes files qu'avant.
+
+**r13 — les écritures différées.** Les sauvegardes de la reprise demandées par une touche (pause, saut, dossier, réglages) ou par un changement de piste (`heard_publish`, dans le chemin audio) sont écrites par la boucle après le dessin de l'image (`resume_save_later()`, `resume_flush()`), l'idée d'EchoPod (§98) ; une extinction, une mise à l'arrêt et les écrans exclusifs (avant une session USB ou une installation) écrivent tout de suite.
+
+**r14 — le montage de la carte.** L'attente du réveil de la carte (ACMD41, jusqu'à 200 ms) cède la main quand le montage se fait dans la tâche (un parcours sur la carte, le cas mesuré à 253 ms au §97) ; un montage demandé par la boucle (ouvrir la carte depuis le haut du navigateur) reste bloquant.
+
+**Reste bloquant** : la recherche dans un Musepack sans table de positions (432 ms, le son coupé de toute façon), l'ouverture d'un dossier par le navigateur (1 à 30 ms), un montage demandé par la boucle.
+
+**Vérification de la r15 dans l'émulateur** (`work/emu/regress_r15.txt`, `perf_r15.txt`) :
+- 12 tests `emutest` PASS (dont les reprises d'arbre, qui passent par le parcours dans la tâche) ; 31 scénarios sur la r9 et la r15 sans faute, **49 captures identiques sur 54** ; les 5 autres : la barre de progression (1 à 19 pixels), l'écriture de l'installateur, l'ordre aléatoire tiré de l'horloge ;
+- scénarios de mesure (`--cycles`) :
+
+| Cas | Plus long trou du chemin audio, r9 | r15 |
+|---|---|---|
+| Ogg Vorbis, pochette 17,9 Mo (étiquettes de la suivante) | 1 350 ms (étiquettes), 1 tour perdu | **26 ms** (ouverture), 0 |
+| Opus, pochette 8,7 Mo | 664 ms (étiquettes) | **21 ms** (ouverture) |
+| AAC, MP3, Musepack, FLAC, pochettes de 8 Mo | 4 à 19 ms | 4 à 15 ms |
+| Chaîne de formats, 24/192 compris | 8 à 14 ms | 7 à 13 ms |
+
+- le pire passage de la boucle hors démarrage à froid des DAC (290 ms, une fois par session) : 26 ms (ouverture d'un Ogg de 24 Mo par le cœur B), au-dessus des 20 ms visés de peu ; tout le reste sous 16 ms ;
+- pile de la tâche : 576 octets au plus utilisés sur 6 144 (lecture d'étiquettes, parcours d'arbre) ; elle pourra être réduite si la BSS en a besoin (3,5 Kio de marge) ;
+- le blocage de 500 ms (`perf-stall`) et la minuterie (`sleep-fade`) PASS.
+
+## 101. Refonte, étape 3 sur l'appareil (r15) et corrections (image 99R16, 2026-11-06)
+
+**Session de la r15 sur l'appareil** (`work/hwlog/2026-11-06_0.99r15/`, 1 703 lignes, 78 pistes) :
+- **Lecture aléatoire de toute la carte** (PLAY maintenu, carte non montée) : montage de la carte (253 ms) et parcours de 18 257 pistes dans 1 396 dossiers en **3,2 s dans la tâche**, la piste en cours continuant : plus long trou du chemin audio **27 ms** (25 ms de tâche), aucun tour perdu. Avec la r9 la même opération gelait la boucle environ 3 s (§97).
+- **Étiquettes de la piste suivante lues en avance** à chaque enchaînement (« tags read ahead ») ; pile de la tâche : 648 octets au plus utilisés sur 6 144.
+- **Reprise après extinction** : deux fois juste (file d'arbre reconstruite, piste et position).
+- Hors refonte, déjà connus : l'album dont les Ogg refusent de s'ouvrir (-51, déjà dans les journaux d'octobre), la recherche Musepack sans table (398 ms), 500 ms d'« open » sur une piste FLAC qui cumulent les huit échecs précédents.
+
+| Format (r15, appareil) | Pistes | Trou max du chemin audio | Tours perdus |
+|---|---|---|---|
+| FLAC, ALAC, AAC, AIFF, WAV, Vorbis, MP3 | 56 | 25 à 132 ms (ouverture par le cœur B, hors démarrage des DAC et cas ci-dessus) | 0 |
+| Opus 48/16 | 18 | **2 147 ms** (étiquettes 2 049 ms, recherche) | **2** |
+
+**Défaut trouvé : la recherche relit les étiquettes.** Une recherche (VOL+ et VOL- ensemble) rouvre la piste en cours ; `q_open()` relisait ses étiquettes, de façon bloquante : sur un Opus dont l'en-tête de commentaires fait 13,8 Mo, 2 049 ms, deux tours de l'anneau DAC perdus. La lecture anticipée ne couvrait que la piste suivante.
+
+**r16 — correction.** `q_open()` garde la clé du fichier dont les étiquettes sont dans `tg_next` (cluster, taille, volume) ; le même fichier rouvert (recherche, piste mise en veille longue rejouée) les reprend sans lecture (« ui: tags kept »). Scénario `perf-seek-cover` (Opus, pochette de 17 Mo, `--cycles`) : **1 408 ms → 85 ms** (il reste l'ouverture au point visé par le cœur B, 78 ms), plus de tour perdu.
+
+**r16 — barre de progression vide à la reprise.** Après une extinction, une piste reprise en pause (« parked ») n'est pas ouverte : sa durée (`player_heard.length_ms`) était inconnue, la barre vide et la recherche refusée jusqu'à la lecture. La durée est maintenant sauvegardée dans l'état de reprise (deux mots après la somme, avec leur propre contrôle : un état écrit par une version plus ancienne se relit, sans barre) et rendue par `len_ms()` au même titre que la position (`now_ms()`) ; la mise en veille longue d'une pause la garde aussi. La recherche marche donc aussi sur une piste reprise en pause. Test `resume-paused-zero` : « paused at 0 ms of 10000 ».
+
+Vérification de la r16 dans l'émulateur : 17 tests `emutest` PASS, `perf-seek-cover` PASS (la r15 y échoue).
+
+## 102. Refonte, étape 4 : sondes du cœur B sur l'appareil (image 99R17, 2026-11-06)
+
+**But** : savoir ce que le cœur B peut atteindre avant de lui confier l'anneau lu par la DMA. L'émulateur laisse tout passer ; seul l'appareil répond. Image de test (`make EXTRA=-DECHO_BPROBE`, version « 0.99r17 », l'image normale inchangée) : à chaque démarrage du cœur B, avant HP_READY, une sonde (`rt.c`, `hp_ctl.bp`) dont chaque accès est une étape numérotée ; une faute est notée puis sautée (le gestionnaire avance le PC d'une instruction, écritures rendues précises par `ACTLR.DISDEFWBUF`), un blocage laisserait l'étape dans le bloc de contrôle. Le cœur A prépare les mots à lire, vérifie ceux écrits, et journalise (`bprobe:`).
+
+**Résultats** (`work/hwlog/2026-11-06_0.99r17/`, deux démarrages, 16 pistes) : aucune faute.
+
+| Accès du cœur B | Résultat |
+|---|---|
+| SYSRAM, BSS du cœur A (`0x03006724`) | lecture et écriture justes (le cœur A relit le mot écrit) |
+| SYSRAM, constante de la zone de code (`0x03067038`) | lecture juste |
+| PMU-SRAM (`0x03090000`) | lecture et écriture justes |
+| SAR du canal 5 du DMAC1 | lisible ; 192 octets par ms (48 kHz × 4 octets), cohérent avec la lecture du cœur A |
+| SysTick, horloge du cœur | 200 035 coups par ms à 200 MHz ; 9 interruptions en 20 ms sur une période de 2 ms |
+| SysTick, horloge de référence | absente (0 coup ; CALIB `0x40000001`, bit NOREF) |
+
+Au passage, la r16 sur l'appareil : trois recherches, « tags kept » à chaque fois, aucun tour perdu ; reprise « paused at 5855 ms of 390026 », barre juste. Défaut noté : au démarrage, la reprise d'une file d'arbre de toute la carte reparcourt l'arbre dans la boucle (2,4 s d'écran figé, rien ne joue encore) ; à passer dans la tâche de stockage.
+
+**Décisions pour l'étape 4** (utilisateur, 2026-11-06) :
+1. anneau PCM de **96 Kio** en HIGHRAM1, écrit par le cœur B et lu directement par la DMA (557 ms en 16/44,1, 64 ms en 24/192) ;
+2. les **bips** de batterie mélangés par le cœur B, à la demande du cœur A (même baisse de 12 dB) ;
+3. le cœur B se règle sur **TIMER1** (24 MHz fixes) et sur la position de la DMA qu'il lit lui-même ; la SysTick n'est pas utilisée (elle suit l'horloge variable du cœur B) ;
+4. anneau d'entrée de **96 Kio en SYSRAM** (et non 192 Kio) : 96 Kio de SYSRAM laissés libres pour les évolutions graphiques. Environ 2,4 s de MP3 à 320 kb/s, 750 ms de FLAC 16/44, 165 ms de FLAC 24/192.
+Le mode carte son USB garde l'anneau du DAC en SYSRAM (à réduire avec lui : voir l'étape).
+
+## 103. Refonte, étape 4 : le cœur B écrit l'anneau lu par la DMA (images 99R18 à 99R21, 2026-11-06)
+
+Faite dans l'émulateur, la r21 essayée ensuite sur l'appareil. Les décisions du §102 appliquées.
+
+**r18 — la mémoire.** L'anneau d'entrée passe en SYSRAM (`0x03020000`, 96 Kio, section `.hpinring`), l'anneau de sortie du cœur B à 96 Kio en HIGHRAM1 (`0x01048000`), les données des codecs ramenées à 148 Kio (Vorbis, le plus gros, en prend 115 avec son tas). Le protocole ne change pas encore (le cœur A recopie toujours) : 17 tests `emutest` PASS.
+
+**r19 — le cœur B écrit l'anneau de la DMA** (protocole version 2). Le DMAC1 lit directement l'anneau de sortie du cœur B ; le cœur A ne recopie plus rien.
+- *Les positions* : compteurs d'octets `pcm_wr` (écrit par le cœur B) et `pcm_rd` (la position de la DMA, que le cœur B suit lui-même en lisant le SAR, avec les tours cachés comptés d'après TIMER1 comme au §97). Le cœur A les pose avant de libérer le cœur B (`pcm_hold`), puis ne touche plus à la position d'écriture jusqu'à l'arrêt du cœur B (`audio_attach` / `audio_detach`) : jamais un indice déplacé par les deux cœurs à la fois (règle du §98).
+- *Le réveil du cœur B* : TIMER1 ne peut pas l'interrompre ; c'est sa **SysTick**, toutes les 2 ms, sur son horloge que le cœur A lui donne à chaque changement (`b_hz`). TIMER1 ne sert qu'à mesurer le temps. Écart à la décision 3 du §102.
+- *Trois moments de passage* : à la suite de la piste précédente (enchaînement à la même fréquence : sans blanc, comme avant) ; après un démarrage des DAC ; après un changement de fréquence (le cœur B attend que la DMA ait passé la fin de la piste précédente, puis commence 40 ms devant elle, l'anneau mis à zéro). Après une recherche ou un saut (la DMA a dépassé ce qui restait), tout l'anneau est mis à zéro : un départ tardif joue du silence.
+- *Un changement de codec ne remet plus à zéro la HIGHRAM1 ni sa matrice* pendant que la DMA y lit (`hifi_prepare`) : seulement la HIGHRAM0 et HIFIACC.
+- *L'émulateur* : le cœur B lit le SAR du modèle de DMA du cœur A, et sa SysTick le réveille (`emu_coreb.py`).
+
+**r20 — les bips** de batterie mélangés par le cœur B dans ce qu'il écrit (même mélangeur qu'au §43, le motif calculé par le cœur A) ; un changement de piste, qui redémarre le cœur B, reprend le motif où il en était (`beep_from`). Scénario `beep-low` : les trois bips de 1 kHz trouvés dans ce que la DMA a lu, à pleine amplitude, l'un d'eux à cheval sur un changement de piste.
+
+**r21 — 96 Kio de SYSRAM libres.** L'anneau du mode carte son prend la place de l'anneau d'entrée (aucun codec ne tourne alors) ; `0x03038000`–`0x0304ffff` reste libre pour les écrans. Au passage : les compteurs des anneaux reculent d'un nombre entier d'anneaux à chaque piste une fois au-delà de 2^30 (`audio_rebase`) — la taille n'étant pas une puissance de deux, un compteur repassant par 2^32 aurait déplacé l'écriture d'un anneau, une fois toutes les 47 min en 24/192 (défaut ancien, l'anneau de 192 Kio l'avait aussi) ; essayé avec un seuil de 1 Mio : la sortie de la DMA identique octet pour octet.
+
+**Vérification dans l'émulateur** :
+- 17 tests `emutest` PASS (r19, r21) ; 31 scénarios r16 contre r19 sans faute, 49 captures identiques sur 54 (les 5 autres : barre de progression, ordre aléatoire, écriture de l'installateur, comme au §100) ; r19 contre r21 : 52 sur 54 (la barre d'une piste à grosse pochette, l'écriture de l'installateur), `perf-stall` PASS ;
+- le blocage de 500 ms de la boucle du cœur A (`perf-stall`, ECHO_STALL) : **MP3 aucun manque** (la r16 y perdait des tours) ; FLAC 24/96, un manque de 71 ms : l'anneau d'entrée de 96 Kio n'en tient que 300 ms (la conséquence attendue de cette taille) ;
+
+| Mesure (`--cycles`) | r16 | r21 |
+|---|---|---|
+| Anneau PCM, plus bas (16/44,1) | 1 086 ms (DAC, 192 Kio) | 507 ms (96 Kio, ne dépend plus du cœur A) |
+| Anneau PCM, plus bas (24/192) | 119 ms | 57 ms |
+| Anneau d'entrée, plus bas (MP3, Vorbis, AAC) | 0,4 à 1 s | 2 à 3,7 s |
+| Plus long trou du chemin audio | 4 à 26 ms | 4 à 27 ms |
+
+**Sur l'appareil (r21, `work/hwlog/2026-11-06_0.99r21/`, 61 pistes)** :
+- le **changement de codec, l'anneau gardé** (Vorbis → WAV, la DMA continuant) : aucun manque — la HIGHRAM1 garde son contenu sans sa remise à zéro ;
+- **15 fréquences** de 8 à 192 kHz, un changement à chaque piste (9 ms chacun) ; le **mode carte son** (80 s, son propre) ;
+- **manques du cœur B : 0**, sauf 9, tous juste après une recherche dans un Vorbis ou un Opus : le cœur B y met 130 à 190 ms à sortir ses premières trames, pour 40 ms de silence devant lui ; l'anneau étant mis à zéro, rien d'audible (le son est coupé par la recherche de toute façon). Corrigé dans le compte (r22) : un retard avant la première trame n'est plus un manque.
+- les « tours perdus » du cœur A (colonne `laps`) ne disent plus rien du son depuis la r19 : la colonne `B ur` de `perfreport.py` les remplace.
+
+## 104. La reprise d'une file d'arbre joue sa piste tout de suite (image 99R23, 2026-11-06)
+
+**Avant** : au démarrage, la reprise d'une file faite par PLAY maintenu (toute la carte : 18 257 pistes) reparcourait l'arbre avant d'entrer dans la boucle : 2,4 s d'écran figé sur l'appareil (§102), puis le démarrage des DAC et le son.
+
+**Maintenant** :
+- l'état de reprise garde aussi la **piste** de la file (taille, type, nom ; mots 104 à 127 du secteur, après les réglages, avec sa propre somme : un état plus ancien se relit, avec la reprise d'avant) ;
+- au démarrage, cette piste devient une **file d'une piste** (`q_single`) et joue (ou attend en pause) aussitôt ; l'arbre est parcouru **dans la tâche de stockage** pendant ce temps, la piste gardée comme file (`q_from_tree_keep` : le nombre de pistes et son entrée ne changent qu'à la fin) ;
+- à la fin du parcours, encore dans la tâche et sans céder la main (`storage_hold`), la piste est retrouvée à sa place, sinon par son cluster, l'ordre aléatoire sauvé est remis (`q_resume_fix`) : la suivante vient de la même file qu'avant l'extinction, sans couper le son ;
+- pendant le parcours : sur l'écran de lecture, le volume, la pause et la recherche marchent ; les touches qui liraient un dossier (piste suivante ou précédente, mode, menu, navigateur) attendent ; aucune sauvegarde de la reprise (celle du disque reste valable), une écrite à la fin ; une piste finie avant la fin du parcours attend la file ;
+- un fichier changé depuis (taille, cluster, type) : la reprise d'avant (parcours bloquant).
+
+**Émulateur** : `resume-tree` (son attendu adapté : la piste joue d'abord comme « queue 1/1 »), `resume-shuffle` et `resume-paused-zero` PASS ; scénario `resume-library` (l'arbre de PortablePlayer, 18 260 pistes, `--cycles`) :
+
+| | Son au démarrage | File prête |
+|---|---|---|
+| r22 | 2,27 s | 1,98 s (parcours bloquant de 1 104 ms) |
+| r23 | **1,17 s** | 2,54 s (parcours de 1 675 ms dans la tâche, le son continu) |
+
+Sur l'appareil, où le parcours prend 2,4 s, le gain attendu est d'environ 2,4 s. `resume-library-pause` : pause et reprise pendant le parcours, puis la file retrouvée. 17 tests `emutest` PASS ; 32 scénarios r22 contre r23 (avec `shuffle-library`) sans faute, 56 captures identiques sur 57 (l'écriture de l'installateur).
+
+## 105. Refonte, étape 5 : l'anneau d'entrée en segments, l'ouverture sans attente (images 99R24 et 99R25, 2026-11-06)
+
+**r24 — l'anneau d'entrée en segments, la piste dans un en-tête** (protocole version 3). Les codecs du cœur B lisent `in_rd` et `in_end` comme des positions du fichier et sautent à des positions absolues (`in_seek`) : la vue « fichier » leur est gardée. L'anneau contient des **segments** : des suites d'octets contiguës à la fois dans le fichier et dans l'anneau ; leurs débuts (numéro, compteur d'anneau, position du fichier, fin du précédent) sont dans une file du bloc de contrôle (`seg[]`, le cœur A ajoute, le cœur B prend dans l'ordre). Un saut que le cœur B ne peut pas servir (en arrière, ou au-delà de ce qui est écrit) devient une **demande** (`req_seq`, `req_pos`) ; le cœur A y répond par un nouveau segment de ce numéro, ce qui précédait est sauté. Le retour en arrière du Musepack (§61, `rewind_*`) passe par là, comme les sauts de pochettes et les recherches de tous les codecs. Un nouveau segment commence au même endroit d'un secteur que sa position dans le fichier (quelques octets de l'anneau sautés) : sans cela, le cœur A, qui lit des secteurs entiers, ne pouvait plus écrire les derniers octets avant la fin de l'anneau (premier essai : lecture figée après le retour en arrière de dr_flac). Les indications de la piste (point de départ, page Ogg, fin des commentaires, dernière granule) passent dans un **en-tête de piste** (`trk`), que le cœur B recopie à l'ouverture. Chaque indice n'a toujours qu'un cœur qui le déplace.
+
+Vérification : le PCM que le cœur B écrit (capture `--pcm`, scénarios `pcm-*`) comparé à la r23 par blocs de 4 Kio : enchaînement de 9 formats, pochettes de 8 et 17 Mo (identique octet pour octet), recherches en Vorbis, Opus, Musepack SV8 et FLAC : tous les blocs retrouvés dans l'ordre, sauf 1 ou 2 aux coutures (les captures autour d'un redémarrage, et la position visée par une recherche, qui dépend du moment de la touche) ; 17 tests `emutest` PASS.
+
+**r25 — l'ouverture sans attente.** Depuis la r19, le son ne dépend plus de la boucle du cœur A : un blocage de l'ouverture (20 à 190 ms) ne fige plus que l'écran et les touches, et le redémarrage du cœur B coûte 40 µs. Le gain de l'étape est donc que le cœur A n'attende plus le cœur B : une piste enchaînée et une recherche s'ouvrent en `PLAY_ASYNC` (le cœur B lit les en-têtes, `player_service()` termine l'ouverture). Une piste choisie à la main reste ouverte en attendant (son refus s'affiche, « Cannot play »). Restent dans la phase « open » le travail propre du cœur A : le chargement du codec depuis la mémoire interne, la recherche de la dernière page et de la page visée en Ogg (jusqu'à 65 ms pour une recherche dans l'Opus à pochette de 17 Mo, contre 79).
+
+**Sans blanc** (scénarios `gapless-*`, `fw/tools/gapcheck.py`) : un enregistrement coupé en trois fichiers de 58 816, 75 411 et 86 273 trames, joué comme un dossier ; dans ce que la DMA a lu, l'enregistrement entier se retrouve **échantillon pour échantillon** (220 500 trames d'affilée) en WAV, en FLAC, et en WAV puis FLAC puis WAV (changement de codec à fréquence égale). Le changement de fréquence garde son court silence (40 ms devant la DMA, 9 ms de changement).
+
+**Vérification de la r25** : 17 tests `emutest` PASS (`set-covers` et `set-ci` adaptés : une piste enchaînée, ouverte sans attente, écrit sa ligne de format après sa ligne de file) ; 33 scénarios contre la r23 sans faute, 48 captures identiques sur 54 (les autres : barre de progression, ordre aléatoire, écriture de l'installateur, et la barre de `battery-gauge`, décalée de 4 pixels : les pistes de 4 s en boucle s'ouvrent un peu plus tôt).
+
+**Conséquence pour la suite du plan** : la r26 prévue (préparer la piste suivante dans l'anneau d'entrée, passer d'une piste à l'autre sans redémarrer le cœur B) ne changerait plus rien d'audible ; l'enchaînement est déjà exact, et la boucle n'attend plus.
+
+## 106. Les anneaux d'entrée et PCM : usage et marges ; la carte montée d'office (image 99R26, 2026-11-06)
+
+**Mesure.** L'émulateur relève, avec `--ring-trace` (`--cycles`), toutes les 5 ms le remplissage de l'anneau d'entrée (octets d'anneau gardés : `in_wr - rb_rd`) et de l'anneau PCM (`pcm_wr - pcm_rd`) ; scénarios `ring-chain`, `ring-covers`, `ring-queue` (album puis aléatoire), `ring-gapless-mixed` sur la r25 ; avec la session r21 de l'appareil (61 pistes, 21 formats ou fréquences).
+
+**Régime établi** : l'anneau PCM reste à moins de 50 ms du plein dans tous les formats (le cœur B se réveille toutes les 2 ms) ; l'anneau d'entrée à 80-90 % (le cœur A le complète dès 8 Kio libres). Les deux font 96 Kio : ce qui change d'un format à l'autre est leur durée.
+
+| Format | Débit | Entrée : capacité / plus bas | PCM : capacité / plus bas (émul. ; appareil) |
+|---|---|---|---|
+| Opus, Vorbis | 175-190 kb/s | 4,3-4,5 s / 3,9 s | 512-557 / 473-522 ; 466-512 ms |
+| AAC, MP3 320 | 260-320 kb/s | 2,5-3 s / 2,1-2,9 s | 557 / 508-511 ; 505-509 ms |
+| FLAC 16/44,1 | ≈ 650 kb/s | 1,3 s / 0,5-0,6 s | 557 / 511 ; 509 ms |
+| WAV 16/44,1 | 1 411 kb/s | 557 / 506 ms | 557 / 533 ; 528 ms |
+| FLAC, ALAC 24/96 | 2,2-2,4 Mb/s | 325-350 / 174-286 ms | 128 / 117-122 ; 96-119 ms |
+| WAV 24/96 | 4,6 Mb/s | 170 / 153 ms | 128 / 119 ms |
+| FLAC 24/192 | 2,6 Mb/s | 300 / 88 ms | 64 / 58 ms |
+| WAV 24/176,4-192 | 8,5-9,2 Mb/s | 85-92 / 64-76 ms | 64-70 / 58-62 ms |
+
+**Changement de piste** : enchaînement d'album (même codec, même fréquence) : l'anneau PCM baisse de 7 à 50 ms le temps que le cœur B redémarre et écrive (appareil : 482 ms au plus bas, depuis 528-533 ; émulateur : 485-526 ms en 16 bits, 51 ms sur 64 en 24/192) ; changement de codec à fréquence égale : idem (code rechargé en 1 à 4 ms) ; changement de fréquence : 9 ms et 40 ms de silence devant la DMA ; saut, recherche : l'anneau remis à zéro, première trame 23 à 312 ms plus tard (silence) ; aléatoire : comme un enchaînement, la lecture du dossier par le cœur A ne touche plus le son. Aucun manque du cœur B dans ces cas.
+
+**Marges.** Contre un blocage du cœur A, la protection est la durée de l'anneau d'entrée plus celle de l'anneau PCM (le cœur B décode ce qui reste) : 3 à 5 s en compressé avec perte, 1,9 s en FLAC 16/44,1, 1,1 s en WAV 16/44,1, ≈ 450 ms en FLAC 24/96, ≈ 360 ms en FLAC 24/192, ≈ 300 ms en WAV 24/96, **≈ 150 ms en WAV 24/192**. Contre un retard du cœur B, l'anneau PCM : 0,5 s jusqu'à 48 kHz, 64 ms en 24/192 pour au plus 13 ms de creux au changement de piste. Les anneaux sont donc bien dimensionnés ; le seul point juste est le WAV haute résolution, face aux blocages du cœur A qui restent : un **montage de la carte** demandé par la boucle (45 à 253 ms : plus que 150 ms), la recherche Musepack sans table (≈ 400 ms, le son coupé de toute façon), les ouvertures de pistes choisies à la main (20 à 130 ms, son coupé), un dossier ouvert (1 à 30 ms), l'écriture du journal (3 à 5 ms).
+
+**r26 — la carte montée d'office** (décision de l'utilisateur : plus simple et plus sûr que la tâche de stockage, le montage marche) : au démarrage avant la reprise (rien ne joue), au retour d'une session USB, de l'installateur ou des écrans système (la musique est arrêtée), et quand une carte est remise si rien ne s'entend. Avant, elle l'était au premier accès : une lecture depuis la mémoire interne, puis « SD card » ouvert dans le navigateur, bloquait la boucle le temps du montage. Reste au premier accès : une carte remise pendant une lecture. Test `sd-boot` (une carte FAT32 à la mise sous tension : montée avant la liste du haut) : PASS en r26, échoue en r25.
+
+## 107. Refonte, étape 6 : l'horloge du cœur B (images 99R27P, 99R28, 99R29, 2026-11-06)
+
+**Les autres firmwares** (idées seulement) : aucun ne règle l'horloge du cœur B sur une mesure. Le firmware d'origine (schéma du SDK Rockchip, dont une copie est dans le dépôt de ReChord) a une table de fréquences par « application » : MP3 24 / 36 MHz, AAC 36 / 80, WAV 88, Ogg 120 / 180 / 260, FLAC 150 / 220, APE, ALAC haute résolution et DSD jusqu'à 400 MHz ; le cycle d'attente des mémoires au-delà de 300 MHz seulement. ReChord tient le cœur B à fréquence fixe (100 MHz) ; sa régulation n'est « pas faite, trop risquée sans mesure » ; son gain contre la chaleur a été de faire dormir le cœur B (WFI, SysTick de 1 ms), ce que nous faisons. EchoPod et Podium : PLL divisée sous 100 MHz, pleine vitesse pour AAC, Opus et FLAC avec égaliseur, choisie à l'ouverture. Notre boucle de retour reste une spécificité (décision de l'utilisateur), réglée sur des critères plus fins.
+
+**Ce que montrait la r21 sur l'appareil** : l'accélération à 200 MHz à chaque début de piste puis une descente d'un niveau par seconde (6 s de 200 à 50 MHz : 16 à 41 % du temps à 200 MHz sur des pistes courtes, même pour un WAV de 2 MHz) ; des règles pensées pour l'ancien anneau de 1,1 s, alors que l'anneau PCM ne fait plus que 64 ms en 24/192 ; une charge du cœur B doublée en WAV haute résolution depuis la r18 (24/192 : 35 → 62 MHz ; 176,4 : 32 → 58 ; 128 : 23 → 42).
+
+**r27 — mesurer.** Dans l'émulateur (`--cycles`), le cœur B exécute maintenant un nombre d'instructions proportionnel à son horloge (`hifi_hz` divisé par `--b-cpi`, 1,0 par défaut) au lieu de 100 MHz fixes, ses réveils (sonnette, SysTick) attendent les tranches de temps du cœur A, et le TIMER1 qu'il lit avance avec le travail fait : sa charge, mesurée par ses sommeils, devient visible (elle était à 0) ; elle vaut à peu près la moitié de celle de l'appareil (`--b-cpi 1.8` l'en approche). Image de test `NEWFWR27P` (`ECHO_BPROBE`) : les cycles du cœur B pour lire 32 Kio en SYSRAM, en HIGHRAM0 et en HIGHRAM1, et pour 1 000 lectures du SAR de la DMA et de TIMER1 (sur l'appareil seulement : l'émulateur ne compte pas les cycles de la SysTick).
+
+**r28 — alléger le cœur B.** La position de la DMA n'est plus relue à chaque écriture mais après chaque sommeil, ou quand la place connue tombe sous 2 Kio (une position ancienne ne donne que moins de place). Sa SysTick n'est armée que pendant la lecture, à la période où la DMA libère 4 Kio (2 à 20 ms : 20 ms en 44,1/16, 2,7 ms en 24/192 ; 2 ms toujours avant). Premier essai : un réveil armé seulement sous 4 Kio de place laissait le cœur B dormir pour toujours quand le décodeur MP3 attendait 4,5 Kio (une trame) ; armé à chaque sommeil pendant la lecture. Réveils divisés par deux en 16 bits (210 à 250 par piste de 5 s au lieu de 450 à 575) ; PCM identique à la r23 (`pcm-chain`, `pcm-seek-mpc`), sans blanc (`gapless-mixed`), `perf-stall` PASS.
+
+**r29 — la régulation** (seuils de l'utilisateur) :
+- **la fenêtre** suit l'anneau : un quart de sa durée, de 16 à 250 ms (16 ms en 24/192) ; à chaque fenêtre, les **sécurités** sur l'anneau : sous la moitié de sa durée, un niveau au moins de plus ; sous le quart, le maximum ;
+- **la charge** est jugée sur 250 ms au moins (une fenêtre courte voit les rafales d'un codec : un premier essai, qui jugeait chaque fenêtre, tenait le FLAC 24/96 à 100 MHz pour 38 MHz de besoin) : **au-dessus de 85 %**, on monte aussitôt au niveau qui donne 75 % ; **sous 65 % pendant 1 s**, on descend **directement** à ce niveau (avant : un niveau par seconde) ;
+- l'accélération du début de piste est gardée (décision de l'utilisateur) ;
+- la ligne `clock:` donne les montées, descentes, interventions de sécurité et le plus bas remplissage en ms.
+
+Scénario `gov-long` (Vorbis, Opus, Musepack, FLAC 24/96, WAV 24/192, 20 s chacun, `--cycles --b-cpi 1.8`) :
+
+| Piste | Changements r28 → r29 | Niveau tenu (r29) | Charge moyenne | Plus bas de l'anneau | Manques |
+|---|---|---|---|---|---|
+| Vorbis | 6 → 2 | 50-57 MHz | 36 MHz | 496 ms | 0 |
+| Opus | 3 → 1 | 80 MHz | 57 MHz | 457 ms | 0 |
+| Musepack | 6 → 1 | 50 MHz | 13 MHz | 480 ms | 0 |
+| FLAC 24/96 | 19 → 2 | 50 MHz | 35 MHz | 77 ms (sur 128) | 0 |
+| WAV 24/192 | 4 → 4 | 57 MHz | 41 MHz | 51 ms (sur 64) | 0 |
+
+Les sécurités ne se sont pas déclenchées (l'anneau toujours au-dessus de la moitié). Vérification de la r29 : 18 tests `emutest` PASS ; `perf-stall` PASS ; sans blanc exact (`gapless-wav`, `-flac`, `-mixed`) ; PCM identique à la r23 aux coutures près ; 31 scénarios contre la r26 sans faute, 52 captures identiques sur 54 (l'ordre aléatoire, l'écriture de l'installateur). À voir sur l'appareil : la charge réelle (environ le double), l'Opus le plus lourd, le WAV 24/192, et les sondes de la r27.
+
+## 108. La charge du cœur B en WAV 24 bits : écriture de l'anneau PCM et lecture de la SYSRAM (images 99R27P, 99R30, 99R31, 2026-11-06, appareil)
+
+**Constat** (r21, puis r27p sur l'appareil) : depuis la r18, la charge moyenne du cœur B en WAV 24 bits a doublé (192 kHz : 35 MHz en r17, 62 à 66 MHz ; 96 kHz : 14 → 27 MHz). Le WAV 16 bits bouge peu en valeur absolue (64 kHz : 0,7 → 2,1 MHz).
+
+**La sonde de la r27p** (`work/hwlog/2026-11-06_0.99r27p/`, cœur B à 200 MHz, en cycles) : 32 Kio lus par `memcpy` dans un tampon de 1 Kio : SYSRAM 131 667, HIGHRAM0 49 477, HIGHRAM1 49 445 (la SYSRAM 2,7 fois plus lente : environ 16 cycles par mot) ; 1 000 lectures du SAR de la DMA : 16 003, de TIMER1 : 20 996. Les accès de la sonde : SYSRAM et PMU-SRAM lues et écrites justes, aucune faute (comme en r17, §102).
+
+**Deux causes** :
+1. **l'écriture mot à mot dans l'anneau PCM** (`raw_word`) : depuis la r18, chaque mot y faisait la vérification des bips (lecture du bloc de contrôle), un modulo sur 96 Kio (une division : la taille n'est pas une puissance de deux) et trois écritures ; la r17 faisait une lecture, une écriture et une comparaison. En 24 bits, deux mots par trame ;
+2. **la lecture de l'anneau d'entrée en SYSRAM** (depuis la r18 ; il était en HIGHRAM) : le `memcpy` du cœur B ne copiait par mots que si la source et la destination étaient alignées ; une trame de 6 octets (24 bits stéréo) laisse la position de lecture désalignée une fois sur deux, et la copie se faisait alors octet par octet, chaque octet coûtant une lecture complète de la SYSRAM.
+
+**r30** : `raw_word` réduit au plus court (le décalage dans l'anneau gardé d'un mot au suivant, le modulo seulement si le compteur a bougé ailleurs ; le retour au début par comparaison) ; la vérification des bips une fois par bloc (`raw_space`, `raw_write`) au lieu d'une fois par mot ; le WAV non 16 bits stéréo converti dans un tampon local de 256 mots puis écrit par `out_write`, le FLAC stéréo (16 et 24 bits) écrit d'un bloc (les trames tassées sur place au-delà de deux canaux). **r31** : `memcpy` lit la source par mots alignés quelle que soit la destination (les premiers octets un par un, puis des mots lus, écrits par mots ou par octets).
+
+**Sur l'appareil** (`work/hwlog/2026-11-06_0.99r30/`, `..._0.99r31/` ; les 15 fréquences de `test_rates`, tous les formats, 33 et 46 pistes) — charge moyenne du cœur B :
+
+| WAV 24 bits | r17 | r27p | r30 | r31 |
+|---|---|---|---|---|
+| 88,2 kHz | 12 MHz | 24 MHz | 11,5 MHz | 11,6 MHz |
+| 96 kHz | 14 MHz | 27 MHz | 13 MHz | 13,1 MHz |
+| 128 kHz | 23 MHz | 44,5 MHz | 26,7 MHz | 19,3 MHz |
+| 176,4 kHz | 32 MHz | 61 MHz | 40 MHz | 36,2 MHz |
+| 192 kHz | 35 MHz | 63 à 66 MHz | 44 à 47 MHz | 33,1 MHz |
+
+Les autres formats en r31 : FLAC 16/44,1 9 à 10 MHz, MP3 27 MHz, AAC 27 MHz, Vorbis 37 à 47 MHz, Opus 54 à 62 MHz. Aucun manque du cœur B, aucune faute, aucun tour perdu en r31 (deux « tours perdus » en r30 en 24/192 : l'estimation du cœur A pendant le démarrage des DAC, 338 ms pour un anneau de 64 ms ; aucun manque du cœur B). Plus bas de l'anneau PCM : 56 ms sur 64 en 24/192, 81 ms sur 128 en FLAC 24/96. La carte est montée au démarrage (15 ms, exFAT). Les échecs d'ouverture des journaux sont les fichiers de `test_floor0` (Vorbis floor 0, refusés par conception, §62) et de `test_damanged_files`.
+
+**Reste** : à 176,4 et 192 kHz la régulation oscille entre 50 et 80 MHz (10 changements par piste, charge jusqu'à 100 % sur une fenêtre de 16 ms), l'anneau restant au-dessus de la moitié (38 à 45 ms sur 64) ; une copie par DMA de la SYSRAM vers la HIGHRAM (idée de l'utilisateur) gagnerait encore environ 5 MHz en 24/192 (4 cycles par octet en mots alignés), pour un canal du DMAC partagé avec le cœur A : écartée pour l'instant.
+
+**Émulateur** (r30, r31 ; il ne modélise pas la lenteur de la SYSRAM) : 18 tests `emutest` PASS ; sans blanc exact (`gapless-wav`, `-flac`, `-mixed`) ; `beep-low` identique octet pour octet à la r29 ; `pcm-chain` et `pcm-seek-flac` identiques à la r29 sauf un décalage en un point (1 536 et 320 octets, le temps d'une couture), puis identiques jusqu'à la fin ; la r31 identique octet pour octet à la r30 (`pcm-chain`).
+
+**Question de l'utilisateur, le bip en piste intercalée** : écartée ; le bip attendrait la fin de la piste (ou la couperait : une recherche pour reprendre, 30 à 300 ms de trou) et changerait de fréquence avec les pistes à 96 et 192 kHz ; le mélange par le cœur B tient dans `rt.c` (aucun codec touché) et ne coûte plus rien sans bip (r30).
+
+## 109. Refonte, étape 7 : la robustesse (images 99R32 à 99R36, 2026-11-06, appareil)
+
+**Décisions de l'utilisateur** : le relevé dans NEWFWLOG.TXT ; un écran au démarrage suivant ; après une faute du cœur B en pleine lecture, la même piste rejouée 1 s avant ; le chien de garde à environ 2 s.
+
+**r32 — le relevé de faute** (`crash.c`, `crash.h`) : un secteur de NEWFWLOG.TXT, avant l'état de reprise (`log_crash_read/write` ; l'anneau du journal a un secteur de moins), écrit en texte (`NEWFWCRASH 1 unread=… seq=…` : version, démarrage, heure, cœur, exception, tâche de la boucle, PC, LR, xPSR, SP, CFSR, HFSR, BFAR et MMFAR s'ils sont valides, 16 mots de pile, piste et position). Le gestionnaire de faute du cœur A l'écrit lui-même (le pilote eMMC scrute : pas d'interruption nécessaire), puis vide l'anneau du journal dans le fichier ; rien n'est écrit si la faute vient du pilote eMMC (`emmc_busy`) ou en mode USB. Au démarrage suivant : des lignes `crash:` dans le journal, un écran « Fault » 3 s une fois, le relevé marqué lu. `readlog.py` l'affiche à part.
+
+**r33 — le cœur B relancé** : une faute du cœur B en pleine lecture écrit le relevé, oublie le codec chargé (`hifi_own_drop` : son code a pu être abîmé) et rouvre la même piste 1 s avant la position entendue (ouverture asynchrone, comme une recherche) ; un deuxième incident sur la même piste la fait passer, la suivante joue.
+
+**r34 — les blocages** :
+- cœur B : aucune trame pendant **500 ms** (et non 1 s : la DMA rejoue l'anneau périmé pendant ce temps) alors que la DMA joue, que l'anneau PCM a de la place (8 Kio) et l'anneau d'entrée des données (4 Kio), hors pause, changement de fréquence et ouverture : relevé « core B stall » puis la même relance ;
+- cœur A : le chien de garde (TRM chapitre 20, DesignWare WDT, horloge pclk = cœur / 4) armé à TORR 11 (2^27 cycles : 2,7 s à 200 MHz ; 1,3 s aurait pris la lecture synchrone des étiquettes d'une pochette de 17,9 Mo, 1,4 s), mode « interruption d'abord » (IRQ 8) : l'interruption écrit le relevé « watchdog » avec le PC bloqué puis redémarre ; le reset matériel suit au deuxième délai si elle ne peut pas s'exécuter. Rafraîchi dans la boucle et dans `storage_yield` (une vidange de la tâche de stockage dure jusqu'à 3,4 s).
+
+**r35, r36 — sur l'appareil** :
+- les fautes de bus y sont **imprécises** (CFSR 400, tampon d'écriture) : le PC noté suit l'écriture fautive, BFAR sans valeur ; le relevé ne note BFAR et MMFAR que s'ils sont valides et marque l'imprécision (r35) ;
+- le chien de garde **survit au redémarrage logiciel** (SYSRESETREQ) et **ne peut pas être coupé** : CR = 0 laisse le bit d'activation à 1 et efface seulement le mode d'interruption (« CR was 1 » au démarrage suivant, r35) ; le chargeur et ce qu'il démarre auraient eu un reset direct au bout d'environ 22 s à 24 MHz. r36 : avant un redémarrage, la plus longue période (TORR 15 : environ 6 min jusqu'à l'interruption, 12 min jusqu'au reset au rythme du chargeur), le mode gardé (« CR was b ») ; notre démarrage le réarme à 2,7 s. Le chargeur l'avait laissé désactivé (« CR was a »).
+
+**Image de test `ECHO_FAULT`** : Power seul : le cœur B faute, puis se bloque à l'appui suivant (`hp_ctl.test`) ; VOL- tenu + Power : faute du cœur A (écriture en `0xfffffff0`) ; VOL+ tenu + Power : boucle du cœur A bloquée.
+
+**Sur l'appareil** (`work/hwlog/2026-11-06_0.99r34f/` à `..._0.99r36f/`) : une trentaine de fautes et de blocages du cœur B (MP3, Musepack, Opus, Vorbis) : relance sur la même piste, puis piste passée ; faute du cœur A : relevé relu après une extinction complète (démarrage à froid) ; blocage du cœur A : interruption du chien de garde à 2,7 s, relevé, redémarrage ; écran « Fault » vu aux trois redémarrages.
+
+**Émulateur** : une faute de bus (accès à une adresse non projetée) est remise au firmware au lieu d'arrêter l'émulation, sur les deux cœurs (pile d'exception, CFSR, HFSR, BFAR, vecteur HardFault) ; un modèle du chien de garde (avec `--cycles` : délai sur pclk, interruption 8, reset, le bit d'activation qui ne retombe pas). Tests `emutest` `fault-a`, `fault-b`, `stall-a` (image `ECHO_FAULT` seulement, hors de la liste par défaut). Non-régression : 18 tests `emutest`, `perf-*`, `gov-long`, `perf-stall` sans déclenchement du chien de garde ; sans blanc exact ; `pcm-chain` et `beep-low` identiques aux décalages de timing près (une couture ; les bips 1 ms plus tôt).
+
+**Reste** : une session longue avec l'image normale (aucun relevé, aucun redémarrage par le chien de garde attendu) ; le mode USB du chargeur (rkdeveloptool) redémarrerait au bout de 12 min s'il ne rafraîchit pas le chien de garde.
+
+## 110. L'écran d'installation : noms longs et défilement (image 99R37, 2026-11-06)
+
+Les images étaient listées par `fat_list_root()`, qui ne donne que le nom 8.3 (`NEWFWR~1.IMG` : deux images de test indiscernables), et l'écran a sa propre boucle d'attente des touches, où le défilement du navigateur ne tourne pas. r37 : la racine interne listée par `fat_list_dir()` (le nom long en UTF-8 ; `.IMG` en majuscules ou minuscules), la `fat_file` tirée de l'entrée (`fat_file_of`) pour la vérification et l'écriture, inchangées ; la ligne sélectionnée défile quand elle dépasse (réglages du navigateur : 1,5 s d'arrêt, 1 pixel toutes les 33 ms, blanc de 32 pixels), depuis la boucle d'attente ; le nom long aussi sur l'écran de vérification et dans les lignes `install:`. Les 32 noms (5 Kio) ne tenaient plus dans la BSS (1,5 Kio de trop) : ils sont dans la zone de SYSRAM laissée aux écrans (section `.screenram` à `0x03038000`, non chargée, §103). Émulateur : test `install-long` (deux images aux noms longs, la seconde choisie) ; `install-ok`, `install-badcrc` inchangés ; captures : noms longs, ligne sélectionnée décalée.
+
+## 111. Version 0.100 (2026-11-06)
+
+La refonte (branche `rework`, 0.99r1 à r37, §97 à §110) fusionnée dans `main`. Image de la version : le code de la 0.99r37 (vérifiée sur l'appareil en r36 et r37 pour l'écran d'installation ; r31 pour le son, r34f à r36f pour les pannes), seuls le numéro de version et la date changent. Reste à faire sur l'appareil : une session longue (aucun relevé de faute ni redémarrage par le chien de garde attendu), le pourcentage de batterie sur une longue session, les points des pull requests #8 et #9 (ROADMAP, « Waiting for a test on the device »).

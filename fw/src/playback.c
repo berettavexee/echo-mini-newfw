@@ -2,11 +2,14 @@
  * gapless from the main loop, skips and stops, the parked state of a long pause, the volume and
  * the seek on the bar. The screen and the resume state follow the track heard (heard_sync). */
 #include "ui_priv.h"
+#include "storage.h"
 
 /* ---- playback ---- */
 int play_level = 80;                            /* PCM_VOL: attenuation / 2 dB, start at -40 dB */
 struct tags tg = { .rg_gain = { RG_NONE, RG_NONE } };    /* of the track heard (none yet) */
 static struct tags tg_next;                     /* of the one opened last */
+static struct { uint32_t cluster, size; int vol, ok; } tg_key;  /* its file: a seek, a parked
+                                                 * track played again reuse its tags (§101) */
 static int fresh;                               /* the output was (re)started: fade in once fed */
 static int draining;                            /* end of the queue: the DAC ring plays out */
 uint32_t heard_gen;
@@ -84,7 +87,7 @@ static void heard_sync(void)
     q_cur = q_dec;
     tg = tg_next;
     rg_apply();
-    resume_save();
+    resume_save_later();                        /* written by the loop, after the frame (§100) */
 }
 
 /* Why nothing could be played: shown by the main loop (a banner, then the browser) */
@@ -155,6 +158,52 @@ void fail_text(int code, uint32_t why, const char **what, const char **hint)
     }
 }
 
+/* ---- the next track prepared ahead (rework step 3, ETUDE §100): once the track playing has
+ * filled its DAC ring, the storage task opens the next one of the queue and reads its tags, a
+ * few ms each pass; q_open() then finds them ready (the 1.4 s of a 17.9 MB Ogg cover read
+ * meanwhile, no longer between the two tracks, while the DACs play the last second). Not "once
+ * its file is all read": a Musepack's APEv2 cover at the end of the file is never read. ---- */
+enum { PREP_NONE, PREP_RUNNING, PREP_READY };
+static struct {
+    int state, idx;
+    uint32_t codec, t0, ms;
+    struct fat_file f;
+    struct tags t;
+} prep;
+
+static void prep_job(void *arg)
+{
+    (void)arg;
+    tags_read(&prep.f, prep.codec, &prep.t);
+    prep.ms = (ticks() - prep.t0) / 1000;
+    prep.state = PREP_READY;
+}
+
+static void prep_next(void)
+{
+    if (prep.state != PREP_NONE || !player_settled() || storage_busy() || browser_walking())
+        return;                                 /* (the queue is being rebuilt by a walk) */
+    int n = q_next_index(q_dec, 0);
+    const struct entry *e = n >= 0 ? q_ent(n) : 0;
+    if (!e || !e->size || ((e->flags & F_SD) && !sdvol.mounted))
+        return;                                 /* (never a card mounted from here) */
+    copy_name(prep.f.name, q_name(n), sizeof prep.f.name);
+    prep.f.vol = e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT;
+    prep.f.contig = (e->flags & F_CONTIG) != 0;
+    prep.f.cluster = e->cluster;
+    prep.f.size = e->size;
+    fat_open(&prep.f);
+    prep.idx = n;
+    prep.codec = e->flags & F_CODEC;
+    prep.t0 = ticks();
+    prep.state = PREP_RUNNING;
+    if (storage_submit(prep_job, 0))
+        prep.state = PREP_NONE;
+}
+
+static int seek_async;                          /* the next q_open: a seek's (same track) */
+
+/* chain: 2 from the end of a track (PLAY_ASYNC), else 0 or 1 */
 static int q_open(int i, int chain)
 {
     struct fat_file f;
@@ -173,13 +222,37 @@ static int q_open(int i, int chain)
     f.size = e->size;
     fat_open(&f);
     uint32_t t0 = ticks();
-    tags_read(&f, flags & F_CODEC, &tg_next);
+    const char *pp = perf_begin("tags");
+    if (prep.state == PREP_RUNNING)
+        storage_drain();                        /* tags.c is not reentrant: the job ends first */
+    int ahead = prep.state == PREP_READY && prep.idx == i && prep.f.cluster == f.cluster &&
+                prep.f.size == f.size && prep.f.vol == f.vol;
+    int same = tg_key.ok && tg_key.cluster == f.cluster && tg_key.size == f.size &&
+               tg_key.vol == f.vol;             /* the same file again (a seek): kept */
+    if (ahead)
+        tg_next = prep.t;
+    else if (!same)
+        tags_read(&f, flags & F_CODEC, &tg_next);
+    tg_key.cluster = f.cluster;
+    tg_key.size = f.size;
+    tg_key.vol = f.vol;
+    tg_key.ok = 1;
+    perf_end(pp);
     log_printf("ui: tags in %u us: '%s' / '%s' / '%s' / %u", ticks() - t0, tg_next.title,
                tg_next.artist, tg_next.album, tg_next.track);
+    if (same && !ahead)
+        log_printf("ui: tags kept (the same track again)");
+    if (ahead)
+        log_printf("ui: tags read ahead, over %u ms of the track before; storage stack %u bytes "
+                   "never used", prep.ms, storage_stack_free());
+    prep.state = PREP_NONE;
     int was_on = audio.on;
-    (void)chain;
+    int async = chain == 2 || seek_async;       /* a chained track, a seek: the loop goes on */
+    seek_async = 0;                             /* while core B reads the headers (0.99r25); */
     player_ogg_hint(tg_next.ogg_end_page, tg_next.ogg_end_seg);  /* core B skips the comment header */
-    int r = player_open(&f, flags & F_CODEC, PLAY_CHAIN);
+    pp = perf_begin("open");                    /* one chosen: waited for (its failure shown) */
+    int r = player_open(&f, flags & F_CODEC, PLAY_CHAIN | (async ? PLAY_ASYNC : 0));
+    perf_end(pp);
     if (!r && (!was_on || audio.vol == 0xff))
         fresh = 1;
     log_printf("ui: queue %d/%d: %s (%d)", i + 1, q_n, q_name(i), r);
@@ -194,7 +267,7 @@ static int q_open(int i, int chain)
 /* Parked: a long pause (PARK_MS) stops the track, core B and the DACs; PLAY starts it again
  * where it was (player_seek_hint). Also the state after a resume of a paused track. */
 int parked;
-uint32_t parked_ms;
+uint32_t parked_ms, parked_len;                 /* parked: where, and the track's length */
 
 void play_stop(int how)
 {
@@ -261,6 +334,30 @@ void play_index(int i)
     play_step(i, 1);
 }
 
+/* Core B stopped on a fault, or stuck, in the middle of a track (rework step 7, 0.99r33): the
+ * same track again 1 s before where it was (core B loaded again: player.c); a second time on
+ * the same track, it is passed over as one that does not play */
+static uint32_t fr_cluster, fr_n;
+static int fr_vol;
+
+static int fault_retry(void)
+{
+    if (fr_n && fr_cluster == tg_key.cluster && fr_vol == tg_key.vol) {
+        fr_n = 0;
+        log_printf("player: core B stopped twice on %s: passed over", q_name(q_dec));
+        return 0;
+    }
+    fr_cluster = tg_key.cluster;
+    fr_vol = tg_key.vol;
+    fr_n = 1;
+    uint32_t at = player.time_ms > 1000 ? player.time_ms - 1000 : 0;
+    log_printf("player: core B started again on %s at %u ms", q_name(q_dec), at);
+    player_seek_hint(at);
+    seek_async = 1;
+    play_index(q_dec);
+    return 1;
+}
+
 /* The player between two key polls; called during long reads too */
 void ui_background(void)
 {
@@ -279,17 +376,24 @@ void ui_background(void)
     }
     int r = player_service();
     heard_sync();
-    if (r == 0)
+    if (r == 0) {
+        prep_next();                            /* the next track's tags, once this one plays */
         return;
+    }
     if (r == 1 && audio_paused && play_mode == MODE_ORDER && q_dec + 1 >= q_n)
         return;                                 /* end of the queue in a pause: drained after it */
+    if (r == 1 && browser_walking())
+        return;                                 /* the queue is being walked (a resume): the */
+                                                /* next track once it is known (§104) */
+    if (r == PLAYER_EFAULT && fault_retry())
+        return;                                 /* core B again, on the same track */
     player_close(0);                            /* end of the track (or an error) */
     if (r == 1 || player.time_ms > 10000)
         q_errors = 0;                           /* it played: only failures in a row stop */
     int first = q_dec, err = r < 0 ? r : 0;     /* the first that failed, why */
     for (int n = q_next_index(q_dec, 0); n >= 0; n = q_next_index(n, 0)) {
         q_dec = n;
-        int o = q_open(q_dec, 1);
+        int o = q_open(q_dec, 2);
         if (o == 0)
             return;                             /* the next one, gapless when it can */
         if (!err) {
@@ -318,9 +422,14 @@ uint32_t now_ms(void)                    /* the position shown */
     return parked ? parked_ms : player_heard.time_ms;
 }
 
+uint32_t len_ms(void)                           /* the length shown (parked: the one saved) */
+{
+    return parked ? parked_len : player_heard.length_ms;
+}
+
 void seek_begin(void)
 {
-    if (!q_n || !player_heard.length_ms || (!q_playing && !parked)) {
+    if (!q_n || !len_ms() || (!q_playing && !parked)) {
         log_printf("ui: no seek (nothing open, or no length)");
         return;
     }
@@ -339,7 +448,7 @@ void seek_move(int d, int repeat)
         return;
     sk_step_ms = now;
     uint32_t step = !repeat || held < 1500 ? 10000 : held < 4000 ? 30000 : 60000;
-    uint32_t max = player_heard.length_ms > 1000 ? player_heard.length_ms - 1000 : 0;
+    uint32_t max = len_ms() > 1000 ? len_ms() - 1000 : 0;
     if (d < 0)
         sk_ms = sk_ms > step ? sk_ms - step : 0;
     else
@@ -352,14 +461,15 @@ void seek_end(int go)
     uint32_t d = sk_ms > sk_from ? sk_ms - sk_from : sk_from - sk_ms;
     if (!go || d < 500 || sk_cur != q_cur || (!q_playing && !parked))
         return;
-    log_printf("ui: seek %u -> %u ms of %u%s", now_ms(), sk_ms, player_heard.length_ms,
+    log_printf("ui: seek %u -> %u ms of %u%s", now_ms(), sk_ms, len_ms(),
                parked ? " (parked)" : "");
     if (parked) {
         parked_ms = sk_ms;
-        resume_save();
+        resume_save_later();
         return;
     }
     player_seek_hint(sk_ms);
+    seek_async = 1;
     play_index(q_cur);
 }
 

@@ -19,11 +19,20 @@ static void fault(void);
 static void doorbell(void);
 
 static volatile int rung;
+static void tick(void);
+#ifdef ECHO_BPROBE
+static void systick(void);
+static volatile int probing;                    /* a fault while set: recorded, passed over */
+#endif
 
 __attribute__((section(".vectors"), used))
 static void (*const vectors[IRQ_DOORBELL + 1])(void) = {
     (void (*)(void))HP_STACK_TOP, hp_reset,
-    [2 ... IRQ_DOORBELL - 1] = fault,
+#ifdef ECHO_BPROBE
+    [2 ... 14] = fault, [15] = systick, [16 ... IRQ_DOORBELL - 1] = fault,
+#else
+    [2 ... 14] = fault, [15] = tick, [16 ... IRQ_DOORBELL - 1] = fault,
+#endif
     [IRQ_DOORBELL] = doorbell,
 };
 
@@ -31,6 +40,11 @@ static void (*const vectors[IRQ_DOORBELL + 1])(void) = {
 __attribute__((noinline)) static void wfi(void)
 {
     __asm volatile ("wfi");
+}
+
+__attribute__((unused)) static void tick(void)   /* SysTick: room may have come in the ring */
+{
+    rung = 1;
 }
 
 static void doorbell(void)
@@ -50,8 +64,24 @@ __attribute__((naked)) static void fault(void)
         "b hp_fault\n");
 }
 
-static __attribute__((used)) void hp_fault(const uint32_t *frame)
+static __attribute__((used)) void hp_fault(uint32_t *frame)
 {
+#ifdef ECHO_BPROBE
+    if (probing) {                              /* the probe's access: noted, then skipped */
+        uint32_t k = ctl->bp.step;
+        if (!ctl->bp.faults) {
+            ctl->bp.cfsr = REG(SCB_CFSR);
+            ctl->bp.bfar = REG(0xe000ed38u);
+            ctl->bp.hfsr = REG(0xe000ed2cu);
+        }
+        ctl->bp.faults |= 1u << k;
+        REG(SCB_CFSR) = REG(SCB_CFSR);          /* write 1 to clear */
+        REG(0xe000ed2cu) = REG(0xe000ed2cu);
+        uint16_t op = *(const uint16_t *)frame[6];
+        frame[6] += (op & 0xf800) >= 0xe800 ? 4 : 2;    /* a 32-bit Thumb instruction or not */
+        return;
+    }
+#endif
     ctl->fault_pc = frame[6];
     ctl->fault_lr = frame[5];
     ctl->fault_cfsr = REG(SCB_CFSR);
@@ -61,27 +91,93 @@ static __attribute__((used)) void hp_fault(const uint32_t *frame)
         wfi();
 }
 
-/* ---- rings ---- */
+/* ---- the input ring (version 3, ETUDE §105) ----
+ * The ring holds segments: runs of the stream contiguous both in the stream and in the ring,
+ * their starts in ctl->seg[] (core A appends them). The segment read is seg[seg_rd]: its data
+ * end where the next one starts, or at core A's write counter. A stream offset core B wants and
+ * does not have (back, or forward past what is written) is asked for (req_seq, req_pos); core A
+ * answers with a new segment of that seq, and what came before it is dropped. */
+static uint32_t want;                           /* the seq whose data are read (0: the open's) */
+
+static volatile struct hp_seg *seg_cur(void)
+{
+    return &ctl->seg[ctl->seg_rd % HP_SEGS];
+}
+
+static int seg_has_next(void)
+{
+    return ctl->seg_wr - ctl->seg_rd > 1;
+}
+
+/* The ring counter where the data of the segment read end (so far) */
+static uint32_t seg_limit(void)
+{
+    return seg_has_next() ? ctl->seg[(ctl->seg_rd + 1) % HP_SEGS].prev_end : ctl->in_wr;
+}
+
+/* Onto the segment that holds in_rd: stale ones (an older seq) dropped, the next one taken when
+ * the read one is used up and the next continues it (or answers the request). 0 when the
+ * segment read is the one wanted and holds in_rd. */
+static int seg_settle(void)
+{
+    for (;;) {
+        if (ctl->seg_wr == ctl->seg_rd)
+            return -1;                          /* nothing yet */
+        volatile struct hp_seg *g = seg_cur();
+        if (g->seq == want) {
+            uint32_t at = g->ring0 + (ctl->in_rd - g->off0);
+            if ((int32_t)(seg_limit() - at) > 0 || !seg_has_next())
+                return 0;                       /* in_rd within it, or the last one */
+        }
+        if (!seg_has_next())
+            return -1;                          /* an older seq, the answer not there yet */
+        ctl->seg_rd++;                          /* used up, or stale */
+        g = seg_cur();
+        ctl->rb_rd = g->ring0;
+        if (g->seq == want && g->off0 != ctl->in_rd && (int32_t)(g->off0 - ctl->in_rd) > 0)
+            ctl->in_rd = g->off0;               /* an answer starts where it was asked */
+    }
+}
+
 uint32_t in_avail(void)
 {
-    return ctl->in_wr - ctl->in_rd;
+    if (seg_settle())
+        return 0;
+    volatile struct hp_seg *g = seg_cur();
+    uint32_t at = g->ring0 + (ctl->in_rd - g->off0), lim = seg_limit();
+    return (int32_t)(lim - at) > 0 ? lim - at : 0;
 }
 
 int in_ended(void)
 {
-    return ctl->in_end != 0xffffffffu && ctl->in_wr == ctl->in_end;
+    if (ctl->in_end == 0xffffffffu || seg_settle() || seg_has_next())
+        return 0;
+    volatile struct hp_seg *g = seg_cur();
+    return g->off0 + (ctl->in_wr - g->ring0) == ctl->in_end;   /* the stream written to its end */
 }
 
 static uint32_t peek_at(uint32_t off, void *dst, uint32_t n)
 {
-    uint32_t a = in_avail(), o = (ctl->in_rd + off) % HP_IN_SIZE;
+    uint32_t a = in_avail();
     a = a > off ? a - off : 0;
     if (n > a)
         n = a;
+    if (!n)
+        return 0;
+    volatile struct hp_seg *g = seg_cur();
+    uint32_t o = (g->ring0 + (ctl->in_rd - g->off0) + off) % HP_IN_SIZE;
     uint32_t k = HP_IN_SIZE - o < n ? HP_IN_SIZE - o : n;
     memcpy(dst, (const void *)(HP_IN_BASE + o), k);
     memcpy((uint8_t *)dst + k, (const void *)HP_IN_BASE, n - k);
     return n;
+}
+
+static void consumed(void)                      /* core A's room follows in_rd */
+{
+    if (!seg_settle()) {
+        volatile struct hp_seg *g = seg_cur();
+        ctl->rb_rd = g->ring0 + (ctl->in_rd - g->off0);
+    }
 }
 
 uint32_t in_peek(void *dst, uint32_t n)
@@ -89,10 +185,15 @@ uint32_t in_peek(void *dst, uint32_t n)
     return peek_at(0, dst, n);
 }
 
+static int ring_full(void)                      /* as full as core A keeps it */
+{
+    return ctl->in_wr - ctl->rb_rd >= HP_IN_SIZE - 8192;
+}
+
 uint32_t in_peek_ahead(uint32_t off, void *dst, uint32_t n)
 {
     /* core A refills when 8 KiB are free (player.c feed()) */
-    while (in_avail() < off + n && !in_ended() && in_avail() < HP_IN_SIZE - 8192)
+    while (in_avail() < off + n && !in_ended() && !ring_full())
         rt_wait();
     return peek_at(off, dst, n);
 }
@@ -112,32 +213,25 @@ uint32_t in_read_wait(void *dst, uint32_t n)
     return got;
 }
 
-/* Forward only. Within what core A has written: consumed here; beyond: in_rd is set past in_wr,
- * which tells core A to go on reading from there (its write position follows). */
-/* Backwards: core A is asked to feed again from pos (the ring emptied), then waited for */
-static int in_rewind(uint32_t pos)
-{
-    uint32_t seq = ctl->rewind_seq + 1;
-    ctl->rewind_pos = pos;
-    ctl->rewind_seq = seq;                      /* core A polls it with the ring */
-    while (ctl->rewind_ack != seq)
-        rt_wait();
-    return 0;
-}
-
+/* The stream from pos: within what the segment read holds, at once; else asked of core A (back,
+ * or forward past what is written: core A jumps there, nothing read in between), waited for */
 int in_seek(uint32_t pos)
 {
-    if ((int32_t)(pos - ctl->in_rd) < 0)
-        return in_rewind(pos);
     if (ctl->in_end != 0xffffffffu && pos > ctl->in_end)
         return -1;
-    if ((int32_t)(pos - ctl->in_wr) <= 0)
+    if ((int32_t)(pos - ctl->in_rd) >= 0 && pos - ctl->in_rd <= in_avail()) {
         ctl->in_rd = pos;
-    else {
-        ctl->in_rd = pos;
-        while ((int32_t)(ctl->in_wr - pos) < 0)
-            rt_wait();
+        consumed();
+        return 0;
     }
+    want = ctl->req_seq + 1;
+    ctl->req_pos = pos;
+    ctl->req_seq = want;                        /* core A polls it with the ring */
+    ctl->rb_rd = ctl->in_wr;                    /* what is there now: dropped (A's room) */
+    ctl->in_rd = pos;
+    while (seg_settle())
+        rt_wait();
+    consumed();
     return 0;
 }
 
@@ -145,6 +239,7 @@ uint32_t in_read(void *dst, uint32_t n)
 {
     n = in_peek(dst, n);
     ctl->in_rd += n;
+    consumed();
     return n;
 }
 
@@ -152,30 +247,201 @@ void in_skip(uint32_t n)
 {
     uint32_t a = in_avail();
     ctl->in_rd += n < a ? n : a;
+    consumed();
 }
+
+/* ---- the PCM ring the DMA reads (version 2, ETUDE §103) ----
+ * The DMA's position is read from its SAR at each look; a look later than half a ring (core B
+ * busy that long: not expected) would hide laps, counted from TIMER1 as core A did (§97). The
+ * DMA overtaking what core B wrote (an underrun: input late, or core B too slow) leaves stale
+ * sound played; the write position then jumps to the DMA's and the episode is counted. */
+#define ST_CSR 0xe000e010u
+#define ST_RVR 0xe000e014u
+#define ST_CVR 0xe000e018u
+
+static int pcm_started;                         /* a frame written: a late DMA is an underrun
+                                                 * (before, the silence ahead of a seek runs out
+                                                 * while the first frames decode: device, r21) */
+
+static void pcm_update(void)
+{
+    uint32_t pos = REG(HP_DMA_SAR) - HP_OUT_BASE, now = TIMER1_NOW();
+    if (pos < HP_OUT_SIZE && ctl->pcm_bps) {
+        uint32_t moved = (pos + HP_OUT_SIZE - ctl->pcm_pos) % HP_OUT_SIZE;
+        uint64_t played = (uint64_t)(now - ctl->pcm_t) * ctl->pcm_bps / 24000000;
+        if (played > HP_OUT_SIZE / 2 && played > moved)
+            moved += (uint32_t)((played - moved + HP_OUT_SIZE / 2) / HP_OUT_SIZE) * HP_OUT_SIZE;
+        ctl->pcm_rd += moved;
+        ctl->pcm_pos = pos;
+    }
+    ctl->pcm_t = now;
+    int32_t fill = (int32_t)(ctl->pcm_wr - ctl->pcm_rd);
+    if (fill < 0) {
+        if (pcm_started) {
+            ctl->pcm_ur++;
+            ctl->pcm_lost += (uint32_t)-fill;
+        }
+        ctl->pcm_wr = (ctl->pcm_rd + 7) & ~7u;  /* whole frames, 4 or 8 bytes */
+        fill = 0;
+    }
+    if ((uint32_t)fill < ctl->pcm_min)
+        ctl->pcm_min = (uint32_t)fill;
+}
+
+/* The wake of core B while it plays (0.99r28): its SysTick, at the time the DMA takes to free
+ * 4 KiB (2 to 20 ms: 20 ms at 44.1 kHz / 16 bits, 2.7 ms at 192 kHz / 24 bits; 2 ms always
+ * until 0.99r27), on its clock as core A gives it; off otherwise (the doorbell wakes it for a
+ * command). Armed at each sleep while playing: a codec may wait for more room than 4 KiB (an
+ * MP3 frame: 4.5 KiB). */
+static void tick_arm(void)
+{
+    static uint32_t hz, bps;
+    if (ctl->state != HP_PLAYING || ctl->pcm_hold || !ctl->b_hz || !ctl->pcm_bps) {
+        if (hz) {
+            REG(ST_CSR) = 0;
+            hz = 0;
+        }
+        return;
+    }
+    if (ctl->b_hz == hz && ctl->pcm_bps == bps)
+        return;
+    hz = ctl->b_hz;
+    bps = ctl->pcm_bps;
+    uint32_t us = (uint32_t)(4096ull * 1000000 / bps);
+    us = us < 2000 ? 2000 : us > 20000 ? 20000 : us;
+    uint64_t load = (uint64_t)hz / 1000000 * us;
+    REG(ST_CSR) = 0;
+    REG(ST_RVR) = (uint32_t)(load > 0xffffff ? 0xffffff : load) - 1;
+    REG(ST_CVR) = 0;
+    REG(ST_CSR) = 7;                            /* the core clock, its interrupt, on */
+}
+
+/* Room in the ring (0.99r28): the DMA position read again after each sleep, or when the room
+ * known runs under 2 KiB; in between, the room known goes down with what is written (an older
+ * position only gives less room). Before, the SAR was read at every write. */
+static int slept = 1;                           /* set by sleep_until_rung() */
+
+static void beep_check(void);
 
 static uint32_t raw_space(void)
 {
-    uint32_t fill = (ctl->out_wr + HP_OUT_SIZE - ctl->out_rd) % HP_OUT_SIZE;
-    return fill < HP_OUT_SIZE - HP_OUT_GUARD ? HP_OUT_SIZE - HP_OUT_GUARD - fill : 0;
+    beep_check();                               /* once a block, not once a word (0.99r30) */
+#ifdef ECHO_FAULT
+    if (ctl->test == 1) {                       /* test build: a bus fault, as a bad pointer */
+        ctl->test = 0;
+        *(volatile uint32_t *)0xfffffff0u = 0;
+    } else if (ctl->test == 2) {                /* a loop without end, as a decoder that hangs */
+        ctl->test = 0;
+        for (;;)
+            ;
+    }
+#endif
+    if (ctl->pcm_hold)
+        return 0;
+    uint32_t lim = HP_OUT_SIZE - HP_OUT_GUARD, fill = ctl->pcm_wr - ctl->pcm_rd;
+    uint32_t room = fill < lim ? lim - fill : 0;
+    if (slept || room < 2048) {
+        slept = 0;
+        pcm_update();
+        fill = ctl->pcm_wr - ctl->pcm_rd;
+        room = fill < lim ? lim - fill : 0;
+    }
+    return room;
 }
+
+/* ---- battery beeps (0.99r20, the mixer core A had, ETUDE §43): while a pattern runs, the
+ * music is lowered by 12 dB and a sine at -12 dBFS (5 ms fades) is added ---- */
+static const int16_t beep_sine[64] = {
+    0, 803, 1598, 2378, 3135, 3862, 4551, 5197, 5793, 6333, 6811, 7225, 7568, 7839, 8035, 8153,
+    8192, 8153, 8035, 7839, 7568, 7225, 6811, 6333, 5793, 5197, 4551, 3862, 3135, 2378, 1598, 803,
+    0, -803, -1598, -2378, -3135, -3862, -4551, -5197, -5793, -6333, -6811, -7225, -7568, -7839,
+    -8035, -8153, -8192, -8153, -8035, -7839, -7568, -7225, -6811, -6333, -5793, -5197, -4551,
+    -3862, -3135, -2378, -1598, -803,
+};
+static struct { int on, mix; uint32_t seq, frame, phase; int32_t t; } bp;
+
+static void beep_check(void)                    /* a new pattern from core A */
+{
+    if (ctl->beep_seq != bp.seq) {
+        bp.seq = ctl->beep_seq;
+        bp.frame = ctl->beep_from;
+        bp.phase = 0;
+        bp.on = ctl->beep_period && bp.frame < ctl->beep_total;
+    }
+}
+
+static int32_t beep_sample(void)
+{
+    uint32_t f = bp.frame % ctl->beep_period, on = ctl->beep_on, fade = ctl->beep_fade;
+    int32_t v = 0;
+    if (f < on) {
+        uint32_t edge = f < on - f ? f : on - f;
+        v = beep_sine[bp.phase >> 26];
+        if (edge < fade)
+            v = v * (int32_t)edge / (int32_t)fade;
+        bp.phase += ctl->beep_step;
+    }
+    if (++bp.frame >= ctl->beep_total)
+        bp.on = 0;
+    ctl->beep_frame = bp.frame;
+    return v;
+}
+
+/* One word on its way to the ring at byte counter 'at' */
+static uint32_t beep_mix(uint32_t w, uint32_t at)
+{
+    if (ctl->frame_bytes == 4) {                /* one word: left low, right high */
+        if (!bp.on)
+            return w;
+        int32_t t = beep_sample();
+        int32_t l = (int16_t)(w & 0xffff) / 4 + t, r = (int16_t)(w >> 16) / 4 + t;
+        return ((uint32_t)l & 0xffff) | (uint32_t)r << 16;
+    }
+    if (!(at & 4)) {                            /* left word: a new frame */
+        bp.mix = bp.on;
+        if (bp.mix)
+            bp.t = beep_sample();
+    }
+    return bp.mix ? (uint32_t)(((int32_t)w >> 2) + (bp.t << 16)) : w;
+}
+
+static void raw_word(uint32_t w);
 
 static void raw_write(const uint32_t *w, uint32_t words)
 {
-    uint32_t o = ctl->out_wr, n = words * 4;
+    beep_check();
+    if (bp.on || bp.mix) {                      /* word by word while a beep runs */
+        while (words--)
+            raw_word(*w++);
+        return;
+    }
+    uint32_t o = ctl->pcm_wr % HP_OUT_SIZE, n = words * 4;
     uint32_t k = HP_OUT_SIZE - o < n ? HP_OUT_SIZE - o : n;
+    pcm_started = 1;
     memcpy((void *)(HP_OUT_BASE + o), w, k);
     memcpy((void *)HP_OUT_BASE, (const uint8_t *)w + k, n - k);
-    o += n;
-    ctl->out_wr = o >= HP_OUT_SIZE ? o - HP_OUT_SIZE : o;
+    ctl->pcm_wr += n;
 }
+
+/* One word (0.99r30: the shortest path; it was a beep check and a division a word, which doubled
+ * core B's load in 24-bit WAV, ETUDE §108): the ring offset of the write counter kept, so that
+ * only a wrap or a counter moved elsewhere (a restart, an underrun) costs the modulo; a new beep
+ * pattern is seen at the next room check (raw_space), a block later at most */
+static uint32_t wr_at, wr_off;                  /* the next word's counter, its offset */
 
 static void raw_word(uint32_t w)
 {
-    uint32_t o = ctl->out_wr;
+    uint32_t at = ctl->pcm_wr, o = wr_off;
+    if (at != wr_at)
+        o = at % HP_OUT_SIZE;
+    if (bp.on || bp.mix)
+        w = beep_mix(w, at);
     *(volatile uint32_t *)(HP_OUT_BASE + o) = w;
     o += 4;
-    ctl->out_wr = o == HP_OUT_SIZE ? 0 : o;
+    wr_off = o == HP_OUT_SIZE ? 0 : o;
+    wr_at = at + 4;
+    ctl->pcm_wr = wr_at;
+    pcm_started = 1;
 }
 
 /* ---- upsampling (ETUDE §59) ----
@@ -361,11 +627,29 @@ void *rt_alloc(uint32_t n)
 }
 
 /* ---- the C library functions the compiler and the decoders call ---- */
+/* 0.99r31: the source read by aligned words whatever the destination (ETUDE §108): the input
+ * ring is in SYSRAM, where a read costs about 16 cycles of core B whatever its width; a source
+ * off by 1 to 3 bytes (a 24-bit WAV: 6-byte frames) was copied byte by byte, 4 times the reads */
 void *memcpy(void *d, const void *s, size_t n)
 {
     uint8_t *dp = d;
     const uint8_t *sp = s;
-    if (!(((uint32_t)dp | (uint32_t)sp) & 3)) {
+    if (n >= 8)
+        while ((uint32_t)sp & 3) {
+            *dp++ = *sp++;
+            n--;
+        }
+    if ((uint32_t)sp & 3)
+        ;                                       /* short: bytes below */
+    else if ((uint32_t)dp & 3)                  /* words read, bytes written */
+        for (; n >= 4; n -= 4, dp += 4, sp += 4) {
+            uint32_t w = *(const uint32_t *)sp;
+            dp[0] = (uint8_t)w;
+            dp[1] = (uint8_t)(w >> 8);
+            dp[2] = (uint8_t)(w >> 16);
+            dp[3] = (uint8_t)(w >> 24);
+        }
+    else {
         for (; n >= 16; n -= 16, dp += 16, sp += 16) {
             ((uint32_t *)dp)[0] = ((const uint32_t *)sp)[0];
             ((uint32_t *)dp)[1] = ((const uint32_t *)sp)[1];
@@ -416,6 +700,7 @@ int abs(int x)
 /* ---- main loop ---- */
 static void sleep_until_rung(void)
 {
+    tick_arm();
     __asm volatile ("cpsid i");
     if (!rung) {
         uint32_t t0 = TIMER1_NOW();
@@ -427,6 +712,7 @@ static void sleep_until_rung(void)
     rung = 0;
     __asm volatile ("cpsie i");
     ctl->wakeups++;
+    slept = 1;
 }
 
 void rt_wait(void)
@@ -447,8 +733,15 @@ static void run(void)
         if (seq != ctl->ack_seq) {
             uint32_t cmd = ctl->cmd;
             ctl->ack_seq = seq;
-            if (cmd == HP_CMD_OPEN && ctl->state == HP_READY)
+            if (cmd == HP_CMD_OPEN && ctl->state == HP_READY) {
+                ctl->seek_ms = ctl->trk.seek_ms;        /* the track's hints, for the codecs */
+                ctl->seek_offset = ctl->trk.seek_offset;
+                ctl->comment_end_page = ctl->trk.comment_end_page;
+                ctl->comment_end_seg = ctl->trk.comment_end_seg;
+                ctl->end_granule_lo = ctl->trk.end_granule_lo;
+                ctl->end_granule_hi = ctl->trk.end_granule_hi;
                 ctl->state = HP_OPENING;
+            }
             else if (cmd == HP_CMD_PLAY && ctl->state == HP_FORMAT)
                 ctl->state = HP_PLAYING;
             else if (cmd == HP_CMD_STOP)
@@ -481,6 +774,128 @@ static void run(void)
     }
 }
 
+
+#ifdef ECHO_BPROBE
+/* ---- the probe of the test build (0.99r17): see hp_ctl.bp ---- */
+#define ST_CSR   0xe000e010u
+#define ST_RVR   0xe000e014u
+#define ST_CVR   0xe000e018u
+#define ST_CALIB 0xe000e01cu
+#define ACTLR    0xe000e008u
+static volatile uint32_t st_count;
+
+static void systick(void)
+{
+    st_count++;
+}
+
+static void spin_ticks(uint32_t t)              /* TIMER1: 24 MHz */
+{
+    uint32_t t0 = TIMER1_NOW();
+    while (TIMER1_NOW() - t0 < t)
+        ;
+}
+
+static uint32_t st_measure(uint32_t csr)       /* SysTick counts in 1 ms (no interrupt) */
+{
+    REG(ST_CSR) = 0;
+    REG(ST_RVR) = 0xffffff;
+    REG(ST_CVR) = 0;
+    REG(ST_CSR) = csr;
+    uint32_t a = REG(ST_CVR);
+    spin_ticks(24000);
+    uint32_t b = REG(ST_CVR);
+    REG(ST_CSR) = 0;
+    return (a - b) & 0xffffff;
+}
+
+/* Core B's cycles for a task, on its SysTick (24 bits: up to 84 ms at 200 MHz) */
+static uint32_t st_start(void)
+{
+    REG(ST_CSR) = 0;
+    REG(ST_RVR) = 0xffffff;
+    REG(ST_CVR) = 0;
+    REG(ST_CSR) = 5;
+    return REG(ST_CVR);
+}
+
+static uint32_t st_since(uint32_t a)
+{
+    uint32_t b = REG(ST_CVR);
+    REG(ST_CSR) = 0;
+    return (a - b) & 0xffffff;
+}
+
+static uint32_t bench_read(uint32_t base)       /* 32 KiB read through a 1 KiB buffer */
+{
+    static uint32_t buf[256];
+    uint32_t a = st_start();
+    for (uint32_t k = 0; k < 32; k++)
+        memcpy(buf, (const void *)(base + k * 1024), 1024);
+    return st_since(a);
+}
+
+static uint32_t bench_reg(uint32_t reg)         /* 1,000 reads */
+{
+    uint32_t a = st_start(), x = 0;
+    for (int k = 0; k < 1000; k++)
+        x += REG(reg);
+    uint32_t c = st_since(a);
+    __asm volatile("" : : "r"(x));
+    return c;
+}
+
+static void probe(void)
+{
+    volatile uint32_t *got = ctl->bp.got;
+    REG(ACTLR) |= 2;                            /* DISDEFWBUF: a write's fault is precise */
+    probing = 1;
+    ctl->bp.step = BP_SYS_RD;
+    got[BP_SYS_RD] = REG(ctl->bp.sys_addr);
+    ctl->bp.step = BP_SYS_WR;
+    REG(ctl->bp.sys_addr + 4) = ~ctl->bp.sys_word;
+    got[BP_SYS_WR] = REG(ctl->bp.sys_addr + 4);
+    ctl->bp.step = BP_DRAM_RD;
+    got[BP_DRAM_RD] = REG(ctl->bp.dram_addr);
+    ctl->bp.step = BP_PMU_RD;
+    got[BP_PMU_RD] = REG(ctl->bp.pmu_addr);
+    ctl->bp.step = BP_PMU_WR;
+    REG(ctl->bp.pmu_addr + 4) = ~ctl->bp.pmu_word;
+    got[BP_PMU_WR] = REG(ctl->bp.pmu_addr + 4);
+    ctl->bp.step = BP_SAR;
+    uint32_t t0 = TIMER1_NOW();
+    ctl->bp.sar0 = REG(0x60000000u + 5 * 0x58);
+    spin_ticks(24000);
+    ctl->bp.sar1 = REG(0x60000000u + 5 * 0x58);
+    ctl->bp.sar_dt = TIMER1_NOW() - t0;
+    ctl->bp.step = BP_SYSTICK;
+    ctl->bp.st_calib = REG(ST_CALIB);
+    ctl->bp.st_core = st_measure(5);            /* CLKSOURCE 1: the core clock */
+    ctl->bp.st_ref = st_measure(1);             /* CLKSOURCE 0: the reference clock */
+    uint32_t load = ctl->bp.st_core * 2;        /* 2 ms on the core clock */
+    if (load > 0xffffff)
+        load = 0xffffff;
+    ctl->bp.st_load = load;
+    if (load > 1000) {
+        st_count = 0;
+        REG(ST_RVR) = load - 1;
+        REG(ST_CVR) = 0;
+        REG(ST_CSR) = 7;                        /* core clock, interrupt, enabled */
+        spin_ticks(20 * 24000);
+        REG(ST_CSR) = 0;
+        ctl->bp.st_irqs = st_count;
+    }
+    probing = 0;
+    REG(ACTLR) &= ~2u;
+    ctl->bp.c_sys = bench_read(0x03038000u);    /* SYSRAM, free since 0.99r21 */
+    ctl->bp.c_hr0 = bench_read(0x00000000u);    /* HIGHRAM0 (our code), as core B sees it */
+    ctl->bp.c_hr1 = bench_read(HP_OUT_BASE);    /* HIGHRAM1 (the PCM ring) */
+    ctl->bp.c_sar = bench_reg(0x60000000u + 5 * 0x58);
+    ctl->bp.c_t1 = bench_reg(0x400e0028u);
+    ctl->bp.step = BP_DONE;
+}
+#endif
+
 __attribute__((noreturn)) void hp_reset(void)
 {
     for (uint32_t *p = &_sbss; p < &_ebss; p++)
@@ -496,6 +911,10 @@ __attribute__((noreturn)) void hp_reset(void)
     REG(A2B_STATUS) = 0xf;
     REG(A2B_INTEN) |= 1u << 1;
     REG(NVIC_ISER0) = 1u << (IRQ_DOORBELL - 16);
+#ifdef ECHO_BPROBE
+    if (ctl->bp.req == BP_REQ)
+        probe();
+#endif
     ctl->state = HP_READY;
     run();
     for (;;)

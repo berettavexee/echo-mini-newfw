@@ -33,6 +33,8 @@ static struct {
 /* 'chunk' bytes from a sector boundary: whole aligned sectors, which fat_pread() reads in one
  * eMMC command per run of clusters (each command costs a fixed delay, about 0.5 ms on the
  * device). The Ogg comment header is crossed page by page: 16 KiB at a time. */
+void (*tags_yield)(void);                       /* between two reads (the storage task), or 0 */
+
 static int rd_at(uint32_t pos, uint32_t n, const uint8_t **p)
 {
     if (n > sizeof rd.buf - 512 || pos >= rd.f->size || pos + n > rd.f->size || pos + n > rd.lim)
@@ -43,6 +45,8 @@ static int rd_at(uint32_t pos, uint32_t n, const uint8_t **p)
             m = sizeof rd.buf;
         if (m > rd.f->size - base)
             m = rd.f->size - base;
+        if (tags_yield)
+            tags_yield();                       /* before the read: nothing held across it */
         if (fat_pread(rd.f, &rd.c, base, rd.buf, m) != (int)m)
             return -1;
         rd.pos = base;

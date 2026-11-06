@@ -15,11 +15,16 @@
 
 struct emmc_geom emmc;
 
+volatile int emmc_busy;                         /* inside a transfer (the fault record: crash.c) */
+
 static int transfer(uint32_t sector, uint32_t count, uint32_t *buf, int write)
 {
     int multi = count > 1;
-    return mshc_data(MSHC_EMMC, write ? (multi ? 25 : 24) : (multi ? 18 : 17), sector, count, buf,
-                     write);
+    emmc_busy++;
+    int r = mshc_data(MSHC_EMMC, write ? (multi ? 25 : 24) : (multi ? 18 : 17), sector, count,
+                      buf, write);
+    emmc_busy--;
+    return r;
 }
 
 /* Card size in sectors, from SEC_COUNT (bytes 212-215) of the EXT_CSD (CMD8, read only) */

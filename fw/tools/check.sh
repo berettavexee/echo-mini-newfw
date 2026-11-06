@@ -3,7 +3,7 @@
 #   - the image builds, warnings as errors (the stricter WARN of the Makefile on our code);
 #   - BSS leaves at least 2 KiB before the DAC ring;
 #   - the log formats match their arguments (log.h, LOG_FORMAT_CHECK);
-#   - the host tests of log.c, msc.c and remote.c pass;
+#   - the host tests of log.c, msc.c, remote.c and perf.c pass;
 #   - ruff (or pyflakes) and codespell find nothing (when installed);
 #   - the functions of ours the linker drops (dead code) are listed, not refused.
 # --full also builds the test variants (ECHO_HWTEST, ECHO_HWSYN, ECHO_NO_HWFFT, ECHO_FFTCMP,
@@ -57,7 +57,7 @@ done
 if [ $N = 0 ]; then echo "ok    log_printf formats"; else bad "log_printf formats"; fi
 
 say "host tests"
-for t in log msc remote; do
+for t in log msc remote perf; do
     if cc -O1 -Wall -Werror -Isrc -o $C/${t}_test tools/${t}_test.c > $C/${t}_test.log 2>&1 &&
         $C/${t}_test >> $C/${t}_test.log 2>&1; then
         printf 'ok    %s_test\n' $t

@@ -381,35 +381,78 @@ void lcd_brightness(int pct)
 }
 
 /* Panel sleep (ST7789 DISPOFF + SLPIN, then SLPOUT + 120 ms + DISPON): the controller keeps its
- * memory, and the interface still writes it, so drawing may go on while it sleeps */
-static int lcd_asleep;
+ * memory, and the interface still writes it, so drawing may go on while it sleeps. Since 0.99r5
+ * (ETUDE §99) nothing waits here: lcd_service(), called by the loops, sends the next command once
+ * the controller's delay has passed (120 ms after SLPOUT, 5 ms after SLPIN), then DISPON and the
+ * backlight when asked: the first frame is drawn meanwhile, and the audio is served. */
+static int lcd_asleep;                          /* the last command sent: SLPIN 1, SLPOUT 0 */
+static int lcd_want, lcd_busy, lcd_light;       /* asked; waiting its delay; backlight on wake */
+static uint32_t lcd_t;                          /* ticks() of the last SLPIN or SLPOUT */
+
+void lcd_service(void)
+{
+    if (lcd_busy) {
+        if (ticks() - lcd_t < (lcd_asleep ? 5000u : 120000u))
+            return;
+        lcd_busy = 0;
+        if (!lcd_asleep) {
+            cmd(0x29);                          /* DISPON: the frame drawn meanwhile shows */
+            if (lcd_light && !lcd_want)
+                lcd_backlight(1);
+            lcd_light = 0;
+        }
+    }
+    if (lcd_want == lcd_asleep)
+        return;
+    if (lcd_want) {
+        cmd(0x28);
+        cmd(0x10);
+    } else
+        cmd(0x11);
+    lcd_asleep = lcd_want;
+    lcd_t = ticks();
+    lcd_busy = 1;
+}
 
 void lcd_sleep(int on)
 {
-    if (on == lcd_asleep)
-        return;
-    if (on) {
-        cmd(0x28);
-        cmd(0x10);
-        mdelay(5);
-    } else {
-        cmd(0x11);
-        mdelay(120);
-        cmd(0x29);
+    lcd_want = on;
+    if (on)
+        lcd_light = 0;
+    lcd_service();
+}
+
+void lcd_wake_lit(void)
+{
+    lcd_light = 1;
+    lcd_sleep(0);
+    if (!lcd_busy && !lcd_asleep) {             /* awake already: the backlight at once */
+        lcd_backlight(1);
+        lcd_light = 0;
     }
-    lcd_asleep = on;
+}
+
+int lcd_waking(void)
+{
+    return lcd_busy || lcd_want != lcd_asleep;
 }
 
 /* The fault screen: no SysTick there, a counted wait instead of mdelay() */
 void lcd_wake_fault(void)
 {
-    if (!lcd_asleep)
+    if (!lcd_asleep && !lcd_busy)
         return;
     cmd(0x11);
     for (volatile uint32_t i = 0; i < 6000000; i++)
         ;
     cmd(0x29);
-    lcd_asleep = 0;
+    lcd_asleep = lcd_want = lcd_busy = 0;
+}
+
+void lcd_settle(void)
+{
+    while (lcd_waking())
+        lcd_service();
 }
 
 void lcd_init(void)

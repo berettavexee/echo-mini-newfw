@@ -65,6 +65,9 @@ TESTS = {
     "sd-nofs": dict(files={"A.WAV": "wav"}, sd=True, ms=11000,
                     keys=keys((2000, "BACK"), (3000, "VOL-"), (4000, "PLAY")),
                     expect=[r"ui: card not readable: no FAT32 or exFAT volume"]),
+    # a card in at power-on: mounted at once, before the resume lists the top level (0.99r26, §106)
+    "sd-boot": dict(files={"A.WAV": "wav"}, sd="fat", ms=9000, keys="",
+                    expect=[r"ui: card mounted in \d+ ms: FAT32", r"ui: folder 0: "]),
     "sd-noreply": dict(files={"A.WAV": "wav"}, sd=True, emu_args=["--sd-noreply"], ms=11000,
                        keys=keys((2000, "BACK"), (3000, "VOL-"), (4000, "PLAY")),
                        expect=[r"ui: card not readable: no reply"]),
@@ -79,6 +82,41 @@ TESTS = {
                                 (6000, "PLAY")),
                       expect=[r"uac: start", r"screen off", r"uac: exit \(Power 2 s\)",
                               r"power off \(Power 2 s\)"]),
+    # the fault tests (ECHO_FAULT builds only: Power alone, core B faults, then is stuck; with
+    # VOL- held, core A faults; with VOL+ held, core A is stuck). fault-a: the record written
+    # on the internal memory by core A's fault handler, then logged and shown once by the next
+    # boot (0.99r32)
+    "fault-a": dict(files={"A.WAV": "wav10"}, ms=6000, fault=True,
+                    keys=keys((2000, "PLAY", 100), (3900, "VOL-", 600)),
+                    emu_args=["--gpio-at", "4000:2:5:1,4100:2:5:0"],
+                    expect=[r"fault test: core A faults",
+                            r"crash: the last session ended on a fault \(record \d+\)",
+                            r"crash: core A: HardFault, exception 3",
+                            r"crash: cfsr 00008200 hfsr 40000000 bfar fffffff0$",
+                            r"crash: track A\.WAV at \d+ ms"],
+                    reboot=dict(ms=5000)),
+    # fault-b: core B faults: the same track again 1 s before (0.99r33); then stuck on the same
+    # track (0.99r34: seen after 500 ms without a frame): passed over, the next one plays
+    "fault-b": dict(files={"A.WAV": "wav10", "B.WAV": "wav10"}, keys=keys((2000, "PLAY", 100)),
+                    ms=13000, fault=True,
+                    emu_args=["--gpio-at", "4000:2:5:1,4100:2:5:0,7000:2:5:1,7100:2:5:0"],
+                    expect=[r"fault test: core B faults", r"player: core B error 4",
+                            r"player: core B started again on A\.WAV at \d+ ms",
+                            r"ui: queue 1/2: A\.WAV \(0\)",
+                            r"fault test: core B stuck",
+                            r"player: core B stuck: no frame for \d+ ms",
+                            r"player: core B stopped twice on A\.WAV: passed over",
+                            r"ui: queue 2/2: B\.WAV \(0\)"]),
+    # stall-a: core A stuck (0.99r34): the watchdog's interrupt after 2.7 s, the record, a
+    # reboot; the next boot shows it (the watchdog modelled with --cycles only)
+    "stall-a": dict(files={"A.WAV": "wav10"}, ms=9000, fault=True,
+                    keys=keys((2000, "PLAY", 100), (3900, "VOL+", 600)),
+                    emu_args=["--cycles", "--gpio-at", "4000:2:5:1,4100:2:5:0"],
+                    expect=[r"watchdog: armed, 2\.7 s", r"fault test: core A stuck",
+                            r"WATCHDOG: the loop stuck for 2\.7 s at pc",
+                            r"crash: core A: watchdog, exception 24",
+                            r"crash: track A\.WAV at \d+ ms"],
+                    reboot=dict(ms=5000)),
     # a track saved paused at position 0 (the state written by the test: the keys cannot pause
     # before anything is heard), then a power on: it comes back paused (PR #9: it was lost, its
     # position 0 read as "nothing to resume")
@@ -86,9 +124,10 @@ TESTS = {
                                ms=7000, reboot=dict(ms=7000, keys="",
                                                     state=dict(playing=0, pos_ms=0)),
                                expect=[r"track [0-9a-f]+ at 0 ms, playing 0",
-                                       r"ui: resume: paused at 0 ms"]),
-    # a queue made by PLAY held on a folder (two levels), two tracks on, then a reboot: the same
-    # queue rebuilt, the same track playing, then the one after it in that queue
+                                       r"ui: resume: paused at 0 ms of [1-9]\d+"]),
+    # a queue made by PLAY held on a folder (two levels), two tracks on, then a reboot: the track
+    # playing at once as a queue of its own (0.99r23), the same queue rebuilt meanwhile, the
+    # track found in it, then the one after it in that queue
     "resume-tree": dict(files={"ALBUM/CD1/A1.WAV": "wav10", "ALBUM/CD1/A2.WAV": "wav10",
                                "ALBUM/CD1/A3.WAV": "wav10", "ALBUM/CD2/B1.WAV": "wav10",
                                "ALBUM/CD2/B2.WAV": "wav10"},
@@ -96,8 +135,10 @@ TESTS = {
                         ms=13000,
                         expect=[r"ui: 5 tracks in 2 folders under ALBUM",
                                 r"ui: queue 3/5: A3.WAV",               # the log: both boots
+                                r"ui: resume: A3.WAV, its tree under ALBUM walked meanwhile",
+                                r"ui: queue 1/1: A3.WAV",
                                 r"ui: resume: tree queue under ALBUM, track 3/5$",
-                                r"ui: queue 3/5: A3.WAV", r"ui: queue 4/5: B1.WAV"],
+                                r"ui: queue 4/5: B1.WAV"],
                         reboot=dict(ms=20000)),
     # the same in shuffle (BACK held three times): Y, then Z, BACK to Y; after the reboot Y
     # plays again and Z comes after it (the order kept: the same seed and start)
@@ -121,6 +162,15 @@ TESTS = {
                                r"=== boot \d+: ECHO MINI newfw [^ ]+ \(2026-\d\d-\d\d\)",
                                r"FW1: == image", r"FW2: == image", r"boot: FW1"],
                        reboot=dict(ms=3000)),
+    # the list with the long names (0.99r37): two images whose 8.3 names would both be
+    # NEWFWR~n.IMG, the second chosen (VOL- once), its long name in the log
+    "install-long": dict(files={"NEWFW-0.99r37-first-test-image.IMG": "@BADCRC.IMG",
+                                "NEWFW-0.99r37-second-test-image-long-name.img": "@BADCRC.IMG"},
+                         keys=keys(*_INST[:-1], (8600, "VOL-"), (9600, "PLAY"), (13000, "BACK"),
+                                   (14500, "BACK")), ms=18000,
+                         expect=[r"install: NEWFW-0\.99r37-second-test-image-long-name\.img, "
+                                 r"\d+ bytes: check"],
+                         forbid=[r"install: writing", r"install: NEWFWR~"]),
     "install-badcrc": dict(files={"BADCRC.IMG": "@BADCRC.IMG"}, fw2=True,
                            keys=keys(*_INST, (12000, "BACK"), (13500, "BACK")), ms=22000,
                            expect=[r"install: BADCRC.IMG, \d+ bytes: check -?\d+ \(CRC mismatch"],
@@ -204,7 +254,8 @@ def run_set(group, t, img, elf, tmp):
     text = read_log(dump) if os.path.exists(dump) else ""
     fails = [] if text else [f"no log (emulator: {out.stderr.strip()[-300:]!r})"]
     seen, tags, fmt = set(), None, None
-    for line in text.splitlines():
+    lines = text.splitlines()
+    for at, line in enumerate(lines):
         if "ui: tags in " in line:
             tags, fmt = line, None
         elif "player: format: " in line:
@@ -212,6 +263,13 @@ def run_set(group, t, img, elf, tmp):
         mq = re.search(r"ui: queue \d+/\d+: (\S+) \((-?\d+)\)", line)
         if not mq or mq.group(1) not in names or mq.group(1) in seen:
             continue
+        if fmt is None:                         # a chained track opens while the loop goes on
+            for nxt in lines[at + 1:]:          # (0.99r25): its format comes after the queue
+                if "ui: tags in " in nxt:       # line, before the next track's tags
+                    break
+                if "player: format: " in nxt:
+                    fmt = nxt
+                    break
         m = names[mq.group(1)]
         seen.add(mq.group(1))
         what = f"{m['file']}: "
@@ -257,6 +315,7 @@ def read_log(dump):
 # path (DEPTH_MAX 16 clusters, sel and top), track, playing, level, mode, pos_ms and the sum
 STATE_FIELDS = dict(track=144, playing=148, level=152, mode=156, pos_ms=160)
 STATE_SUM = 164
+STATE_LEN, STATE_LEN_SUM = 168, 172             # the track's length (0.99r16), its own sum
 
 
 def patch_state(disk, fields):
@@ -275,7 +334,11 @@ def patch_state(disk, fields):
         h = 0x4e465753
         for (w,) in struct.iter_unpack("<I", bytes(s[:STATE_SUM])):
             h = ((h << 5 | h >> 27) & 0xffffffff) ^ w
+        old_sum, = struct.unpack_from("<I", s, STATE_SUM)
+        ln, ln_sum = struct.unpack_from("<II", s, STATE_LEN)
         struct.pack_into("<I", s, STATE_SUM, h)
+        if ln_sum == ~ln & 0xffffffff ^ old_sum:  # a length saved: still valid
+            struct.pack_into("<I", s, STATE_LEN_SUM, ~ln & 0xffffffff ^ h)
         f.seek(at)
         f.write(s)
 
@@ -305,6 +368,9 @@ def run(name, t, img, elf, tmp):
         sd = ["--sd", os.path.join(tmp, "sd.img")]
         with open(sd[1], "wb") as f:
             f.truncate(64 << 20)
+        if t["sd"] == "fat":                    # or a FAT32 volume on the whole card
+            subprocess.run(["/usr/sbin/mkfs.fat", "-F", "32", "-n", "CARD", sd[1]], check=True,
+                           stdout=subprocess.DEVNULL)
     out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--keys",
                           t["keys"], "--ms", str(t["ms"]), "--steps", "30000000000",
                           "--dump-disk", dump] + sd + [at(a) for a in t.get("emu_args", [])],
@@ -327,7 +393,7 @@ def run(name, t, img, elf, tmp):
             pos = m.end()
         else:
             fails.append(f"missing: {pat}")
-    for pat in ALWAYS_FORBID + t.get("forbid", []):
+    for pat in ([] if t.get("fault") else ALWAYS_FORBID) + t.get("forbid", []):
         m = re.search(pat, whole, re.M)
         if m:
             fails.append(f"forbidden: {pat}: {whole[max(0, m.start() - 60):m.end() + 60]!r}")
@@ -337,7 +403,8 @@ def run(name, t, img, elf, tmp):
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
-    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or list(TESTS)
+    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or [n for n in TESTS
+                                                                if not TESTS[n].get("fault")]
     failed = 0
     for name in names:
         with tempfile.TemporaryDirectory(prefix=f"emutest_{name}_") as tmp:
@@ -345,6 +412,8 @@ def main():
         print(f"{name}: {'FAIL' if fails else 'PASS'}")
         for f in fails:
             print("  " + f[:300])
+        if os.environ.get("EMUTEST_DUMP"):
+            open(os.environ["EMUTEST_DUMP"], "w").write(whole)
         if fails and os.environ.get("EMUTEST_VERBOSE"):
             print(whole[-4000:])
         failed += bool(fails)

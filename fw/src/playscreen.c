@@ -80,7 +80,7 @@ void marquee_tick(void)
     }
 }
 
-void draw_playing(int full)
+static void draw_playing_do(int full)
 {
     char b[96], *p;
     if (!q_playing && !q_n) {
@@ -163,20 +163,20 @@ void draw_playing(int full)
         p = put_str(b, "go to ");
         p = fmt_time(p, sk_ms);
         p = put_str(p, " / ");
-        p = fmt_time(p, player_heard.length_ms);
+        p = fmt_time(p, len_ms());
         p = put_str(p, sk_ms >= sk_from ? "   +" : "   -");
         p = fmt_time(p, sk_ms >= sk_from ? sk_ms - sk_from : sk_from - sk_ms);
         lcd_text_clip(4, 122, b, LCD_W, SK_FG, BG);
-        seek_bar(140, 5, now_ms(), sk_ms, player_heard.length_ms);
+        seek_bar(140, 5, now_ms(), sk_ms, len_ms());
         lcd_text_clip(4, 150, "VOL+/- move  PLAY go  BACK cancel", LCD_W, DIM, BG);
         return;
     }
     p = fmt_time(b, now_ms());
     p = put_str(p, " / ");
-    p = fmt_time(p, player_heard.length_ms);
+    p = fmt_time(p, len_ms());
     *p = 0;
     lcd_text_clip(4, 122, b, LCD_W, FG, BG);
-    progress_bar(140, 5, now_ms(), player_heard.length_ms);
+    progress_bar(140, 5, now_ms(), len_ms());
     p = put_str(b, codec_name(q_ent(q_cur) ? q_ent(q_cur)->flags & F_CODEC : 0));
     p = put_str(p, "  ");
     p = put_dec(p, player_heard.rate / 1000);
@@ -213,6 +213,13 @@ void draw_playing(int full)
         lcd_fill(x, 150, LCD_W - x, 16, BG);
 }
 
+void draw_playing(int full)
+{
+    const char *pp = perf_begin("draw");
+    draw_playing_do(full);
+    perf_end(pp);
+}
+
 /* A key on the play screen: VOL+/VOL- volume, PLAY pause / play, PLAY held next track (stop past
  * the last), BACK start of the track or the one before, BACK held the play mode. Returns UI_*. */
 int play_key(const struct key_ev *e)
@@ -223,7 +230,7 @@ int play_key(const struct key_ev *e)
     else if (k == KEY_PLAY && ev == EV_PRESS) {
         if (q_playing) {
             audio_pause(!audio_paused);
-            resume_save();
+            resume_save_later();
         }
         else if (q_n) {
             if (parked)
@@ -239,7 +246,7 @@ int play_key(const struct key_ev *e)
             parked = 0;                         /* PLAY plays the last track from its start */
             player_heard.time_ms = 0;
             log_printf("ui: end of the queue (next on the last track)");
-            resume_save();
+            resume_save_later();
         }
     } else if (k == KEY_BACK && ev == EV_PRESS) {
         if (q_n) {
@@ -255,7 +262,7 @@ int play_key(const struct key_ev *e)
         if (play_mode == MODE_SHUFFLE)
             q_shuffle_new(q_cur);
         rg_apply();                             /* auto: the album's, the track's in shuffle */
-        resume_save();
+        resume_save_later();
     }
     return UI_QUICK;                            /* the bands redrawn, not the title: a new track */
 }                                               /* sets a full drawing (ui_main) */

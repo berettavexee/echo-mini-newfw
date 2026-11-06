@@ -33,6 +33,7 @@ class Shared:
         self.sram = ctypes.create_string_buffer(0xA0000)          # core A SRAM (descriptor)
         self.mb = bytearray(0x100)
         self.b = None                                             # CoreB once started
+        self.sar_read = None                                      # core A's DMA position
 
     def get(self, off):
         return struct.unpack_from("<I", self.mb, off)[0]
@@ -77,7 +78,17 @@ class CoreB(emu_host.Hifi):
         u.mem_map(0x400e1000, 0x110000 - 0xe1000)
         mmio(0x40110000, 0x1000, self._rd, self._wr)
         u.mem_map(0x40111000, 0x400000 - 0x111000)
-        u.mem_map(0x60000000, 0x50000)                              # DMAC1, IMDCT36, SDMMC, ...: RAM
+        # DMAC1: channel 5's SAR from core A's DMA model (sh.sar_read: the protocol's version 2,
+        # core B follows the DMA itself, ETUDE §103); the rest, IMDCT36, SDMMC...: RAM
+        self.dmac = {}
+        def dmac_rd(uc, off, size, _):
+            if off == 0x1b8 and sh.sar_read:
+                return sh.sar_read()
+            return self.dmac.get(off, 0)
+        def dmac_wr(uc, off, size, val, _):
+            self.dmac[off] = val
+        mmio(0x60000000, 0x1000, dmac_rd, dmac_wr)
+        u.mem_map(0x60001000, 0x4f000)
         self.syn = emu_host.Synth()                                 # SYNTH model
         mmio(0x60050000, 0x2000, self.syn.rd, self.syn.wr)
         u.mem_map(0x60052000, 0x100000 - 0x52000)
@@ -104,7 +115,8 @@ class CoreB(emu_host.Hifi):
         if off in (0x28, 0x2c):
             self.t1["reads"] += 1
             now = struct.unpack_from("<I", self.sh.sram, CLOCK - 0x03000000)[0]
-            n = now * 24 + self.t1["reads"] * 12
+            now -= getattr(self, "t_back", 0)    # --cycles: the part of the slice not run yet
+            n = int(now * 24) + self.t1["reads"] * 12
             return ~(n >> (32 if off == 0x2c else 0)) & 0xffffffff
         return self.t1["regs"].get(off, 0)
 
@@ -125,10 +137,35 @@ class CoreB(emu_host.Hifi):
             uc.emu_stop()
 
     def deliver(self, ch):
-        """A2B message on channel ch: the interrupt, if enabled, then let the core run"""
+        """A2B message on channel ch: the interrupt, if enabled, then let the core run (with
+        --cycles, sh.lazy: it runs in the time slices of core A, its work then takes time)"""
         if self.sh.get(0x00) & 1 << ch:
             self._irq(0x1a if ch == 1 else 0x1b)
+        if getattr(self.sh, "lazy", False):
+            self.woken = True
+            return
         self.step()
+
+    def systick(self, now_us, hz):
+        """Core B's SysTick (its registers are RAM here): asleep with the counter and its
+        interrupt on, it wakes at each period of (reload + 1) cycles of core B's clock 'hz'"""
+        csr, rvr = struct.unpack("<2I", self.u.mem_read(0xE000E010, 8))
+        if csr & 3 != 3 or not hz:
+            self.st_next = None
+            return
+        period = max(1, (rvr + 1) * 1_000_000 // hz)
+        nxt = getattr(self, "st_next", None)
+        if nxt is None or nxt > now_us + period:
+            self.st_next = now_us + period
+            return
+        if now_us >= nxt:
+            self.st_next = now_us + period
+            if self.sleeping:
+                self._irq(15)
+                if getattr(self.sh, "lazy", False):
+                    self.woken = True
+                else:
+                    self.step()
 
     def watch(self, lo, hi):
         """EMU_WATCH: the last writes into [lo, hi), shown when core B faults"""
@@ -139,10 +176,33 @@ class CoreB(emu_host.Hifi):
             self.wlog.append((uc.reg_read(UC_ARM_REG_PC), addr, size, value))
         self.u.hook_add(UC_HOOK_MEM_WRITE, cb, begin=lo, end=hi - 1)
 
+    def fault_entry(self, ex):
+        """A bus fault given to core B's runtime, as the hardware would: the exception frame on
+        its stack, CFSR set, then its HardFault vector (it reports and waits)"""
+        import struct
+        from unicorn import arm_const as ac
+        u = self.u
+        self.faults = getattr(self, "faults", 0) + 1
+        regs = [u.reg_read(getattr(ac, "UC_ARM_REG_" + n)) for n in
+                ("R0", "R1", "R2", "R3", "R12", "LR", "PC")]
+        sp = (u.reg_read(ac.UC_ARM_REG_SP) - 32) & ~7
+        u.mem_write(sp, struct.pack("<8I", *regs, 0x01000000))
+        u.mem_write(0xE000ED28, struct.pack("<I", 0x8200))
+        u.reg_write(ac.UC_ARM_REG_SP, sp)
+        u.reg_write(ac.UC_ARM_REG_LR, 0xFFFFFFF9)
+        vtor = struct.unpack("<I", u.mem_read(0xE000ED08, 4))[0]
+        self.pc = struct.unpack("<I", u.mem_read(vtor + 12, 4))[0] | 1
+        self.sleeping = False
+        print(f"core B: fault given to the runtime: {ex} at pc {regs[6]:#x}")
+
     def step(self, budget=2_000_000):
+        self.woken = False
         try:
             self.run(budget=budget)
         except Exception as ex:                                   # noqa: BLE001
+            if "UNMAPPED" in str(ex) and getattr(self, "faults", 0) < 4:
+                self.fault_entry(ex)                              # the firmware's fault (0.99r33)
+                return
             for pc, a, n, v in getattr(self, "wlog", []):
                 print(f"  write pc {pc:#x} addr {a:#x} size {n} value {v:#x}")
             from unicorn import arm_const as ac

@@ -4,14 +4,16 @@
 
 #define FW_NAME    "ECHO MINI newfw"
 #ifdef ECHO_UACDIAG
-#define FW_VERSION "0.99ud"            /* test build: USB sound card diagnostics */
+#define FW_VERSION "0.100ud"            /* test build: USB sound card diagnostics */
 #elif defined(ECHO_FFTCMP)
-#define FW_VERSION "0.99fc"            /* test build: AAC sound from HIFIACC, compared */
+#define FW_VERSION "0.100fc"            /* test build: AAC sound from HIFIACC, compared */
+#elif defined(ECHO_BPROBE)
+#define FW_VERSION "0.100p"          /* test build: what core B can reach, its costs (rework) */
 #elif defined(ECHO_HWTEST)
-#define FW_VERSION "0.99hwt"           /* test build: accelerators against the software */
+#define FW_VERSION "0.100hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.99"
+#define FW_VERSION "0.100"
 #endif
-#define FW_DATE    "2026-11-01"
+#define FW_DATE    "2026-11-06"
 
 #endif

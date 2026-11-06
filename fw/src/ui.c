@@ -3,7 +3,11 @@
  * natural order ignoring case; VOL+/VOL- move (held: repeat), PLAY opens or plays, BACK goes up,
  * MENU switches between the browser and now playing, MENU held opens the main menu. Playback
  * runs in the background: the main loop services the player between two key polls. */
+#include "crash.h"
 #include "ui_priv.h"
+#include "storage.h"
+
+#define STORAGE_BUDGET_US 4000                  /* the storage task per pass of the loop */
 
 /* ---- the loop ---- */
 enum { SCR_BROWSER, SCR_PLAYING };
@@ -20,6 +24,7 @@ static void power_service(uint32_t key_ms)
     uint32_t idle = millis() - key_ms;
     if (q_playing && audio_paused && idle > PARK_MS) {
         parked_ms = player_heard.time_ms;
+        parked_len = player_heard.length_ms;
         play_stop(STOP_NOW);
         hifi_sleep();
         parked = 1;
@@ -49,27 +54,38 @@ static void power_service(uint32_t key_ms)
 
 /* The sleep timer (settings) ended: the music faded out over 5 s, paused, power off (paused
  * where it was at the next start) */
-static void sleep_service(void)
+/* The fade is a step of the main loop each pass (since 0.99r7, ETUDE §99), the keys ignored
+ * meanwhile as before; 1 while it runs */
+static struct { int on; uint32_t t0, v0, v; } fade;
+
+static int sleep_service(void)
 {
-    if (!sleep_at || (int32_t)(millis() - sleep_at) < 0)
-        return;
-    sleep_cancel();
-    log_printf("ui: sleep timer ended");
-    if (q_playing && !audio_paused && audio.on && audio.vol != 0xff) {
-        for (uint32_t t0 = millis(), v0 = audio.vol, v = v0; v < 0xfe;) {
-            sys_idle();
-            ui_background();
-            cpu_wait();
-            uint32_t t = millis() - t0 < 5000 ? millis() - t0 : 5000;
-            uint32_t want = v0 + (0xfe - v0) * t / 5000;
-            if (want > v)
-                audio_volume((uint8_t)(v = want), 0);
-        }
+    if (fade.on) {
+        uint32_t t = millis() - fade.t0 < 5000 ? millis() - fade.t0 : 5000;
+        uint32_t want = fade.v0 + (0xfe - fade.v0) * t / 5000;
+        if (want > fade.v)
+            audio_volume((uint8_t)(fade.v = want), 0);
+        if (fade.v < 0xfe && q_playing)
+            return 1;
+        fade.on = 0;
         audio_pause(1);
         rg_apply();                             /* the volume put back for PLAY */
         resume_save();
+        sys_power_off("sleep timer");           /* (returns when the USB cable powers us) */
+        return 0;
+    }
+    if (!sleep_at || (int32_t)(millis() - sleep_at) < 0)
+        return 0;
+    sleep_cancel();
+    log_printf("ui: sleep timer ended");
+    if (q_playing && !audio_paused && audio.on && audio.vol != 0xff) {
+        fade.on = 1;
+        fade.t0 = millis();
+        fade.v0 = fade.v = audio.vol;
+        return 1;
     }
     sys_power_off("sleep timer");               /* (returns when the USB cable powers us) */
+    return 0;
 }
 
 /* The battery shown (ETUDE §82): the mean of the last 64 readings, one a second (about a minute:
@@ -147,6 +163,7 @@ static void battery_off(uint32_t mv)
     sys_screen_set(1);
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
     lcd_text_clip_x(8, 50, "Battery empty", LCD_W, WARN, BG, 2);
+    lcd_settle();                               /* lit before the wait, not after it */
     mdelay(2000);
     sys_power_off("battery empty");             /* the resume state: paused where it was */
 }                                               /* (returns when the USB cable powers us) */
@@ -224,17 +241,35 @@ static void draw_stats(int browser, int whole, uint32_t us)
     __builtin_memset(st, 0, sizeof st);
 }
 
-/* MENU held: the main menu, then what was chosen in it */
-static void menu_open(int *scr)
+/* ---- the stack of screens (ui_priv.h): above the browser and the play screen ---- */
+#define SCR_DEPTH 4
+static const struct screen *scr_stack[SCR_DEPTH];
+static int scr_n;
+
+void scr_push(const struct screen *s)
 {
-    int m = main_menu();
+    if (scr_n == SCR_DEPTH) {
+        log_printf("ui: screen stack full");
+        return;
+    }
+    scr_stack[scr_n++] = s;
+    s->enter();
+}
+
+/* What the main menu chose, once it is off the stack */
+static void menu_action(int m, int *scr)
+{
+    if (m < 0)
+        return;
     if (m == M_FILES)
         *scr = SCR_BROWSER;
     else if (m == M_SETTINGS)
-        settings_screen();
+        scr_push(&settings_screen);
     else if (m == M_PLAYING)
         *scr = SCR_PLAYING;
     else if (m >= M_USB_RO) {
+        resume_flush();                         /* before the USB session, an install, a reboot */
+        storage_drain();
         play_stop(STOP_NOW);                    /* the rest needs the audio and core B */
         if (m == M_USB_RO || m == M_USB_RW)
             sys_usb(m == M_USB_RW);
@@ -249,12 +284,32 @@ static void menu_open(int *scr)
         sd_forget();                            /* the card unwatched meanwhile: maybe changed */
         log_printf("ui: card to be set up again (after the %s)", m == M_SYSTEM ? "system screen" :
                    m == M_INSTALL ? "installer" : "USB session");
+        if (sd_present())
+            sd_open();                          /* at once: the music stopped (§106) */
         if (m == M_USB_RW || m == M_INSTALL || m == M_USB_RO) {
             path_root(FAT_VOL_INT);             /* the volume may have changed */
             dir_load(&path[1].dir);
             q_clear();
         }
     }
+}
+
+/* The top screen closed: the one below it drawn again, or the browser and the play screen (after
+ * the main menu, what it chose); UI_FULL when the home screens show again */
+static int scr_pop(int *scr)
+{
+    const struct screen *top = scr_stack[--scr_n];
+    if (top == &menu_screen) {
+        int m = menu_choice;
+        menu_choice = -1;
+        menu_action(m, scr);
+    }
+    if (scr_n) {
+        scr_stack[scr_n - 1]->shown();
+        return 0;
+    }
+    b_dirty = 1;
+    return UI_FULL;
 }
 
 void ui_main(void)
@@ -264,11 +319,15 @@ void ui_main(void)
     int lvl_key = play_level;                   /* the volume before a VOL key: undone by a chord */
     uint32_t t_draw = 0, t_key = ticks(), t_save = millis(), key_ms = millis();
     uint32_t banner_ms = 0;                     /* a banner is shown (low battery, cannot play) */
+    tags_yield = storage_yield;                 /* a tag read in the storage task gives way */
+    sd_yield = storage_yield;                   /* so does a card mounted there */
     depth = 0;
     fat_root(VOL_TOP, &path[0].dir);
     copy_name(path[0].name, "Storage", sizeof path[0].name);
     path[0].sel = path[0].top = 0;
-    resume_load();
+    if (sd_present())
+        sd_open();                              /* the card mounted at once (0.99r26, ETUDE §106): */
+    resume_load();                              /* nothing plays yet */
     if (!depth && !dir_n) {                     /* nothing saved: the internal volume */
         path_root(FAT_VOL_INT);
         dir_load(&path[1].dir);
@@ -277,11 +336,17 @@ void ui_main(void)
         scr = SCR_PLAYING;                      /* show a track restored at power-on */
     for (;;) {
         sys_idle();
+        const char *pp = perf_begin("player");  /* the loop's tasks, named for perf (§97, §99) */
         ui_background();
         audio_power_service();
+        perf_end(pp);
+        pp = perf_begin("power");
         power_service(key_ms);
-        sleep_service();
+        int fading = sleep_service();
+        perf_end(pp);
+        pp = perf_begin("battery");
         int bat = battery_service();
+        perf_end(pp);
         if (bat == BAT_REDRAW)
             full = b_dirty = 1;
         if (bat == BAT_WARN) {                  /* the banner, 3 s, screen on */
@@ -306,18 +371,34 @@ void ui_main(void)
             lcd_text_clip(8, 118, hint, LCD_W - 8, DIM, BG);
             scr = SCR_BROWSER;
         }
+        if (crash_due) {                        /* the last session ended on a fault (0.99r32): */
+            crash_due = 0;                      /* once, 3 s */
+            banner_ms = millis() ? millis() : 1;
+            sys_screen_set(1);
+            t_key = ticks();
+            lcd_fill(0, 0, LCD_W, LCD_H, BG);
+            lcd_text_clip_x(8, 20, "Fault", LCD_W, WARN, BG, 2);
+            lcd_text_clip(8, 62, "The last session ended on a fault", LCD_W - 8, FG, BG);
+            lcd_text_clip(8, 88, crash_text[0], LCD_W - 8, DIM, BG);
+            lcd_text_clip(8, 108, crash_text[1], LCD_W - 8, DIM, BG);
+            lcd_text_clip(8, 134, "details: NEWFWLOG.TXT", LCD_W - 8, DIM, BG);
+        }
         if (banner_ms && millis() - banner_ms > 3000) {
             banner_ms = 0;
             full = b_dirty = 1;
+            if (scr_n)
+                scr_stack[scr_n - 1]->shown();
         }
+        pp = perf_begin("card watch");
         int sw = sd_watch();
+        perf_end(pp);
         if (sw)
             full = 1;
         if (sw == 2)
             scr = SCR_BROWSER;
         if (q_playing && !audio_paused && millis() - t_save > 60000) {
             t_save = millis();                  /* the position, for a resume after a cut */
-            resume_save();
+            resume_save();                      /* (its own phase, "resume save") */
         }
         if (sys_screen_is_off())
             was_off = 1;
@@ -330,8 +411,18 @@ void ui_main(void)
             lvl_key = play_level;
         struct key_ev e;
         int ev = key_poll(&e), k = e.key;
-        if (ev == EV_PLUG || ev == EV_UNPLUG)
-            ev = EV_NONE;                       /* logged (keys.c); no action yet */
+        if (ev == EV_PLUG || ev == EV_UNPLUG || fading)
+            ev = EV_NONE;                       /* logged (keys.c); no action yet; the fade */
+        int wr = browser_walk_poll();           /* a tree walk ended: its queue plays */
+        if (wr) {
+            full = b_dirty = 1;
+            if (wr & UI_TO_PLAYING)
+                scr = SCR_PLAYING;
+        }
+        if (browser_walking() && ev != EV_NONE && !sys_screen_is_off() &&
+            !(scr == SCR_PLAYING && !scr_n && (key_is_vol(k) || (k == KEY_PLAY && ev == EV_PRESS))))
+            ev = EV_NONE;                       /* no folder read meanwhile (§100): keys wait; */
+                                                /* the play screen's volume, pause, seek: on */
         if (ev != EV_NONE) {
             t_key = ticks();
             key_ms = millis();
@@ -339,15 +430,18 @@ void ui_main(void)
                 sys_screen_set(1);
                 ev = EV_NONE;
             }
-        } else if (!sys_screen_is_off() && ticks() - t_key > screen_timeout_us())
-            sys_screen_set(0);
+        } else if (!scr_n && !sys_screen_is_off() && ticks() - t_key > screen_timeout_us())
+            sys_screen_set(0);                  /* (not over a screen of the stack, as before) */
         if (sk_on && (millis() - sk_key_ms > SEEK_IDLE_MS || sk_cur != q_cur ||
                       (!q_playing && !parked))) {
             seek_end(1);                        /* no key for a while: go there (or the track */
             full = 1;                           /* changed meanwhile: nothing) */
         }
         int r = 0;
-        if (ev == EV_CHORD) {
+        if (scr_n) {                            /* a screen of the stack: its keys */
+            if (ev != EV_NONE && ev != EV_CHORD && scr_stack[scr_n - 1]->key(&e) == SCR_POP)
+                r = scr_pop(&scr);
+        } else if (ev == EV_CHORD) {
             if (scr == SCR_PLAYING && !sk_on) {
                 play_level = lvl_key;           /* the steps of a VOL key held before it undone */
                 volume(0);
@@ -359,11 +453,9 @@ void ui_main(void)
         else if (ev != EV_NONE) {
             if (sk_on)
                 seek_end(0);
-            if (k == KEY_MENU && ev == EV_LONG) {
-                menu_open(&scr);
-                r = UI_FULL;
-                b_dirty = 1;
-            } else if (k == KEY_MENU && ev == EV_PRESS) {
+            if (k == KEY_MENU && ev == EV_LONG)
+                scr_push(&menu_screen);         /* drawn by the loop, acted on when closed */
+            else if (k == KEY_MENU && ev == EV_PRESS) {
                 scr = scr == SCR_BROWSER ? SCR_PLAYING : SCR_BROWSER;
                 r = UI_FULL;
                 b_dirty = 1;
@@ -384,7 +476,10 @@ void ui_main(void)
         }
         /* Drawing: at most one frame every 33 ms (30/s, key repeat included), the periodic
          * refresh 4/s (play screen) or 2/s, nothing while the screen is off */
-        if (!sys_screen_is_off() && !banner_ms) {
+        if (scr_n && !sys_screen_is_off() && !banner_ms) {
+            if (scr_stack[scr_n - 1]->draw() == SCR_POP && (scr_pop(&scr) & UI_FULL))
+                full = b_dirty = 1;
+        } else if (!sys_screen_is_off() && !banner_ms) {
             uint32_t since = ticks() - t_draw;
             if (((full || quick) && since >= 33000) || since > (scr == SCR_PLAYING ? 250000u : 500000u)) {
                 t_draw = ticks();
@@ -400,6 +495,10 @@ void ui_main(void)
             else
                 browser_marquee_tick();
         }
+        resume_flush();                         /* a save asked meanwhile, after the frame */
+        pp = perf_begin("storage");
+        storage_run(STORAGE_BUDGET_US);         /* the long reads, a few ms each pass (§100) */
+        perf_end(pp);
         cpu_wait();                             /* until the next 1 ms tick */
     }
 }

@@ -1,6 +1,7 @@
 /* Player (ETUDE §19 onwards): our codecs on core B (hifi_proto.h), the input ring fed from the
  * file by core A, core B's PCM copied into the DAC ring in SYSRAM. The stock codec modules and
  * their mailbox protocol (ETUDE §1.2) were dropped in 0.61. */
+#include "perf.h"
 #include "player.h"
 #include "audio.h"
 #include "board.h"
@@ -26,6 +27,7 @@ static int fail(int err, const char *what)
 
 /* ---- our runtime and codecs (ETUDE §19) ---- */
 #include "hifi_proto.h"
+#include "crash.h"
 
 /* Core B's error (enum hp_err) as a player error; its reason into player.why */
 static int b_error(volatile struct hp_ctl *c)
@@ -39,49 +41,66 @@ static int b_error(volatile struct hp_ctl *c)
 static uint32_t fed_since_ring, freed_since_ring;
 static int mp4_on;                              /* the input is mp4.c's packet stream */
 
-/* Input ring from the file, in pieces up to the ring end, as much as fits (MP4: the packet
- * stream, once 4 KiB of room are free) */
+/* Input ring from the file (version 3, ETUDE §105): the stream in segments; feed_pos is the
+ * stream offset of the next byte written. Core B's requests (another offset: back, or forward
+ * past what is written) start a new segment there. MP4: the packet stream, once 4 KiB of room
+ * are free (no request then). */
+static uint32_t feed_pos, feed_ack;
+
+static void feed_start(void)
+{
+    volatile struct hp_ctl *c = HP_CTL;
+    feed_pos = feed_ack = 0;
+    c->in_wr = 0;
+    c->seg[0].seq = 0;
+    c->seg[0].ring0 = 0;
+    c->seg[0].off0 = 0;
+    c->seg[0].prev_end = 0;
+    c->seg_wr = 1;
+}
+
 static void feed(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
-    uint32_t wr = c->in_wr, rd = c->in_rd;
-    if (c->rewind_seq != c->rewind_ack) {       /* core B wants an earlier offset (it waits) */
-        wr = rd = c->rewind_pos;
-        c->in_rd = rd;
+    uint32_t wr = c->in_wr;
+    if (c->req_seq != feed_ack && c->seg_wr - c->seg_rd < HP_SEGS) {
+        feed_ack = c->req_seq;                  /* core B wants another offset (it waits) */
+        uint32_t pos = c->req_pos;
+        feed_pos = pos < file->size ? pos : file->size;
+        volatile struct hp_seg *g = &c->seg[c->seg_wr % HP_SEGS];
+        g->seq = feed_ack;
+        g->prev_end = wr;
+        wr += (feed_pos - wr) % 512;            /* the same place in a sector as in the file */
         c->in_wr = wr;
-        c->rewind_ack = c->rewind_seq;
+        g->ring0 = wr;
+        g->off0 = feed_pos;
+        c->seg_wr = c->seg_wr + 1;
         fed_since_ring++;
     }
     if (mp4_on) {
-        uint32_t room = HP_IN_SIZE - (wr - rd), nr;
+        uint32_t room = HP_IN_SIZE - (wr - c->rb_rd), nr;
         if (mp4_done() || room < 4096)
             return;
         uint32_t n = mp4_feed(wr, room, &nr);
         c->in_wr = wr + n;
+        feed_pos += n;
         fed_since_ring += n;
         player.reads += nr;
         player.read_bytes += n;
         if (mp4_done())
-            c->in_end = wr + n;
+            c->in_end = feed_pos;
         return;
     }
-    if ((int32_t)(rd - wr) > 0) {               /* core B skipped past what we wrote */
-        wr = rd;
-        if (wr > file->size)
-            wr = file->size;
-        c->in_wr = wr;
-        fed_since_ring++;
-    }
-    for (int k = 0; k < 4 && wr < file->size; k++) {
-        uint32_t room = HP_IN_SIZE - (wr - c->in_rd), o = wr % HP_IN_SIZE;
+    for (int k = 0; k < 4 && feed_pos < file->size; k++) {
+        uint32_t room = HP_IN_SIZE - (wr - c->rb_rd), o = wr % HP_IN_SIZE;
         uint32_t n = room < HP_IN_SIZE - o ? room : HP_IN_SIZE - o;
         if (n > 8192)
             n = 8192;
-        if (n >= file->size - wr)
-            n = file->size - wr;
-        else if (wr % 512) {                    /* after a skip: back to sector alignment */
-            if (n > 512 - wr % 512)
-                n = 512 - wr % 512;
+        if (n >= file->size - feed_pos)
+            n = file->size - feed_pos;
+        else if (feed_pos % 512) {              /* after a jump: back to sector alignment */
+            if (n > 512 - feed_pos % 512)
+                n = 512 - feed_pos % 512;
         }
         else if (room < 8192)
             break;                              /* wait for 8 KiB of room: fewer, longer reads */
@@ -89,54 +108,114 @@ static void feed(void)
             n &= ~511u;
         if (!n)
             break;
-        if (fat_pread(file, &cur, wr, (void *)(HP_IN_BASE + o), n) != (int)n) {
-            log_printf("player: read error at %u (+%u)", wr, n);
+        if (fat_pread(file, &cur, feed_pos, (void *)(HP_IN_BASE + o), n) != (int)n) {
+            log_printf("player: read error at %u (+%u)", feed_pos, n);
             break;
         }
         wr += n;
+        feed_pos += n;
         c->in_wr = wr;
         fed_since_ring += n;
         player.reads++;
         player.read_bytes += n;
     }
-    if (wr == file->size)
-        c->in_end = wr;
 }
 
 /* One round: positions both ways, input, doorbell when core B may have something to do */
 /* PCM in core B's output ring not copied yet */
-static uint32_t out_avail(void)
-{
-    volatile struct hp_ctl *c = HP_CTL;
-    return (c->out_wr + HP_OUT_SIZE - c->out_rd) % HP_OUT_SIZE;
+static uint32_t out_avail(void)                 /* version 2: none, core B writes the DAC */
+{                                               /* ring itself (ETUDE §103) */
+    return 0;
 }
 
 /* One round: DMA position, core B's PCM into the DAC ring (SYSRAM), input, doorbell when core B
  * may have something to do (new input, or 4 KiB of its output ring freed) */
 static int dac_switch;                          /* the next track's rate waits for the drain */
 
-static void own_service(void)
+/* The state of the track open (non-blocking playback, below) */
+static struct {
+    int flags, warm, kept, changed, full, open, opening;    /* opening: async, headers read */
+    uint32_t t0, t_load, t_ready, t_open, t_dac, t_first, t_play, ur0, lost0, i2s0, fb, t_req;
+    uint32_t na_frames, na_t, na_in;    /* the last change of the frames decoded: when, input */
+    uint32_t st_frames, st_t;           /* the same for the stall watch (0.99r34) */
+    int32_t fill0;
+    uint32_t in_min, out_min, out_max, in_empty;  /* perf: the rings once the DAC ring is full */
+    uint32_t laps0;                     /* audio.laps_lost at the open */
+    int in_was_empty, in_full;  /* the input ring filled once: its minimum counts from then */
+} ps;
+
+static int perf_load(uint32_t img)
+{
+    const char *pp = perf_begin("core B load");
+    int r = hifi_load_own(img);
+    perf_end(pp);
+    return r;
+}
+
+static void perf_rings(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
+    uint32_t out = out_avail(), in = c->in_wr - c->rb_rd;
+    if (out < ps.out_min)
+        ps.out_min = out;
+    if (out > ps.out_max)
+        ps.out_max = out;
+    if (c->in_end != 0xffffffffu && feed_pos >= c->in_end)
+        return;                                 /* all fed: the input may run out */
+    if (!ps.in_full && in < HP_IN_SIZE - 8192)
+        return;                                 /* a track starting: its ring not filled yet */
+    ps.in_full = 1;
+    if (in < ps.in_min)
+        ps.in_min = in;
+    if (!in && !out && !ps.in_was_empty)
+        ps.in_empty++;                          /* core B waits for the card: an episode */
+    ps.in_was_empty = !in && !out;
+}
+
+static void own_service(void)
+{
+    perf_tick(&perf_play);
     audio_update();
-    uint32_t n = dac_switch ? 0 : out_avail(), room = audio_free();
-    if (n > room)
-        n = room;
-    n &= ~3u;
-    uint32_t rd = c->out_rd;
-    while (n) {
-        uint32_t k = HP_OUT_SIZE - rd < n ? HP_OUT_SIZE - rd : n;
-        audio_write((const void *)(HP_OUT_BASE + rd), k);
-        rd = rd + k == HP_OUT_SIZE ? 0 : rd + k;
-        n -= k;
-        freed_since_ring += k;
-    }
-    c->out_rd = rd;
+    if (ps.full && !dac_switch)
+        perf_rings();
     feed();
-    if (fed_since_ring || freed_since_ring >= 4096) {
+    if (fed_since_ring) {
         fed_since_ring = freed_since_ring = 0;
         hifi_ring();
     }
+}
+
+/* Where core B's first frames go after a start or a rate change: 40 ms of silence ahead of the
+ * DMA (8 KiB at least), the time core B takes to decode them */
+static uint32_t pcm_lead(void)
+{
+    uint32_t lead = audio.rate * audio.frame_bytes / 25;
+    lead = lead < 8192 ? 8192 : lead;
+    return (audio.rd + lead) & ~7u;
+}
+
+/* Core B writes the DAC ring from 'wr' on (ETUDE §103): the DMA's position and time as core A
+ * last read them, its rate, core B's clock; then core A keeps off the write position until
+ * player_close() */
+static void pcm_release(uint32_t wr)
+{
+    volatile struct hp_ctl *c = HP_CTL;
+    audio_update();
+    if ((int32_t)(wr - audio.rd) < 1024) {      /* the DMA past it (a skip, a seek: the open */
+        wr = pcm_lead();                        /* took longer than the silence ahead): the */
+        audio_zero(audio.rd, audio.ring_size);  /* whole ring silent, a late start plays that */
+    }
+    audio.wr = wr;
+    c->pcm_wr = wr;
+    c->pcm_rd = audio.rd;
+    c->pcm_pos = audio.last_pos;
+    c->pcm_t = timer24();
+    c->pcm_bps = audio_bps();
+    c->pcm_min = 0xffffffffu;
+    c->b_hz = hifi_hz;
+    audio_attach(&c->pcm_wr);
+    c->pcm_hold = 0;
+    hifi_ring();
 }
 
 /* Read buffer of the three Ogg scans below (they run one after the other): 8 KiB, and a page
@@ -324,10 +403,13 @@ static const uint8_t gov_div[] = { 8, 7, 6, 5, 4, 3, 2 };   /* 50 57 67 80 100 1
 #define GOV_LEVELS ((int)sizeof gov_div)
 static int player_clock;                               /* 0: automatic, else a fixed divider */
 static struct {
-    int level, boost, low, hot;
-    uint32_t t0, t_last, idle_last;
+    int level, boost;
+    uint32_t t0, t_last, idle_last, low_ms;
     int32_t fill_last;
     uint32_t windows, sum_mhz10, max_mhz10, max_load, changes, ms[GOV_LEVELS];
+    uint32_t sum_ms, ups, downs, safety, min_fill_ms;
+    uint32_t acc_busy, acc_el;                  /* the load judged over 250 ms at least */
+    uint64_t wsum_mhz10;                        /* MHz used x ms: the mean over time */
 } gov;
 
 static uint32_t b_idle(void)
@@ -367,6 +449,7 @@ static void gov_start(void)
         gov.changes = 0;
         gov.boost = 1;
     }
+    gov.min_fill_ms = 0xffffffffu;
     gov.t0 = gov.t_last = timer24();
 }
 
@@ -378,10 +461,20 @@ static void gov_begin(void)
     gov.fill_last = audio_fill();
 }
 
+/* The window (0.99r29, ETUDE §107): a quarter of the PCM ring's duration at the rate playing,
+ * 16 to 250 ms (250 at 44.1 kHz / 16 bits, 16 at 192 kHz / 24 bits: the ring lasts 64 ms) */
+static uint32_t gov_window_ticks(void)
+{
+    uint32_t bps = audio.rate * audio.frame_bytes;
+    uint32_t ms = bps ? (uint32_t)((uint64_t)audio.ring_size * 1000 / bps) / 4 : 250;
+    ms = ms < 16 ? 16 : ms > 250 ? 250 : ms;
+    return ms * 24000;                          /* TIMER1: 24 MHz */
+}
+
 static void gov_window(void)
 {
     uint32_t now = timer24(), el = now - gov.t_last;
-    if (el < 6000000)                           /* 250 ms */
+    if (el < gov_window_ticks())
         return;
     uint32_t idle = b_idle(), di = idle - gov.idle_last;
     uint32_t busy = el > di ? el - di : 0;
@@ -389,6 +482,8 @@ static void gov_window(void)
     uint32_t mhz10 = hifi_hz / 100000 * load / 1000;            /* tenths of MHz used */
     gov.windows++;
     gov.sum_mhz10 += mhz10;
+    gov.sum_ms += el / 24000;
+    gov.wsum_mhz10 += (uint64_t)mhz10 * (el / 24000);
     player.b_load = load;
     player.b_mhz10 = mhz10;
     if (mhz10 > gov.max_mhz10)
@@ -398,30 +493,66 @@ static void gov_window(void)
     if (gov.level >= 0)
         gov.ms[gov.level] += el / 24000;
     int32_t fill = audio_fill();
+    uint32_t bps = audio.rate * audio.frame_bytes;
+    int32_t ring_ms = bps ? (int32_t)((uint64_t)audio.ring_size * 1000 / bps) : 0;
+    int32_t fill_ms = bps && fill > 0 ? (int32_t)((uint64_t)fill * 1000 / bps) : 0;
+    if (!gov.boost && (uint32_t)fill_ms < gov.min_fill_ms)
+        gov.min_fill_ms = (uint32_t)fill_ms;
     if (!player_clock) {
         if (gov.boost) {
             if (fill >= (int32_t)audio.ring_size - 16384 || now - gov.t0 > 72000000)
                 gov.boost = 0;                  /* DAC ring full (or 3 s): end of the boost */
         } else {
-            uint32_t need10 = mhz10 * 4 / 3;    /* for a 75 % load */
+            /* the lowest level that keeps the load at 75 % (ETUDE §107) */
+            uint32_t need10 = mhz10 * 4 / 3;
             int want = GOV_LEVELS - 1;
             for (int i = 0; i < GOV_LEVELS; i++)
                 if (4000 / gov_div[i] >= need10) {
                     want = i;
                     break;
                 }
-            gov.hot = load > 850 ? gov.hot + 1 : 0;
-            int falling = fill < (int32_t)(audio.ring_size / 4 * 3) && fill + 4096 < gov.fill_last;
-            if ((falling || gov.hot >= 2) && gov.level < GOV_LEVELS - 1) {
+            /* the load over 250 ms at least (a short window sees a codec's bursts) */
+            gov.acc_busy += busy;
+            gov.acc_el += el;
+            int judged = gov.acc_el >= 6000000;
+            uint32_t lload = judged ? (uint32_t)((uint64_t)gov.acc_busy * 1000 / gov.acc_el) : 0;
+            if (judged) {
+                uint32_t lmhz10 = hifi_hz / 100000 * lload / 1000;
+                need10 = lmhz10 * 4 / 3;
+                want = GOV_LEVELS - 1;
+                for (int i = 0; i < GOV_LEVELS; i++)
+                    if (4000 / gov_div[i] >= need10) {
+                        want = i;
+                        break;
+                    }
+                gov.acc_busy = gov.acc_el = 0;
+            }
+            if (ring_ms && fill_ms < ring_ms / 4) {         /* the ring under a quarter */
+                if (gov.level < GOV_LEVELS - 1)
+                    gov.safety++;
+                gov_set(GOV_LEVELS - 1);
+                gov.low_ms = 0;
+            } else if (ring_ms && fill_ms < ring_ms / 2) {  /* under half: a level up at least */
+                if (gov.level < GOV_LEVELS - 1) {
+                    gov.safety++;
+                    gov_set(want > gov.level ? want : gov.level + 1);
+                }
+                gov.low_ms = 0;
+            } else if (!judged) {
+                ;                                           /* the load not judged yet */
+            } else if (lload > 850 && gov.level < GOV_LEVELS - 1) { /* over 85 %: up at once */
                 gov_set(want > gov.level ? want : gov.level + 1);
-                gov.low = gov.hot = 0;
-            } else if (want < gov.level) {
-                if (++gov.low >= 4) {           /* 1 s below: one level down */
-                    gov_set(gov.level - 1);
-                    gov.low = 0;
+                gov.ups++;
+                gov.low_ms = 0;
+            } else if (lload < 650 && want < gov.level) {   /* under 65 % for 1 s: straight */
+                gov.low_ms += 250;                          /* down to the level for 75 % */
+                if (gov.low_ms >= 1000) {
+                    gov_set(want);
+                    gov.downs++;
+                    gov.low_ms = 0;
                 }
             } else
-                gov.low = 0;
+                gov.low_ms = 0;
         }
     }
     gov.fill_last = fill;
@@ -431,12 +562,14 @@ static void gov_window(void)
 
 static void gov_report(const char *name)
 {
-    uint32_t mean = gov.windows ? gov.sum_mhz10 / gov.windows : 0;
-    log_printf("clock: %s: core B %s, used mean %u.%u MHz, max %u.%u MHz (250 ms), max load %u.%u %%; "
-               "ms at 50/57/67/80/100/133/200 MHz: %u %u %u %u %u %u %u; %u changes", name,
+    uint32_t mean = gov.sum_ms ? (uint32_t)(gov.wsum_mhz10 / gov.sum_ms) : 0;
+    log_printf("clock: %s: core B %s, used mean %u.%u MHz, max %u.%u MHz (window), max load %u.%u %%; "
+               "ms at 50/57/67/80/100/133/200 MHz: %u %u %u %u %u %u %u; %u changes (%u up, %u "
+               "down, %u for the ring); lowest fill %u ms", name,
                player_clock ? "fixed" : "automatic", mean / 10, mean % 10, gov.max_mhz10 / 10,
                gov.max_mhz10 % 10, gov.max_load / 10, gov.max_load % 10, gov.ms[0], gov.ms[1],
-               gov.ms[2], gov.ms[3], gov.ms[4], gov.ms[5], gov.ms[6], gov.changes);
+               gov.ms[2], gov.ms[3], gov.ms[4], gov.ms[5], gov.ms[6], gov.changes, gov.ups,
+               gov.downs, gov.safety, gov.min_fill_ms == 0xffffffffu ? 0 : gov.min_fill_ms);
 }
 
 /* The longest a drain may take: the DAC ring at the rate playing (1.1 s at 44.1 kHz, 6.1 s at
@@ -509,12 +642,6 @@ int player_drain_service(void)
 }
 
 /* ---- non-blocking playback (step 6): open, then service from the main loop, then close ---- */
-static struct {
-    int flags, warm, kept, changed, full, open;
-    uint32_t t0, t_load, t_ready, t_open, t_dac, t_first, t_play, ur0, lost0, i2s0, fb;
-    uint32_t na_frames, na_t, na_in;    /* the last change of the frames decoded: when, input */
-    int32_t fill0;
-} ps;
 
 static uint32_t hint_page, hint_seg, hint_seek;
 
@@ -528,6 +655,9 @@ void player_ogg_hint(uint32_t page, uint32_t seg)
     hint_page = page;
     hint_seg = seg;
 }
+
+static int open_step(void);
+static int open_finish(void);
 
 int player_open(const struct fat_file *f, uint32_t codec, int flags)
 {
@@ -548,11 +678,22 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     fed_since_ring = freed_since_ring = 0;
     player.state = ST_LOAD;
     ps.kept = (flags & PLAY_CHAIN) && dac.running && audio.on;
+    if (!ps.kept) {                             /* nothing heard before it (a start, a jump): */
+        perf_play.last = 0;                     /* no gap of the audio path to count until its */
+        perf_play.max = 0;                      /* first service (r9: 8 s of browsing counted) */
+    }
     drain.on = 0;
+    uint32_t sh = audio_rebase();               /* core B stopped: the counters kept small */
+    tail.end -= sh;
     ps.fill0 = ps.kept ? audio_fill() : 0;      /* what the DAC ring holds at the switch */
     ps.ur0 = audio.ur_all;                      /* the counters of this track by difference */
     ps.lost0 = audio.lost_all;
     ps.i2s0 = audio.i2s_all;
+    ps.in_min = ps.out_min = 0xffffffffu;
+    ps.out_max = ps.in_empty = 0;
+    ps.laps0 = audio.laps_lost;
+    ps.in_was_empty = 0;                        /* the gaps run on: the one before this track
+                                                 * (its tags read, core B loaded) counts in it */
     log_printf("player: %s, %u bytes, our codec %u", f->name, f->size, codec);
     mp4_on = codec == HP_CODEC_AAC || codec == HP_CODEC_ALAC;
     if (mp4_on) {                               /* the container read here, the seek done here */
@@ -573,28 +714,32 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     uint32_t img = codec == HP_CODEC_AIFF ? HP_CODEC_WAV : codec;  /* one image for PCM */
     if (hifi_own_loaded() == img && !hifi_restart_own())
         ps.warm = 1;                            /* the image is still in the HIGHRAM */
-    else if ((r = hifi_load_own(img)))
+    else if ((r = perf_load(img)))
         return fail(r, "our codec is not in the firmware image");
     ps.t_load = ticks();
     if ((r = hifi_start_own()))
         return fail(r, "our core B runtime did not start");
+    c->pcm_hold = 1;                            /* until the DACs are ready for this track */
     ps.t_ready = ticks();
     gov_begin();
     if (ps.kept)
         audio_update();
     c->in_end = mp4_on ? 0xffffffffu : f->size; /* known from the start (MP3 length estimate) */
-    c->comment_end_page = codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS ? cpage : 0;
-    c->comment_end_seg = cseg;
-    c->seek_ms = seek;
-    c->seek_offset = 0;
-    if (c->comment_end_page)
-        log_printf("player: comment header ends at page %u, segment %u", c->comment_end_page,
-                   c->comment_end_seg);
+    feed_start();                               /* the stream from its start (version 3) */
+    c->trk.codec = codec;
+    c->trk.size = c->in_end;
+    c->trk.comment_end_page = codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS ? cpage : 0;
+    c->trk.comment_end_seg = cseg;
+    c->trk.seek_ms = seek;
+    c->trk.seek_offset = 0;
+    if (c->trk.comment_end_page)
+        log_printf("player: comment header ends at page %u, segment %u", c->trk.comment_end_page,
+                   c->trk.comment_end_seg);
     uint64_t end_g = 0;
     if (codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS) {
         end_g = ogg_end_granule(file);
-        c->end_granule_lo = (uint32_t)end_g;
-        c->end_granule_hi = (uint32_t)(end_g >> 32);
+        c->trk.end_granule_lo = (uint32_t)end_g;
+        c->trk.end_granule_hi = (uint32_t)(end_g >> 32);
         cur.index = cur.cluster = 0;
         log_printf("player: last Ogg granule %u", (uint32_t)end_g);
     }
@@ -604,33 +749,63 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
         uint32_t rate = ogg_rate(f), reads = 0, t_seek = ticks();
         uint64_t g = (uint64_t)seek * rate / 1000;
         if (rate && g)
-            c->seek_offset = ogg_page_before(f, g, end_g, cpage, &reads);
+            c->trk.seek_offset = ogg_page_before(f, g, end_g, cpage, &reads);
         cur.index = cur.cluster = 0;
         log_printf("player: start at %u ms: Ogg page at %u, %u reads in %u us", seek,
-                   c->seek_offset, reads, ticks() - t_seek);
+                   c->trk.seek_offset, reads, ticks() - t_seek);
     } else if (seek)
         log_printf("player: start at %u ms", seek);
     feed();
     command(HP_CMD_OPEN);
     player.state = ST_OPEN;
-    for (uint32_t ts = ticks(); c->state != HP_FORMAT;) {
+    ps.t_req = ticks();
+    if (flags & PLAY_ASYNC) {                   /* the headers read while the loop goes on: */
+        ps.open = ps.opening = 1;               /* player_service() finishes it (0.99r25) */
+        return 0;
+    }
+    for (;;) {
         wdt_kick();
         if (ps.kept)
             audio_update();
-        feed();
-        if (fed_since_ring) {
-            fed_since_ring = 0;
-            hifi_ring();
-        }
-        if (c->state == HP_ERROR || ticks() - ts > 3000000) {
-            log_printf("player: open failed: state %u error %u why %u, fault pc %x lr %x cfsr %x, "
-                       "in %u/%u", c->state, c->error, c->why, c->fault_pc, c->fault_lr,
-                       c->fault_cfsr, c->in_rd, c->in_wr);
-            r = c->state == HP_ERROR ? b_error(c) : HIFI_ETIMEOUT;
-            hifi_stop();
-            return fail(r, "our codec could not open the file");
-        }
+        int w = open_step();
+        if (w < 0)
+            return w;
+        if (w)
+            break;
     }
+    return open_finish();
+}
+
+/* One round of the open: the input fed; 1 once core B knows the format, < 0 on a failure */
+static int open_step(void)
+{
+    volatile struct hp_ctl *c = HP_CTL;
+    feed();
+    if (fed_since_ring) {
+        fed_since_ring = 0;
+        hifi_ring();
+    }
+    if (c->state == HP_FORMAT)
+        return 1;
+    if (c->state == HP_ERROR || ticks() - ps.t_req > 3000000) {
+        log_printf("player: open failed: state %u error %u why %u, fault pc %x lr %x cfsr %x, "
+                   "in %u/%u", c->state, c->error, c->why, c->fault_pc, c->fault_lr,
+                   c->fault_cfsr, c->in_rd, feed_pos);
+        int r = c->state == HP_ERROR ? b_error(c) : HIFI_ETIMEOUT;
+        hifi_stop();
+        audio_detach();
+        ps.open = ps.opening = 0;
+        return fail(r, "our codec could not open the file");
+    }
+    return 0;
+}
+
+/* The format known: the DACs, core B released on the ring */
+static int open_finish(void)
+{
+    volatile struct hp_ctl *c = HP_CTL;
+    const struct fat_file *f = &own_file;
+    ps.opening = 0;
     ps.t_open = ticks();
     player.rate = c->rate;
     player.channels = c->channels;
@@ -651,11 +826,12 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
                                            (dac.rate ? dac.rate : 1)), dac.rate);
     }
     if (!ps.kept && !ps.changed) {
+        audio_ring_direct(1);
         audio_start(player.rate, ps.fb == 4);
         audio_update();
-        audio.wr = (audio.rd + 8192) & ~7u;     /* 8 KiB of the zeroed ring, then core B's PCM */
-        log_printf("player: core B had %u bytes ready when the DMA started", out_avail());
-    }
+        pcm_release(pcm_lead());                /* the zeroed ring, then core B's PCM */
+    } else if (ps.kept && !dac_switch)
+        pcm_release(audio.wr);                  /* right after the last track's frames */
     if (!ps.kept)
         tail.on = 0;                            /* the DACs started again: nothing of it left */
     if (tail.on && (int32_t)(tail.end - audio.rd) <= 0)
@@ -683,6 +859,18 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
 }
 
 #define NOAUDIO_US    5000000u
+#define STALL_US      500000u                   /* core B stuck (0.99r34): the DMA replays the
+                                                 * ring meanwhile */
+
+/* A fault or a stall of core B (rework step 7): the fault record, and its codec forgotten so that
+ * the next open loads it again (its code may be damaged) */
+static void b_crash(const char *what, volatile struct hp_ctl *c)
+{
+    struct crash_info ci = { .core = CRASH_B, .what = what, .pc = c->fault_pc,
+                             .lr = c->fault_lr, .cfsr = c->fault_cfsr };
+    crash_record(&ci);
+    hifi_own_drop();
+}
 #define NOAUDIO_BYTES (1u << 20)
 
 /* One round of an open track: 0 while it plays, 1 at its end (all of core B's output in the DAC
@@ -691,8 +879,21 @@ int player_service(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
     if (!ps.open)
-        return 1;
+        return player.state == ST_ERROR ? player.error : 1;
     wdt_kick();
+    if (ps.opening) {                           /* an open of PLAY_ASYNC: its headers */
+        perf_tick(&perf_play);
+        audio_update();
+        gov_window();
+        int w = open_step();
+        if (w <= 0)
+            return w;
+        const char *pp = perf_begin("open");
+        w = open_finish();
+        perf_end(pp);
+        if (w)
+            return w;
+    }
     own_service();
     gov_window();
     if (dac_switch) {
@@ -704,12 +905,14 @@ int player_service(void)
         ps.kept = 0;                            /* only the rate-dependent part */
         if (!audio_change_rate(player.rate, ps.fb == 4)) {
             audio_update();
-            audio.wr = (audio.rd + 1024) & ~7u; /* core B's frames are ready: 1 KiB ahead */
+            audio_zero(audio.rd, audio.ring_size);  /* only its start was cleared */
+            pcm_release(pcm_lead());
             ps.changed = 1;
         } else {
+            audio_ring_direct(1);
             audio_start(player.rate, ps.fb == 4);
             audio_update();
-            audio.wr = (audio.rd + 8192) & ~7u;
+            pcm_release(pcm_lead());
         }
         dac.rate = player.rate;
         dac.fb = ps.fb;
@@ -739,6 +942,7 @@ int player_service(void)
         if (!ps.kept)
             audio_reset_stats();
         audio.min_fill = 0x7fffffff;            /* a chained track too: its own minimum */
+        c->pcm_min = 0xffffffffu;               /* core B's too (a statistic only) */
     }
     /* frames heard: written by core B minus what is still in the two rings */
     uint32_t queued = (out_avail() + (uint32_t)(audio_fill() > 0 ? audio_fill() : 0)) / ps.fb;
@@ -748,7 +952,25 @@ int player_service(void)
     if (c->state == HP_ERROR) {
         log_printf("player: core B error %u, fault pc %x lr %x cfsr %x, at %u MHz", c->error,
                    c->fault_pc, c->fault_lr, c->fault_cfsr, hifi_hz / 1000000);
+        if (c->error == HP_ERR_FAULT)
+            b_crash("core B fault", c);
         player.error = b_error(c);
+        return player.error;
+    }
+    /* Core B stuck (0.99r34): no frame for STALL_US while the DMA plays, with room in the PCM
+     * ring and input in the input ring (not in a pause, a rate change, an open) */
+    if (c->frames != ps.st_frames || !ps.st_t || dac_switch || ps.opening || audio_paused ||
+        !audio.on || c->state != HP_PLAYING || c->pcm_hold ||
+        audio_fill() + 8192 > (int32_t)HP_OUT_SIZE || c->in_wr - c->rb_rd < 4096) {
+        ps.st_frames = c->frames;
+        ps.st_t = ticks() | 1;
+    } else if (ticks() - ps.st_t > STALL_US) {
+        log_printf("player: core B stuck: no frame for %u ms (room %u bytes, input %u bytes)",
+                   (ticks() - ps.st_t) / 1000, HP_OUT_SIZE - (uint32_t)audio_fill(),
+                   c->in_wr - c->rb_rd);
+        b_crash("core B stall", c);
+        player.why = HP_WHY_NONE;
+        player.error = PLAYER_EFAULT;
         return player.error;
     }
     if (c->state == HP_END && !out_avail() &&
@@ -773,6 +995,45 @@ int player_service(void)
     return 0;
 }
 
+/* perf (ETUDE §97): the gaps of this track and the rings' extremes once the DAC ring was full;
+ * in ms of sound, the input at the file's mean rate */
+static uint32_t ms_of(uint32_t bytes, uint32_t per_s)
+{
+    return per_s ? (uint32_t)((uint64_t)bytes * 1000 / per_s) : 0;
+}
+
+static void perf_report(const char *name)
+{
+    uint32_t pcm_s = audio.rate * audio.frame_bytes;   /* the DACs' rate (a low rate is raised) */
+    uint32_t in_s = player.length_ms ? (uint32_t)((uint64_t)own_file.size * 1000 /
+                                                  player.length_ms) : 0;
+    const struct perf_gap *a = &perf_play, *l = &perf_loop;
+    static const char *const cn[] = { "?", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF", "AAC",
+                                      "ALAC", "MPC" };
+    const char *codec = player.codec < sizeof cn / sizeof *cn ? cn[player.codec] : "?";
+    if (!ps.full) {
+        log_printf("perf: %s [%s %u/%u]: gap max %u ms (%s %u ms), loop gap max %u ms (%s %u ms); DAC "
+                   "ring never full", name, codec, player.rate, player.bps, a->max / 1000, a->max_ph ? a->max_ph : "-",
+                   a->max_ph_us / 1000, l->max / 1000, l->max_ph ? l->max_ph : "-",
+                   l->max_ph_us / 1000);
+        return;
+    }
+    int32_t dmin = audio.min_fill > 0 ? audio.min_fill : 0;
+    log_printf("perf: %s [%s %u/%u]: gap max %u ms (%s %u ms), loop gap max %u ms (%s %u ms); "
+               "DAC min %u ms; in min %u B (%u ms); out min %u B max %u B; in empty %u; laps lost %u; "
+               "core B underruns %u (%u B), min %u ms",
+               name, codec,
+               player.rate, player.bps, a->max / 1000,
+               a->max_ph ? a->max_ph : "-", a->max_ph_us / 1000, l->max / 1000,
+               l->max_ph ? l->max_ph : "-", l->max_ph_us / 1000,
+               ms_of((uint32_t)dmin, pcm_s),
+               ps.in_min == 0xffffffffu ? 0 : ps.in_min,
+               ps.in_min == 0xffffffffu ? 0 : ms_of(ps.in_min, in_s),
+               ps.out_min == 0xffffffffu ? 0 : ps.out_min, ps.out_max, ps.in_empty,
+               audio.laps_lost - ps.laps0, HP_CTL->pcm_ur, HP_CTL->pcm_lost,
+               HP_CTL->pcm_min == 0xffffffffu ? 0 : ms_of(HP_CTL->pcm_min, pcm_s));
+}
+
 /* The end of an open track: 'stopped' by the user, or at its end (or after an error) */
 void player_close(int stopped)
 {
@@ -788,6 +1049,9 @@ void player_close(int stopped)
                audio.ring_size / 1024, audio.ur_all - ps.ur0, audio.lost_all - ps.lost0,
                audio.i2s_all - ps.i2s0,
                audio.min_fill, ps.full ? " (since full)" : " (never full)");
+    perf_report(own_file.name);
+    perf_restart(&perf_play);                   /* the next gap still counts from here */
+    perf_restart(&perf_loop);
     gov_report(own_file.name);
     if (c->synth_gran || c->synth_soft)
         log_printf("synth: %s: %u granules on SYNTH, %u timeouts (software for the rest)",
@@ -893,6 +1157,7 @@ void player_close(int stopped)
 #endif
     command(HP_CMD_STOP);
     hifi_stop();
+    audio_detach();                             /* the write position is core A's again */
     if (stopped || player.error || !(ps.flags & PLAY_CHAIN))
         dac.running = 0;
     dac_switch = 0;                             /* the DACs still at the last track's rate */
@@ -906,7 +1171,17 @@ void player_close(int stopped)
     }
 }
 
+int player_settled(void)
+{
+    return ps.open && ps.full;
+}
+
 int player_is_open(void)
 {
     return ps.open;
+}
+
+const char *player_file_name(void)
+{
+    return own_file.name;
 }

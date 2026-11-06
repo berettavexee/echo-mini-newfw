@@ -1,6 +1,6 @@
 # User manual
 
-This manual is for the ECHO MINI new firmware, version 0.80. It describes what the player shows
+This manual is for the ECHO MINI new firmware, version 0.100. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
 The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing Daft
@@ -271,6 +271,7 @@ hand.
 | **Low battery** / plug the USB cable | under 3.425 V (about 45 minutes of playback left). With music, three beeps, then one every 5 min |
 | **Battery empty** | under 3.3 V for 30 s. Two low beeps, a pause, then the player powers off; the position is saved. Under 3.35 V the player does not start |
 | **SD card (not readable)** | the card could not be read; take it out and insert it again |
+| **Fault**: the last session ended on a fault | shown 3 s at the start after the player stopped on a fault or froze (the watchdog restarted it). The details are in `NEWFWLOG.TXT` (`crash:` lines); please report them. A fault of the HiFi core while playing is handled without a restart: the track starts again 1 s before, or is skipped if it happens twice |
 
 A damaged file (5 s with no audio while it reads on) is skipped, and the queue goes on with
 the next one.
@@ -302,11 +303,13 @@ Storage:
 
 ## Installing
 
-1. Copy the image (`HIFIEC70.IMG` from the build, renamed for instance `NEWFW073.IMG`) to the
+1. Copy the image (`NEWFW100.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
+   instance `NEWFW100.IMG`) to the
    root of the internal memory. Use the stock firmware's USB disk, or "USB disk, read/write"
    with this firmware.
 2. Main menu → **Install a firmware (.IMG)**:
-   - VOL+ / VOL- choose the image, and PLAY checks it;
+   - VOL+ / VOL- choose the image (long names are shown, and scroll when too long), and PLAY
+     checks it;
    - PLAY then installs it, and BACK cancels.
 3. Do not power off during the install. The battery must be above 3.6 V, or the USB cable in.
 4. The player restarts on the new firmware.

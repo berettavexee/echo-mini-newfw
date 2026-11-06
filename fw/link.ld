@@ -42,13 +42,21 @@ SECTIONS
     } > RAM
     ASSERT(_ebss <= 0x03020000, "BSS reaches the DAC ring (0x03020000)")
 
-    /* DAC ring, 192 KiB, 0x03020000-0x0304ffff: not loaded, not cleared by the loader nor by
-     * the start-up code (audio.c zeroes what it uses); over the loader's copy of itself, which
-     * is dead once we run */
-    .dacring 0x03020000 (NOLOAD) : {
-        KEEP(*(.dacring))
+    /* Core B's input ring (hifi_proto.h, HP_IN_BASE), 96 KiB, 0x03020000-0x03037fff, also the
+     * USB sound card's DAC ring (no codec runs then; our codecs' DAC ring is core B's output
+     * ring in HIGHRAM1): not loaded, not cleared by the loader nor by the start-up code; over
+     * the loader's copy of itself, dead once we run. 0x03038000-0x0304ffff (96 KiB): free, for
+     * the screens (rework step 4, ETUDE §103) */
+    .hpinring 0x03020000 (NOLOAD) : {
+        . = . + 0x18000;
     }
-    ASSERT(SIZEOF(.dacring) <= 0x30000, "DAC ring larger than 0x03020000-0x0304ffff")
+
+    /* The screens' buffers in 0x03038000-0x0304ffff (0.99r37: the installer's list of long
+     * names): not loaded, not cleared */
+    .screenram 0x03038000 (NOLOAD) : {
+        KEEP(*(.screenram))
+    }
+    ASSERT(SIZEOF(.screenram) <= 0x18000, "screen buffers larger than 96 KiB")
 
     /* The play queue's listing, 32 KiB above the code, and the directory listing, 96 KiB up to the loader's
      * data and stack and over them (dead once we run): not loaded, not cleared (ETUDE §25) */
