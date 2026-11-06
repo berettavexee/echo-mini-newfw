@@ -18,6 +18,8 @@ int storage_busy(void);                         /* a job queued or running */
 void storage_run(uint32_t budget_us);           /* the main loop: the task for up to budget_us */
 void storage_drain(void);                       /* every job to its end, now (blocking) */
 void storage_yield(void);                       /* in a job: back to the loop, budget spent */
+void storage_hold(int on);                      /* in a job: 1, no yield until 0 (a few reads
+                                                 * that must end before the loop runs again) */
 int storage_in_task(void);                      /* called from inside a job */
 uint32_t storage_stack_free(void);              /* bytes of the task's stack never used */
 

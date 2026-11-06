@@ -402,8 +402,10 @@ void ui_main(void)
             if (wr & UI_TO_PLAYING)
                 scr = SCR_PLAYING;
         }
-        if (browser_walking() && ev != EV_NONE && !sys_screen_is_off())
-            ev = EV_NONE;                       /* no folder read meanwhile (§100): keys wait */
+        if (browser_walking() && ev != EV_NONE && !sys_screen_is_off() &&
+            !(scr == SCR_PLAYING && !scr_n && (key_is_vol(k) || (k == KEY_PLAY && ev == EV_PRESS))))
+            ev = EV_NONE;                       /* no folder read meanwhile (§100): keys wait; */
+                                                /* the play screen's volume, pause, seek: on */
         if (ev != EV_NONE) {
             t_key = ticks();
             key_ms = millis();

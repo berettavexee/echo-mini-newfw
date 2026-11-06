@@ -40,6 +40,7 @@ struct set_block {
     uint32_t sum;
 };
 #define SET_V1_WORDS 5
+_Static_assert(sizeof(struct set_block) <= 40 * 4, "settings reach the resume's track (resume.c)");
 
 static uint32_t set_sum(const uint32_t *w, unsigned n)
 {

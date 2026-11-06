@@ -354,6 +354,9 @@ void ui_background(void)
     }
     if (r == 1 && audio_paused && play_mode == MODE_ORDER && q_dec + 1 >= q_n)
         return;                                 /* end of the queue in a pause: drained after it */
+    if (r == 1 && browser_walking())
+        return;                                 /* the queue is being walked (a resume): the */
+                                                /* next track once it is known (§104) */
     player_close(0);                            /* end of the track (or an error) */
     if (r == 1 || player.time_ms > 10000)
         q_errors = 0;                           /* it played: only failures in a row stop */

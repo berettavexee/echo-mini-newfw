@@ -316,11 +316,15 @@ void q_from_dir(int start)
  * subfolders in order, depth first (Q_LEVELS levels, Q_DIRS folders with tracks). Each folder
  * listed is replaced in the table by its subfolders (inserted right after it, which gives the
  * depth-first order) and kept only when it has tracks. */
-static void q_from_tree_do(const struct fat_dir *top, const char *name)
+static void q_from_tree_do(const struct fat_dir *top, const char *name, int keep)
 {
     uint32_t t0 = ticks();
     int lost = 0;
-    q_clear();
+    if (keep) {                                 /* the track playing stays the queue (q_single) */
+        qd_n = 0;                               /* until q_done(): slot 0 keeps it, the table */
+        ql_dir = -1;                            /* below is not read for it */
+    } else
+        q_clear();
     q_tree = 1;
     q_top = *top;
     qd_set(0, top, 0);
@@ -357,14 +361,61 @@ static void q_from_tree_do(const struct fat_dir *top, const char *name)
     if (lost)
         log_printf("ui: %d folders left out (%d at most)", lost, Q_DIRS);
     q_done(name, t0);
-    q_cur = play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;     /* shuffle: from anywhere */
+    if (!keep)
+        q_cur = play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;     /* shuffle: anywhere */
 }
 
 void q_from_tree(const struct fat_dir *top, const char *name)
 {
     const char *pp = perf_begin("tree walk");
-    q_from_tree_do(top, name);
+    q_from_tree_do(top, name, 0);
     perf_end(pp);
+}
+
+/* ---- the resume of a tree queue while its track plays (0.99r23, ETUDE §104): the track first,
+ * as a queue of its own, then the tree walked in the storage task with that track kept as the
+ * queue (q_n 1, its slot), then the place of that track in the tree found again ---- */
+void q_single(const struct entry *e, const char *name, const char *folder)
+{
+    q_clear();
+    q_tree = 1;
+    q_n = 1;
+    q_cur = q_dec = 0;
+    slot[0].i = 0;
+    slot[0].used = ++slot_clock;
+    slot[0].e = *e;
+    copy_name(slot[0].name, name, sizeof slot[0].name);
+    copy_name(q_folder, folder, sizeof q_folder);
+}
+
+void q_from_tree_keep(const struct fat_dir *top, const char *name)
+{
+    const char *pp = perf_begin("tree walk");
+    q_from_tree_do(top, name, 1);
+    perf_end(pp);
+}
+
+/* After q_from_tree_keep(): the saved order (the same tree), the track playing found at its
+ * place, else by its cluster; q_cur and q_dec on it. Its index, or -1 (then 0). */
+int q_resume_fix(const struct q_state *s, uint32_t track)
+{
+    int i = -1;
+    if (q_n == s->n) {
+        q_seed = s->seed;
+        q_base = (int)s->base;
+        const struct entry *e = s->cur >= 0 && s->cur < q_n ? q_ent(s->cur) : 0;
+        if (e && e->cluster == track)
+            i = s->cur;
+    }
+    for (int k = 0; i < 0 && k < q_n; k++) {    /* tracks added or removed: looked for */
+        const struct entry *e = q_ent(k);
+        if (e && e->cluster == track)
+            i = k;
+    }
+    q_cur = q_dec = i < 0 ? 0 : i;
+    if (q_n != s->n && play_mode == MODE_SHUFFLE)
+        q_shuffle_new(q_cur);
+    return i;
 }
 
 /* ---- the resume state of a tree queue (resume.c) ---- */

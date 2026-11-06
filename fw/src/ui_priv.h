@@ -114,6 +114,9 @@ void draw_browser(void);
 void browser_marquee_tick(void);
 int browser_walking(void);                      /* a tree walk runs in the storage task */
 int browser_walk_poll(void);                    /* its end: UI_* (playing from its first track) */
+struct q_state;
+int browser_walk_resume(const struct fat_dir *d, const char *nm, const struct q_state *qs,
+                        uint32_t track);        /* a resume: its track plays meanwhile */
 int browser_key(const struct key_ev *e);
 
 /* ---- queue.c ---- */
@@ -137,6 +140,9 @@ struct q_state {
 };
 int q_state_get(struct q_state *s);             /* 1 when the queue is a tree */
 int q_state_set(const struct q_state *s, const char *name);    /* rebuilt: 0, else -1 */
+void q_single(const struct entry *e, const char *name, const char *folder);  /* one track */
+void q_from_tree_keep(const struct fat_dir *top, const char *name);  /* that track kept meanwhile */
+int q_resume_fix(const struct q_state *s, uint32_t track);     /* its index found again, or -1 */
 void q_clear(void);
 int q_on_sd(void);                              /* the queue is on the card */
 /* Track i: its entry and name (read again from its folder when needed; 0 / "" if unreadable) */

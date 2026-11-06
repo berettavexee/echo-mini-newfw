@@ -31,6 +31,27 @@ struct resume_q {
 _Static_assert(RQ_WORD * 4 + sizeof(struct resume_q) <= 64 * 4, "resume_q overlaps the settings");
 _Static_assert(sizeof(struct resume) <= RQ_WORD * 4, "resume overlaps resume_q");
 
+/* The track of a tree queue, to play it at power-on before its tree is walked again (0.99r23,
+ * ETUDE §104): words 104 to 127, after the settings (settings.c: 40 words at most) */
+#define RT_WORD 104
+struct resume_t {
+    char magic[4];                              /* "TRK1" */
+    uint32_t cluster, size;
+    uint16_t flags, pad;
+    char name[NAME_KEEP + 4];
+    uint32_t sum;
+};
+_Static_assert(RT_WORD * 4 + sizeof(struct resume_t) <= 512, "resume_t past the sector");
+
+static uint32_t rt_sum(const struct resume_t *t)
+{
+    const uint32_t *w = (const uint32_t *)t;
+    uint32_t h = 0x4e465754;
+    for (unsigned i = 0; i < offsetof(struct resume_t, sum) / 4; i++)
+        h = (h << 5 | h >> 27) ^ w[i];
+    return h;
+}
+
 static uint32_t rq_sum(const struct resume_q *r)
 {
     const uint32_t *w = (const uint32_t *)r;
@@ -51,6 +72,8 @@ static uint32_t rs_sum(const struct resume *r)
 
 static void resume_save_do(void)
 {
+    if (browser_walking())
+        return;                                 /* a queue being walked: the state on disk kept */
     struct resume *r = (struct resume *)rs_buf;
     for (int i = 0; i < 128; i++)
         rs_buf[i] = 0x20202020;                 /* spaces: the log reader shows nothing */
@@ -71,12 +94,23 @@ static void resume_save_do(void)
     r->len_ms = parked ? parked_len : q_playing ? player_heard.length_ms : 0;
     r->len_sum = ~r->len_ms ^ r->sum;
     struct resume_q *rq = (struct resume_q *)(rs_buf + RQ_WORD);
+    uint32_t tsum = 0;
     if (qe && q_state_get(&rq->q)) {
         __builtin_memcpy(rq->magic, "QTR1", 4);
         copy_name(rq->name, q_folder, sizeof rq->name);
         rq->sum = rq_sum(rq);
+        struct resume_t *rt = (struct resume_t *)(rs_buf + RT_WORD);
+        __builtin_memcpy(rt->magic, "TRK1", 4);
+        rt->cluster = qe->cluster;
+        rt->size = qe->size;
+        rt->flags = qe->flags;
+        rt->pad = 0;
+        __builtin_memset(rt->name, 0, sizeof rt->name);
+        copy_name(rt->name, q_name(q_cur), sizeof rt->name);
+        rt->sum = rt_sum(rt);
+        tsum = rt->sum;
     }
-    uint32_t sum = r->sum ^ rq->sum ^ settings_put(rs_buf + 64);
+    uint32_t sum = r->sum ^ rq->sum ^ tsum ^ settings_put(rs_buf + 64);
     if (sum == rs_last_sum)
         return;                                 /* nothing changed: no write */
     rs_last_sum = sum;
@@ -147,6 +181,22 @@ static void resume_track(const struct resume *r)
 static void resume_tree(const struct resume *r, struct resume_q *rq)
 {
     rq->name[sizeof rq->name - 1] = 0;
+    struct resume_t *rt = (struct resume_t *)(rs_buf + RT_WORD);
+    if (!__builtin_memcmp(rt->magic, "TRK1", 4) && rt->sum == rt_sum(rt) &&
+        rt->cluster == r->track && rt->size && !(rt->flags & F_DIR) &&
+        (!(rt->flags & F_SD) || !sd_open())) {  /* its track first, the tree walked meanwhile */
+        rt->name[sizeof rt->name - 1] = 0;
+        struct entry e = { rt->cluster, rt->size, 0, rt->flags };
+        struct fat_dir d = { .cluster = rq->q.cluster, .size = rq->q.size, .vol = rq->q.vol,
+                             .contig = rq->q.contig };
+        q_single(&e, rt->name, rq->name);
+        if (!browser_walk_resume(&d, rq->name, &rq->q, r->track)) {
+            log_printf("ui: resume: %s, its tree under %s walked meanwhile", rt->name, rq->name);
+            resume_track(r);
+            return;
+        }
+        q_clear();
+    }
     if ((rq->q.vol == FAT_VOL_SD && sd_open()) || q_state_set(&rq->q, rq->name)) {
         log_printf("ui: resume: the tree queue is gone");
         return;
@@ -185,7 +235,9 @@ void resume_load(void)
     /* state 2 (before 0.58): no top level, index 0 was the internal root */
     int old = r->magic[11] == '2', saved = (int)(r->depth & 0xff) + old, v = (int)(r->depth >> 8);
     struct resume_q *rq = (struct resume_q *)(rs_buf + RQ_WORD);
-    rs_last_sum = r->sum ^ rq->sum ^ settings_put(rs_buf + 64);
+    struct resume_t *rt = (struct resume_t *)(rs_buf + RT_WORD);
+    rs_last_sum = r->sum ^ rq->sum ^ (rt->sum == rt_sum(rt) ? rt->sum : 0) ^
+                  settings_put(rs_buf + 64);
     int tree = !__builtin_memcmp(rq->magic, "QTR1", 4) && rq->sum == rq_sum(rq) && rq->q.tree;
     if (r->level <= 0xfe)
         play_level = (int)r->level;

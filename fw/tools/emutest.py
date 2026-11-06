@@ -87,8 +87,9 @@ TESTS = {
                                                     state=dict(playing=0, pos_ms=0)),
                                expect=[r"track [0-9a-f]+ at 0 ms, playing 0",
                                        r"ui: resume: paused at 0 ms of [1-9]\d+"]),
-    # a queue made by PLAY held on a folder (two levels), two tracks on, then a reboot: the same
-    # queue rebuilt, the same track playing, then the one after it in that queue
+    # a queue made by PLAY held on a folder (two levels), two tracks on, then a reboot: the track
+    # playing at once as a queue of its own (0.99r23), the same queue rebuilt meanwhile, the
+    # track found in it, then the one after it in that queue
     "resume-tree": dict(files={"ALBUM/CD1/A1.WAV": "wav10", "ALBUM/CD1/A2.WAV": "wav10",
                                "ALBUM/CD1/A3.WAV": "wav10", "ALBUM/CD2/B1.WAV": "wav10",
                                "ALBUM/CD2/B2.WAV": "wav10"},
@@ -96,8 +97,10 @@ TESTS = {
                         ms=13000,
                         expect=[r"ui: 5 tracks in 2 folders under ALBUM",
                                 r"ui: queue 3/5: A3.WAV",               # the log: both boots
+                                r"ui: resume: A3.WAV, its tree under ALBUM walked meanwhile",
+                                r"ui: queue 1/1: A3.WAV",
                                 r"ui: resume: tree queue under ALBUM, track 3/5$",
-                                r"ui: queue 3/5: A3.WAV", r"ui: queue 4/5: B1.WAV"],
+                                r"ui: queue 4/5: B1.WAV"],
                         reboot=dict(ms=20000)),
     # the same in shuffle (BACK held three times): Y, then Z, BACK to Y; after the reboot Y
     # plays again and Z comes after it (the order kept: the same seed and start)

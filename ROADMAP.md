@@ -4,7 +4,7 @@ State of the ECHO MINI new firmware, kept up to date with each version. The deta
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
 Last update: 2026-11-06, version 0.99 and `main` since (the sound card's remote and Power key,
-the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r22,
+the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r23,
 steps 1 to 4, checked on the device up to r21).
 
 ## Done, validated on the device
@@ -88,8 +88,9 @@ and checked on the device before the next; `main` stays the working firmware mea
    battery beeps are mixed by core B, the USB sound card uses the input ring's place: 96 KiB of
    SYSRAM free for the screens. A 500 ms stall of core A's loop: no underrun in MP3 (the
    input ring is the limit: 300 ms of FLAC 24/96). On the device: codec changes with the ring
-   kept, 15 rates, the sound card, no core B underrun out of seeks. Left: the resume of a whole
-   card's tree queue at boot still walks in the loop (2.4 s of frozen screen, nothing plays).
+   kept, 15 rates, the sound card, no core B underrun out of seeks. 0.99r23 (ETUDE §104): the
+   resume of a tree queue plays its track at once, the tree walked in the storage task meanwhile
+   (a whole card: about 2.4 s sooner).
 5. Records in the input ring (TRACK, DATA, END, SEEK); a seek never resets an index the other
    core may publish (ReChord's crackle, ETUDE §98).
 6. Core B's clock.

@@ -4108,3 +4108,23 @@ Faite dans l'émulateur, la r21 essayée ensuite sur l'appareil. Les décisions 
 - **15 fréquences** de 8 à 192 kHz, un changement à chaque piste (9 ms chacun) ; le **mode carte son** (80 s, son propre) ;
 - **manques du cœur B : 0**, sauf 9, tous juste après une recherche dans un Vorbis ou un Opus : le cœur B y met 130 à 190 ms à sortir ses premières trames, pour 40 ms de silence devant lui ; l'anneau étant mis à zéro, rien d'audible (le son est coupé par la recherche de toute façon). Corrigé dans le compte (r22) : un retard avant la première trame n'est plus un manque.
 - les « tours perdus » du cœur A (colonne `laps`) ne disent plus rien du son depuis la r19 : la colonne `B ur` de `perfreport.py` les remplace.
+
+## 104. La reprise d'une file d'arbre joue sa piste tout de suite (image 99R23, 2026-11-06)
+
+**Avant** : au démarrage, la reprise d'une file faite par PLAY maintenu (toute la carte : 18 257 pistes) reparcourait l'arbre avant d'entrer dans la boucle : 2,4 s d'écran figé sur l'appareil (§102), puis le démarrage des DAC et le son.
+
+**Maintenant** :
+- l'état de reprise garde aussi la **piste** de la file (taille, type, nom ; mots 104 à 127 du secteur, après les réglages, avec sa propre somme : un état plus ancien se relit, avec la reprise d'avant) ;
+- au démarrage, cette piste devient une **file d'une piste** (`q_single`) et joue (ou attend en pause) aussitôt ; l'arbre est parcouru **dans la tâche de stockage** pendant ce temps, la piste gardée comme file (`q_from_tree_keep` : le nombre de pistes et son entrée ne changent qu'à la fin) ;
+- à la fin du parcours, encore dans la tâche et sans céder la main (`storage_hold`), la piste est retrouvée à sa place, sinon par son cluster, l'ordre aléatoire sauvé est remis (`q_resume_fix`) : la suivante vient de la même file qu'avant l'extinction, sans couper le son ;
+- pendant le parcours : sur l'écran de lecture, le volume, la pause et la recherche marchent ; les touches qui liraient un dossier (piste suivante ou précédente, mode, menu, navigateur) attendent ; aucune sauvegarde de la reprise (celle du disque reste valable), une écrite à la fin ; une piste finie avant la fin du parcours attend la file ;
+- un fichier changé depuis (taille, cluster, type) : la reprise d'avant (parcours bloquant).
+
+**Émulateur** : `resume-tree` (son attendu adapté : la piste joue d'abord comme « queue 1/1 »), `resume-shuffle` et `resume-paused-zero` PASS ; scénario `resume-library` (l'arbre de PortablePlayer, 18 260 pistes, `--cycles`) :
+
+| | Son au démarrage | File prête |
+|---|---|---|
+| r22 | 2,27 s | 1,98 s (parcours bloquant de 1 104 ms) |
+| r23 | **1,17 s** | 2,54 s (parcours de 1 675 ms dans la tâche, le son continu) |
+
+Sur l'appareil, où le parcours prend 2,4 s, le gain attendu est d'environ 2,4 s. `resume-library-pause` : pause et reprise pendant le parcours, puis la file retrouvée. 17 tests `emutest` PASS ; 32 scénarios r22 contre r23 (avec `shuffle-library`) sans faute, 56 captures identiques sur 57 (l'écriture de l'installateur).

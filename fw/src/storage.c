@@ -13,7 +13,7 @@
 static uint32_t stack[STACK_WORDS] __attribute__((aligned(8)));
 static uint32_t *main_sp, *task_sp;
 static struct { storage_job fn; void *arg; } queue[QUEUE];
-static int q_head, q_count, running, started, guard_said;
+static int q_head, q_count, running, started, guard_said, held;
 static uint32_t deadline;
 
 /* Saves r4-r11 and the return address on the current stack, its pointer in *save, then takes
@@ -103,9 +103,14 @@ void storage_drain(void)
         resume(0xffffffffu / 2);                /* no budget: each job to its end */
 }
 
+void storage_hold(int on)
+{
+    held = on;
+}
+
 void storage_yield(void)
 {
-    if (running && (int32_t)(ticks() - deadline) >= 0)
+    if (running && !held && (int32_t)(ticks() - deadline) >= 0)
         co_swap(&task_sp, main_sp);
 }
 

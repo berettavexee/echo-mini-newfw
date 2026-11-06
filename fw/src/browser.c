@@ -330,6 +330,9 @@ static struct {
     char nm[64];
     int state;                                  /* WALK_* */
     uint32_t t0;
+    int resume, found;                          /* a resume (0.99r23): the track plays already */
+    struct q_state qs;                          /* its saved queue */
+    uint32_t track;                             /* its cluster */
 } walk;
 enum { WALK_NONE, WALK_RUNNING, WALK_DONE, WALK_FAILED };
 
@@ -340,8 +343,36 @@ static void walk_job(void *arg)
         walk.state = WALK_FAILED;
         return;
     }
-    q_from_tree(&walk.d, walk.nm);
+    if (walk.resume) {
+        q_from_tree_keep(&walk.d, walk.nm);
+        storage_hold(1);                        /* its place found before the loop runs again */
+        walk.found = q_resume_fix(&walk.qs, walk.track);
+        storage_hold(0);
+    } else
+        q_from_tree(&walk.d, walk.nm);
     walk.state = WALK_DONE;
+}
+
+/* The resume of a tree queue (resume.c): its track plays (q_single), the tree is walked meanwhile;
+ * 0, or -1 when the task cannot take it */
+int browser_walk_resume(const struct fat_dir *d, const char *nm, const struct q_state *qs,
+                        uint32_t track)
+{
+    if (walk.state != WALK_NONE)
+        return -1;
+    walk.d = *d;
+    copy_name(walk.nm, nm, sizeof walk.nm);
+    walk.qs = *qs;
+    walk.track = track;
+    walk.resume = 1;
+    walk.t0 = ticks();
+    walk.state = WALK_RUNNING;
+    if (storage_submit(walk_job, 0)) {
+        walk.state = WALK_NONE;
+        walk.resume = 0;
+        return -1;
+    }
+    return 0;
 }
 
 int browser_walking(void)
@@ -351,6 +382,21 @@ int browser_walking(void)
 
 int browser_walk_poll(void)
 {
+    if (walk.state == WALK_DONE && walk.resume) {
+        walk.state = WALK_NONE;
+        walk.resume = 0;
+        b_dirty = 1;
+        log_printf("ui: resume: tree walk in the storage task: %u ms, the track playing meanwhile",
+                   (ticks() - walk.t0) / 1000);
+        if (walk.found < 0)
+            log_printf("ui: resume: track %x not in the tree queue (%d tracks): from the first",
+                       walk.track, q_n);
+        else
+            log_printf("ui: resume: tree queue under %s, track %d/%d%s", walk.nm, q_cur + 1, q_n,
+                       q_n == walk.qs.n ? "" : " (the tree changed: order from here)");
+        resume_save_later();                    /* none was written meanwhile */
+        return UI_FULL;
+    }
     if (walk.state == WALK_DONE) {
         walk.state = WALK_NONE;
         b_dirty = 1;
@@ -364,6 +410,7 @@ int browser_walk_poll(void)
     }
     if (walk.state == WALK_FAILED) {
         walk.state = WALK_NONE;
+        walk.resume = 0;
         dir_load(&path[depth].dir);             /* "SD card (not responding)" ... */
         b_dirty = 1;
         return UI_FULL;
