@@ -51,6 +51,13 @@ SECTIONS
         . = . + 0x18000;
     }
 
+    /* The screens' buffers in 0x03038000-0x0304ffff (0.99r37: the installer's list of long
+     * names): not loaded, not cleared */
+    .screenram 0x03038000 (NOLOAD) : {
+        KEEP(*(.screenram))
+    }
+    ASSERT(SIZEOF(.screenram) <= 0x18000, "screen buffers larger than 96 KiB")
+
     /* The play queue's listing, 32 KiB above the code, and the directory listing, 96 KiB up to the loader's
      * data and stack and over them (dead once we run): not loaded, not cleared (ETUDE §25) */
     .queuebuf 0x03070000 (NOLOAD) : {

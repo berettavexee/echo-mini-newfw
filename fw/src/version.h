@@ -12,7 +12,7 @@
 #elif defined(ECHO_HWTEST)
 #define FW_VERSION "0.99hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.99r36"        /* the rework branch (ROADMAP, ETUDE §97) */
+#define FW_VERSION "0.99r37"        /* the rework branch (ROADMAP, ETUDE §97) */
 #endif
 #define FW_DATE    "2026-11-01"
 

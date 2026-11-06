@@ -162,6 +162,15 @@ TESTS = {
                                r"=== boot \d+: ECHO MINI newfw [^ ]+ \(2026-\d\d-\d\d\)",
                                r"FW1: == image", r"FW2: == image", r"boot: FW1"],
                        reboot=dict(ms=3000)),
+    # the list with the long names (0.99r37): two images whose 8.3 names would both be
+    # NEWFWR~n.IMG, the second chosen (VOL- once), its long name in the log
+    "install-long": dict(files={"NEWFW-0.99r37-first-test-image.IMG": "@BADCRC.IMG",
+                                "NEWFW-0.99r37-second-test-image-long-name.img": "@BADCRC.IMG"},
+                         keys=keys(*_INST[:-1], (8600, "VOL-"), (9600, "PLAY"), (13000, "BACK"),
+                                   (14500, "BACK")), ms=18000,
+                         expect=[r"install: NEWFW-0\.99r37-second-test-image-long-name\.img, "
+                                 r"\d+ bytes: check"],
+                         forbid=[r"install: writing", r"install: NEWFWR~"]),
     "install-badcrc": dict(files={"BADCRC.IMG": "@BADCRC.IMG"}, fw2=True,
                            keys=keys(*_INST, (12000, "BACK"), (13500, "BACK")), ms=22000,
                            expect=[r"install: BADCRC.IMG, \d+ bytes: check -?\d+ \(CRC mismatch"],
