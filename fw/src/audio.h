@@ -1,8 +1,9 @@
 /* Audio output (steps 5a, 5b): the two CS43131 DACs (I2C0), the ACODEC PLL and I2S1, and
  * DMAC1 channel 5 looping over a PCM ring of stereo frames: two 32-bit words (left, right,
  * data in the high bits), or one 32-bit word with two 16-bit samples (left in the low half):
- * I2S VDW = 16, HWT = 0; the I2S frame stays 64 SCLK, the DACs unchanged. The ring: 192 KiB in
- * SYSRAM, core A copies core B's output ring into it (ETUDE §9, §20, §23). */
+ * I2S VDW = 16, HWT = 0; the I2S frame stays 64 SCLK, the DACs unchanged. The ring: core B's
+ * output ring (96 KiB in HIGHRAM1, core B writes it, ETUDE §103) for our codecs, 96 KiB in SYSRAM
+ * for the USB sound card (ETUDE §9, §20, §23). */
 #ifndef AUDIO_H
 #define AUDIO_H
 
@@ -54,5 +55,15 @@ void audio_stream_align(uint32_t ahead);
 void audio_zero_ahead(uint32_t bytes);
 void audio_idle(void);
 void audio_reset_stats(void);
+/* Our codecs (ETUDE §103): audio_start() on core B's output ring (else the SYSRAM ring); core B
+ * then owns the write position (its pcm_wr) between attach and detach */
+void audio_ring_direct(int on);
+int audio_is_direct(void);
+void audio_attach(volatile uint32_t *wr);
+void audio_detach(void);
+int audio_attached(void);
+void audio_zero(uint32_t from, uint32_t n);
+uint32_t audio_bps(void);
+uint32_t audio_rebase(void);    /* the counters back by whole rings past 2^30; what was taken */
 
 #endif

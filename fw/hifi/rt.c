@@ -19,6 +19,7 @@ static void fault(void);
 static void doorbell(void);
 
 static volatile int rung;
+static void tick(void);
 #ifdef ECHO_BPROBE
 static void systick(void);
 static volatile int probing;                    /* a fault while set: recorded, passed over */
@@ -30,7 +31,7 @@ static void (*const vectors[IRQ_DOORBELL + 1])(void) = {
 #ifdef ECHO_BPROBE
     [2 ... 14] = fault, [15] = systick, [16 ... IRQ_DOORBELL - 1] = fault,
 #else
-    [2 ... IRQ_DOORBELL - 1] = fault,
+    [2 ... 14] = fault, [15] = tick, [16 ... IRQ_DOORBELL - 1] = fault,
 #endif
     [IRQ_DOORBELL] = doorbell,
 };
@@ -39,6 +40,11 @@ static void (*const vectors[IRQ_DOORBELL + 1])(void) = {
 __attribute__((noinline)) static void wfi(void)
 {
     __asm volatile ("wfi");
+}
+
+__attribute__((unused)) static void tick(void)   /* SysTick: room may have come in the ring */
+{
+    rung = 1;
 }
 
 static void doorbell(void)
@@ -178,28 +184,147 @@ void in_skip(uint32_t n)
     ctl->in_rd += n < a ? n : a;
 }
 
+/* ---- the PCM ring the DMA reads (version 2, ETUDE §103) ----
+ * The DMA's position is read from its SAR at each look; a look later than half a ring (core B
+ * busy that long: not expected) would hide laps, counted from TIMER1 as core A did (§97). The
+ * DMA overtaking what core B wrote (an underrun: input late, or core B too slow) leaves stale
+ * sound played; the write position then jumps to the DMA's and the episode is counted. */
+#define ST_CSR 0xe000e010u
+#define ST_RVR 0xe000e014u
+#define ST_CVR 0xe000e018u
+
+static uint32_t st_hz;                          /* the core clock the SysTick is set for */
+static int pcm_started;                         /* a frame written: a late DMA is an underrun
+                                                 * (before, the silence ahead of a seek runs out
+                                                 * while the first frames decode: device, r21) */
+
+static void pcm_update(void)
+{
+    uint32_t pos = REG(HP_DMA_SAR) - HP_OUT_BASE, now = TIMER1_NOW();
+    if (pos < HP_OUT_SIZE && ctl->pcm_bps) {
+        uint32_t moved = (pos + HP_OUT_SIZE - ctl->pcm_pos) % HP_OUT_SIZE;
+        uint64_t played = (uint64_t)(now - ctl->pcm_t) * ctl->pcm_bps / 24000000;
+        if (played > HP_OUT_SIZE / 2 && played > moved)
+            moved += (uint32_t)((played - moved + HP_OUT_SIZE / 2) / HP_OUT_SIZE) * HP_OUT_SIZE;
+        ctl->pcm_rd += moved;
+        ctl->pcm_pos = pos;
+    }
+    ctl->pcm_t = now;
+    int32_t fill = (int32_t)(ctl->pcm_wr - ctl->pcm_rd);
+    if (fill < 0) {
+        if (pcm_started) {
+            ctl->pcm_ur++;
+            ctl->pcm_lost += (uint32_t)-fill;
+        }
+        ctl->pcm_wr = (ctl->pcm_rd + 7) & ~7u;  /* whole frames, 4 or 8 bytes */
+        fill = 0;
+    }
+    if ((uint32_t)fill < ctl->pcm_min)
+        ctl->pcm_min = (uint32_t)fill;
+    if (ctl->b_hz != st_hz) {                   /* a wake every 2 ms while there is room */
+        st_hz = ctl->b_hz;
+        REG(ST_CSR) = 0;
+        if (st_hz) {
+            uint32_t load = st_hz / 500;
+            REG(ST_RVR) = (load > 0xffffff ? 0xffffff : load) - 1;
+            REG(ST_CVR) = 0;
+            REG(ST_CSR) = 7;                    /* the core clock, its interrupt, on */
+        }
+    }
+}
+
 static uint32_t raw_space(void)
 {
-    uint32_t fill = (ctl->out_wr + HP_OUT_SIZE - ctl->out_rd) % HP_OUT_SIZE;
+    if (ctl->pcm_hold)
+        return 0;
+    pcm_update();
+    uint32_t fill = ctl->pcm_wr - ctl->pcm_rd;
     return fill < HP_OUT_SIZE - HP_OUT_GUARD ? HP_OUT_SIZE - HP_OUT_GUARD - fill : 0;
 }
 
+/* ---- battery beeps (0.99r20, the mixer core A had, ETUDE §43): while a pattern runs, the
+ * music is lowered by 12 dB and a sine at -12 dBFS (5 ms fades) is added ---- */
+static const int16_t beep_sine[64] = {
+    0, 803, 1598, 2378, 3135, 3862, 4551, 5197, 5793, 6333, 6811, 7225, 7568, 7839, 8035, 8153,
+    8192, 8153, 8035, 7839, 7568, 7225, 6811, 6333, 5793, 5197, 4551, 3862, 3135, 2378, 1598, 803,
+    0, -803, -1598, -2378, -3135, -3862, -4551, -5197, -5793, -6333, -6811, -7225, -7568, -7839,
+    -8035, -8153, -8192, -8153, -8035, -7839, -7568, -7225, -6811, -6333, -5793, -5197, -4551,
+    -3862, -3135, -2378, -1598, -803,
+};
+static struct { int on, mix; uint32_t seq, frame, phase; int32_t t; } bp;
+
+static void beep_check(void)                    /* a new pattern from core A */
+{
+    if (ctl->beep_seq != bp.seq) {
+        bp.seq = ctl->beep_seq;
+        bp.frame = ctl->beep_from;
+        bp.phase = 0;
+        bp.on = ctl->beep_period && bp.frame < ctl->beep_total;
+    }
+}
+
+static int32_t beep_sample(void)
+{
+    uint32_t f = bp.frame % ctl->beep_period, on = ctl->beep_on, fade = ctl->beep_fade;
+    int32_t v = 0;
+    if (f < on) {
+        uint32_t edge = f < on - f ? f : on - f;
+        v = beep_sine[bp.phase >> 26];
+        if (edge < fade)
+            v = v * (int32_t)edge / (int32_t)fade;
+        bp.phase += ctl->beep_step;
+    }
+    if (++bp.frame >= ctl->beep_total)
+        bp.on = 0;
+    ctl->beep_frame = bp.frame;
+    return v;
+}
+
+/* One word on its way to the ring at byte counter 'at' */
+static uint32_t beep_mix(uint32_t w, uint32_t at)
+{
+    if (ctl->frame_bytes == 4) {                /* one word: left low, right high */
+        if (!bp.on)
+            return w;
+        int32_t t = beep_sample();
+        int32_t l = (int16_t)(w & 0xffff) / 4 + t, r = (int16_t)(w >> 16) / 4 + t;
+        return ((uint32_t)l & 0xffff) | (uint32_t)r << 16;
+    }
+    if (!(at & 4)) {                            /* left word: a new frame */
+        bp.mix = bp.on;
+        if (bp.mix)
+            bp.t = beep_sample();
+    }
+    return bp.mix ? (uint32_t)(((int32_t)w >> 2) + (bp.t << 16)) : w;
+}
+
+static void raw_word(uint32_t w);
+
 static void raw_write(const uint32_t *w, uint32_t words)
 {
-    uint32_t o = ctl->out_wr, n = words * 4;
+    beep_check();
+    if (bp.on || bp.mix) {                      /* word by word while a beep runs */
+        while (words--)
+            raw_word(*w++);
+        return;
+    }
+    uint32_t o = ctl->pcm_wr % HP_OUT_SIZE, n = words * 4;
     uint32_t k = HP_OUT_SIZE - o < n ? HP_OUT_SIZE - o : n;
+    pcm_started = 1;
     memcpy((void *)(HP_OUT_BASE + o), w, k);
     memcpy((void *)HP_OUT_BASE, (const uint8_t *)w + k, n - k);
-    o += n;
-    ctl->out_wr = o >= HP_OUT_SIZE ? o - HP_OUT_SIZE : o;
+    ctl->pcm_wr += n;
 }
 
 static void raw_word(uint32_t w)
 {
-    uint32_t o = ctl->out_wr;
-    *(volatile uint32_t *)(HP_OUT_BASE + o) = w;
-    o += 4;
-    ctl->out_wr = o == HP_OUT_SIZE ? 0 : o;
+    uint32_t at = ctl->pcm_wr;
+    beep_check();
+    if (bp.on || bp.mix)
+        w = beep_mix(w, at);
+    *(volatile uint32_t *)(HP_OUT_BASE + at % HP_OUT_SIZE) = w;
+    ctl->pcm_wr = at + 4;
+    pcm_started = 1;
 }
 
 /* ---- upsampling (ETUDE §59) ----

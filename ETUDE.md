@@ -4074,3 +4074,37 @@ Au passage, la r16 sur l'appareil : trois recherches, « tags kept » à chaque 
 3. le cœur B se règle sur **TIMER1** (24 MHz fixes) et sur la position de la DMA qu'il lit lui-même ; la SysTick n'est pas utilisée (elle suit l'horloge variable du cœur B) ;
 4. anneau d'entrée de **96 Kio en SYSRAM** (et non 192 Kio) : 96 Kio de SYSRAM laissés libres pour les évolutions graphiques. Environ 2,4 s de MP3 à 320 kb/s, 750 ms de FLAC 16/44, 165 ms de FLAC 24/192.
 Le mode carte son USB garde l'anneau du DAC en SYSRAM (à réduire avec lui : voir l'étape).
+
+## 103. Refonte, étape 4 : le cœur B écrit l'anneau lu par la DMA (images 99R18 à 99R21, 2026-11-06)
+
+Faite dans l'émulateur, la r21 essayée ensuite sur l'appareil. Les décisions du §102 appliquées.
+
+**r18 — la mémoire.** L'anneau d'entrée passe en SYSRAM (`0x03020000`, 96 Kio, section `.hpinring`), l'anneau de sortie du cœur B à 96 Kio en HIGHRAM1 (`0x01048000`), les données des codecs ramenées à 148 Kio (Vorbis, le plus gros, en prend 115 avec son tas). Le protocole ne change pas encore (le cœur A recopie toujours) : 17 tests `emutest` PASS.
+
+**r19 — le cœur B écrit l'anneau de la DMA** (protocole version 2). Le DMAC1 lit directement l'anneau de sortie du cœur B ; le cœur A ne recopie plus rien.
+- *Les positions* : compteurs d'octets `pcm_wr` (écrit par le cœur B) et `pcm_rd` (la position de la DMA, que le cœur B suit lui-même en lisant le SAR, avec les tours cachés comptés d'après TIMER1 comme au §97). Le cœur A les pose avant de libérer le cœur B (`pcm_hold`), puis ne touche plus à la position d'écriture jusqu'à l'arrêt du cœur B (`audio_attach` / `audio_detach`) : jamais un indice déplacé par les deux cœurs à la fois (règle du §98).
+- *Le réveil du cœur B* : TIMER1 ne peut pas l'interrompre ; c'est sa **SysTick**, toutes les 2 ms, sur son horloge que le cœur A lui donne à chaque changement (`b_hz`). TIMER1 ne sert qu'à mesurer le temps. Écart à la décision 3 du §102.
+- *Trois moments de passage* : à la suite de la piste précédente (enchaînement à la même fréquence : sans blanc, comme avant) ; après un démarrage des DAC ; après un changement de fréquence (le cœur B attend que la DMA ait passé la fin de la piste précédente, puis commence 40 ms devant elle, l'anneau mis à zéro). Après une recherche ou un saut (la DMA a dépassé ce qui restait), tout l'anneau est mis à zéro : un départ tardif joue du silence.
+- *Un changement de codec ne remet plus à zéro la HIGHRAM1 ni sa matrice* pendant que la DMA y lit (`hifi_prepare`) : seulement la HIGHRAM0 et HIFIACC.
+- *L'émulateur* : le cœur B lit le SAR du modèle de DMA du cœur A, et sa SysTick le réveille (`emu_coreb.py`).
+
+**r20 — les bips** de batterie mélangés par le cœur B dans ce qu'il écrit (même mélangeur qu'au §43, le motif calculé par le cœur A) ; un changement de piste, qui redémarre le cœur B, reprend le motif où il en était (`beep_from`). Scénario `beep-low` : les trois bips de 1 kHz trouvés dans ce que la DMA a lu, à pleine amplitude, l'un d'eux à cheval sur un changement de piste.
+
+**r21 — 96 Kio de SYSRAM libres.** L'anneau du mode carte son prend la place de l'anneau d'entrée (aucun codec ne tourne alors) ; `0x03038000`–`0x0304ffff` reste libre pour les écrans. Au passage : les compteurs des anneaux reculent d'un nombre entier d'anneaux à chaque piste une fois au-delà de 2^30 (`audio_rebase`) — la taille n'étant pas une puissance de deux, un compteur repassant par 2^32 aurait déplacé l'écriture d'un anneau, une fois toutes les 47 min en 24/192 (défaut ancien, l'anneau de 192 Kio l'avait aussi) ; essayé avec un seuil de 1 Mio : la sortie de la DMA identique octet pour octet.
+
+**Vérification dans l'émulateur** :
+- 17 tests `emutest` PASS (r19, r21) ; 31 scénarios r16 contre r19 sans faute, 49 captures identiques sur 54 (les 5 autres : barre de progression, ordre aléatoire, écriture de l'installateur, comme au §100) ; r19 contre r21 : 52 sur 54 (la barre d'une piste à grosse pochette, l'écriture de l'installateur), `perf-stall` PASS ;
+- le blocage de 500 ms de la boucle du cœur A (`perf-stall`, ECHO_STALL) : **MP3 aucun manque** (la r16 y perdait des tours) ; FLAC 24/96, un manque de 71 ms : l'anneau d'entrée de 96 Kio n'en tient que 300 ms (la conséquence attendue de cette taille) ;
+
+| Mesure (`--cycles`) | r16 | r21 |
+|---|---|---|
+| Anneau PCM, plus bas (16/44,1) | 1 086 ms (DAC, 192 Kio) | 507 ms (96 Kio, ne dépend plus du cœur A) |
+| Anneau PCM, plus bas (24/192) | 119 ms | 57 ms |
+| Anneau d'entrée, plus bas (MP3, Vorbis, AAC) | 0,4 à 1 s | 2 à 3,7 s |
+| Plus long trou du chemin audio | 4 à 26 ms | 4 à 27 ms |
+
+**Sur l'appareil (r21, `work/hwlog/2026-11-06_0.99r21/`, 61 pistes)** :
+- le **changement de codec, l'anneau gardé** (Vorbis → WAV, la DMA continuant) : aucun manque — la HIGHRAM1 garde son contenu sans sa remise à zéro ;
+- **15 fréquences** de 8 à 192 kHz, un changement à chaque piste (9 ms chacun) ; le **mode carte son** (80 s, son propre) ;
+- **manques du cœur B : 0**, sauf 9, tous juste après une recherche dans un Vorbis ou un Opus : le cœur B y met 130 à 190 ms à sortir ses premières trames, pour 40 ms de silence devant lui ; l'anneau étant mis à zéro, rien d'audible (le son est coupé par la recherche de toute façon). Corrigé dans le compte (r22) : un retard avant la première trame n'est plus un manque.
+- les « tours perdus » du cœur A (colonne `laps`) ne disent plus rien du son depuis la r19 : la colonne `B ur` de `perfreport.py` les remplace.

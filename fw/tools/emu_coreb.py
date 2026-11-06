@@ -33,6 +33,7 @@ class Shared:
         self.sram = ctypes.create_string_buffer(0xA0000)          # core A SRAM (descriptor)
         self.mb = bytearray(0x100)
         self.b = None                                             # CoreB once started
+        self.sar_read = None                                      # core A's DMA position
 
     def get(self, off):
         return struct.unpack_from("<I", self.mb, off)[0]
@@ -77,7 +78,17 @@ class CoreB(emu_host.Hifi):
         u.mem_map(0x400e1000, 0x110000 - 0xe1000)
         mmio(0x40110000, 0x1000, self._rd, self._wr)
         u.mem_map(0x40111000, 0x400000 - 0x111000)
-        u.mem_map(0x60000000, 0x50000)                              # DMAC1, IMDCT36, SDMMC, ...: RAM
+        # DMAC1: channel 5's SAR from core A's DMA model (sh.sar_read: the protocol's version 2,
+        # core B follows the DMA itself, ETUDE §103); the rest, IMDCT36, SDMMC...: RAM
+        self.dmac = {}
+        def dmac_rd(uc, off, size, _):
+            if off == 0x1b8 and sh.sar_read:
+                return sh.sar_read()
+            return self.dmac.get(off, 0)
+        def dmac_wr(uc, off, size, val, _):
+            self.dmac[off] = val
+        mmio(0x60000000, 0x1000, dmac_rd, dmac_wr)
+        u.mem_map(0x60001000, 0x4f000)
         self.syn = emu_host.Synth()                                 # SYNTH model
         mmio(0x60050000, 0x2000, self.syn.rd, self.syn.wr)
         u.mem_map(0x60052000, 0x100000 - 0x52000)
@@ -129,6 +140,24 @@ class CoreB(emu_host.Hifi):
         if self.sh.get(0x00) & 1 << ch:
             self._irq(0x1a if ch == 1 else 0x1b)
         self.step()
+
+    def systick(self, now_us, hz):
+        """Core B's SysTick (its registers are RAM here): asleep with the counter and its
+        interrupt on, it wakes at each period of (reload + 1) cycles of core B's clock 'hz'"""
+        csr, rvr = struct.unpack("<2I", self.u.mem_read(0xE000E010, 8))
+        if csr & 3 != 3 or not hz:
+            self.st_next = None
+            return
+        period = max(1, (rvr + 1) * 1_000_000 // hz)
+        nxt = getattr(self, "st_next", None)
+        if nxt is None or nxt > now_us + period:
+            self.st_next = now_us + period
+            return
+        if now_us >= nxt:
+            self.st_next = now_us + period
+            if self.sleeping:
+                self._irq(15)
+                self.step()
 
     def watch(self, lo, hi):
         """EMU_WATCH: the last writes into [lo, hi), shown when core B faults"""

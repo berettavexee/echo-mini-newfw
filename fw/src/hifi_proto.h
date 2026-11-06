@@ -3,11 +3,13 @@
  * Memory (core B view = core A view, except HIGHRAM0 which core B sees at 0):
  *   0x01020000  control block (struct hp_ctl), 4 KiB
  *   0x01021000  core B stack (8 KiB, SP at 0x01023000)
- *   0x01023000  codec data and BSS, up to 0x01050000 (180 KiB)
- *   0x01050000  input ring, 32 KiB: compressed data written by core A
- *   0x01058000  output ring, 32 KiB: PCM written by core B, copied by core A into the DAC ring
- *               (192 KiB in SYSRAM, read by DMAC1 channel 5; ETUDE §23)
- * Input positions are byte counters modulo 2^32 (the ring holds 'size' bytes at 'pos % size');
+ *   0x01023000  codec data and BSS, up to 0x01048000 (148 KiB)
+ *   0x01048000  output ring, 96 KiB: PCM written by core B, read by DMAC1 channel 5 (the DAC
+ *               ring since version 2, ETUDE §103; before, core A copied it into SYSRAM)
+ *   0x03020000  input ring, 96 KiB, in core A's SYSRAM (core B reads it: 0.99r17, ETUDE §102):
+ *               compressed data written by core A
+ * Input positions are byte counters (file offsets, below 4 GiB; the ring holds 'size' bytes
+ * at 'pos % size');
  * output positions are offsets in the ring (0 to size - 1).
  * Core A rings the mailbox (A2B channel 1) after it changes anything core B waits for (new
  * input, output read position, command); core B sleeps in WFI between two pieces of work. */
@@ -19,15 +21,16 @@
 #define HP_CTL_ADDR   0x01020000u
 #define HP_STACK_TOP  0x01023000u
 #define HP_DATA_START 0x01023000u
-#define HP_DATA_END   0x01050000u
-#define HP_IN_BASE    0x01050000u
-#define HP_IN_SIZE    0x8000u
-#define HP_OUT_BASE   0x01058000u
-#define HP_OUT_SIZE   0x8000u
-#define HP_OUT_GUARD  4096u             /* bytes core B keeps free ahead of core A's copy */
+#define HP_DATA_END   0x01048000u
+#define HP_IN_BASE    0x03020000u       /* SYSRAM (link.ld: .hpinring) */
+#define HP_IN_SIZE    0x18000u
+#define HP_OUT_BASE   0x01048000u
+#define HP_OUT_SIZE   0x18000u
+#define HP_OUT_GUARD  4096u             /* bytes core B keeps free behind the DMA */
+#define HP_DMA_SAR    0x600001b8u       /* DMAC1 channel 5 SAR: the DMA's read address */
 
 #define HP_MAGIC      0x5452424eu       /* "NBRT" */
-#define HP_VERSION    1
+#define HP_VERSION    2                 /* 2: core B writes the ring the DMA reads (0.99r19) */
 
 enum hp_state {
     HP_BOOT, HP_READY,                  /* runtime up, waiting for OPEN */
@@ -94,6 +97,29 @@ struct hp_ctl {
                                            timeout (ETUDE §67) */
     uint32_t synth_gran, synth_soft;    /* MP3: granules on SYNTH, in software (ETUDE §71) */
     uint32_t why;                       /* B: enum hp_why, with an HP_ERR_* of the open */
+    /* The PCM ring read by the DMA (version 2, rework step 4, ETUDE §103): core B writes its
+     * frames straight into the ring DMAC1 channel 5 plays (the output ring above), and follows
+     * the DMA's position itself (its SAR). Byte counters modulo 2^32, the ring holds 'size'
+     * bytes at 'counter % size'. Core A sets them all after HP_READY and before it clears
+     * pcm_hold; from then on only core B moves pcm_wr, pcm_rd and pcm_pos, until core A stops
+     * it (no index is ever moved by both cores at once: ReChord's crackle, ETUDE §98). */
+    uint32_t pcm_hold;                  /* A: 1: core B writes nothing (the DACs not ready for
+                                           this track yet: started, or its rate changed) */
+    uint32_t pcm_wr;                    /* B: bytes written (A: where to start) */
+    uint32_t pcm_rd;                    /* B: bytes the DMA has read (A: its value at the start) */
+    uint32_t pcm_pos;                   /* B: the DMA's offset in the ring at the last look */
+    uint32_t pcm_t;                     /* B: TIMER1 then (laps the position hides, from the time) */
+    uint32_t pcm_bps;                   /* A: bytes a second the DMA reads (0: the DMA stands) */
+    uint32_t pcm_ur, pcm_lost;          /* B: underruns (the DMA overtook core B), bytes */
+    uint32_t pcm_min;                   /* B: the lowest fill seen, bytes (after pcm_min_from) */
+    uint32_t b_hz;                      /* A: core B's clock (its SysTick: a wake every 2 ms) */
+    /* A battery beep mixed by core B into what it writes next (0.99r20; core A's own mixer for
+     * the SYSRAM ring): the pattern in frames at the DACs' rate, a new one each beep_seq */
+    uint32_t beep_seq;                  /* A: moved on after the fields below are set */
+    uint32_t beep_on, beep_period, beep_total, beep_step, beep_fade;
+    uint32_t beep_from;                 /* A: the pattern's frame to start at (a track change
+                                           restarts core B: the rest of the pattern goes on) */
+    uint32_t beep_frame;                /* B: the pattern's frames written so far */
 #if defined(ECHO_HWTEST) || defined(ECHO_HWSYN) || defined(ECHO_FFTCMP)
     /* Test build only (ETUDE §66): HIFIACC's LPC against dr_flac, per track, written by core B
      * and logged by core A at the end of the track */

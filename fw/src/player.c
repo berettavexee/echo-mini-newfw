@@ -106,10 +106,9 @@ static void feed(void)
 
 /* One round: positions both ways, input, doorbell when core B may have something to do */
 /* PCM in core B's output ring not copied yet */
-static uint32_t out_avail(void)
-{
-    volatile struct hp_ctl *c = HP_CTL;
-    return (c->out_wr + HP_OUT_SIZE - c->out_rd) % HP_OUT_SIZE;
+static uint32_t out_avail(void)                 /* version 2: none, core B writes the DAC */
+{                                               /* ring itself (ETUDE §103) */
+    return 0;
 }
 
 /* One round: DMA position, core B's PCM into the DAC ring (SYSRAM), input, doorbell when core B
@@ -157,29 +156,48 @@ static void perf_rings(void)
 
 static void own_service(void)
 {
-    volatile struct hp_ctl *c = HP_CTL;
     perf_tick(&perf_play);
     audio_update();
     if (ps.full && !dac_switch)
         perf_rings();
-    uint32_t n = dac_switch ? 0 : out_avail(), room = audio_free();
-    if (n > room)
-        n = room;
-    n &= ~3u;
-    uint32_t rd = c->out_rd;
-    while (n) {
-        uint32_t k = HP_OUT_SIZE - rd < n ? HP_OUT_SIZE - rd : n;
-        audio_write((const void *)(HP_OUT_BASE + rd), k);
-        rd = rd + k == HP_OUT_SIZE ? 0 : rd + k;
-        n -= k;
-        freed_since_ring += k;
-    }
-    c->out_rd = rd;
     feed();
-    if (fed_since_ring || freed_since_ring >= 4096) {
+    if (fed_since_ring) {
         fed_since_ring = freed_since_ring = 0;
         hifi_ring();
     }
+}
+
+/* Where core B's first frames go after a start or a rate change: 40 ms of silence ahead of the
+ * DMA (8 KiB at least), the time core B takes to decode them */
+static uint32_t pcm_lead(void)
+{
+    uint32_t lead = audio.rate * audio.frame_bytes / 25;
+    lead = lead < 8192 ? 8192 : lead;
+    return (audio.rd + lead) & ~7u;
+}
+
+/* Core B writes the DAC ring from 'wr' on (ETUDE §103): the DMA's position and time as core A
+ * last read them, its rate, core B's clock; then core A keeps off the write position until
+ * player_close() */
+static void pcm_release(uint32_t wr)
+{
+    volatile struct hp_ctl *c = HP_CTL;
+    audio_update();
+    if ((int32_t)(wr - audio.rd) < 1024) {      /* the DMA past it (a skip, a seek: the open */
+        wr = pcm_lead();                        /* took longer than the silence ahead): the */
+        audio_zero(audio.rd, audio.ring_size);  /* whole ring silent, a late start plays that */
+    }
+    audio.wr = wr;
+    c->pcm_wr = wr;
+    c->pcm_rd = audio.rd;
+    c->pcm_pos = audio.last_pos;
+    c->pcm_t = timer24();
+    c->pcm_bps = audio_bps();
+    c->pcm_min = 0xffffffffu;
+    c->b_hz = hifi_hz;
+    audio_attach(&c->pcm_wr);
+    c->pcm_hold = 0;
+    hifi_ring();
 }
 
 /* Read buffer of the three Ogg scans below (they run one after the other): 8 KiB, and a page
@@ -590,6 +608,8 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
         perf_play.max = 0;                      /* first service (r9: 8 s of browsing counted) */
     }
     drain.on = 0;
+    uint32_t sh = audio_rebase();               /* core B stopped: the counters kept small */
+    tail.end -= sh;
     ps.fill0 = ps.kept ? audio_fill() : 0;      /* what the DAC ring holds at the switch */
     ps.ur0 = audio.ur_all;                      /* the counters of this track by difference */
     ps.lost0 = audio.lost_all;
@@ -624,6 +644,7 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     ps.t_load = ticks();
     if ((r = hifi_start_own()))
         return fail(r, "our core B runtime did not start");
+    c->pcm_hold = 1;                            /* until the DACs are ready for this track */
     ps.t_ready = ticks();
     gov_begin();
     if (ps.kept)
@@ -674,6 +695,7 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
                        c->fault_cfsr, c->in_rd, c->in_wr);
             r = c->state == HP_ERROR ? b_error(c) : HIFI_ETIMEOUT;
             hifi_stop();
+            audio_detach();
             return fail(r, "our codec could not open the file");
         }
     }
@@ -697,11 +719,12 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
                                            (dac.rate ? dac.rate : 1)), dac.rate);
     }
     if (!ps.kept && !ps.changed) {
+        audio_ring_direct(1);
         audio_start(player.rate, ps.fb == 4);
         audio_update();
-        audio.wr = (audio.rd + 8192) & ~7u;     /* 8 KiB of the zeroed ring, then core B's PCM */
-        log_printf("player: core B had %u bytes ready when the DMA started", out_avail());
-    }
+        pcm_release(pcm_lead());                /* the zeroed ring, then core B's PCM */
+    } else if (ps.kept && !dac_switch)
+        pcm_release(audio.wr);                  /* right after the last track's frames */
     if (!ps.kept)
         tail.on = 0;                            /* the DACs started again: nothing of it left */
     if (tail.on && (int32_t)(tail.end - audio.rd) <= 0)
@@ -750,12 +773,14 @@ int player_service(void)
         ps.kept = 0;                            /* only the rate-dependent part */
         if (!audio_change_rate(player.rate, ps.fb == 4)) {
             audio_update();
-            audio.wr = (audio.rd + 1024) & ~7u; /* core B's frames are ready: 1 KiB ahead */
+            audio_zero(audio.rd, audio.ring_size);  /* only its start was cleared */
+            pcm_release(pcm_lead());
             ps.changed = 1;
         } else {
+            audio_ring_direct(1);
             audio_start(player.rate, ps.fb == 4);
             audio_update();
-            audio.wr = (audio.rd + 8192) & ~7u;
+            pcm_release(pcm_lead());
         }
         dac.rate = player.rate;
         dac.fb = ps.fb;
@@ -785,6 +810,7 @@ int player_service(void)
         if (!ps.kept)
             audio_reset_stats();
         audio.min_fill = 0x7fffffff;            /* a chained track too: its own minimum */
+        c->pcm_min = 0xffffffffu;               /* core B's too (a statistic only) */
     }
     /* frames heard: written by core B minus what is still in the two rings */
     uint32_t queued = (out_avail() + (uint32_t)(audio_fill() > 0 ? audio_fill() : 0)) / ps.fb;
@@ -844,7 +870,8 @@ static void perf_report(const char *name)
     }
     int32_t dmin = audio.min_fill > 0 ? audio.min_fill : 0;
     log_printf("perf: %s [%s %u/%u]: gap max %u ms (%s %u ms), loop gap max %u ms (%s %u ms); "
-               "DAC min %u ms; in min %u B (%u ms); out min %u B max %u B; in empty %u; laps lost %u",
+               "DAC min %u ms; in min %u B (%u ms); out min %u B max %u B; in empty %u; laps lost %u; "
+               "core B underruns %u (%u B), min %u ms",
                name, codec,
                player.rate, player.bps, a->max / 1000,
                a->max_ph ? a->max_ph : "-", a->max_ph_us / 1000, l->max / 1000,
@@ -853,7 +880,8 @@ static void perf_report(const char *name)
                ps.in_min == 0xffffffffu ? 0 : ps.in_min,
                ps.in_min == 0xffffffffu ? 0 : ms_of(ps.in_min, in_s),
                ps.out_min == 0xffffffffu ? 0 : ps.out_min, ps.out_max, ps.in_empty,
-               audio.laps_lost - ps.laps0);
+               audio.laps_lost - ps.laps0, HP_CTL->pcm_ur, HP_CTL->pcm_lost,
+               HP_CTL->pcm_min == 0xffffffffu ? 0 : ms_of(HP_CTL->pcm_min, pcm_s));
 }
 
 /* The end of an open track: 'stopped' by the user, or at its end (or after an error) */
@@ -979,6 +1007,7 @@ void player_close(int stopped)
 #endif
     command(HP_CMD_STOP);
     hifi_stop();
+    audio_detach();                             /* the write position is core A's again */
     if (stopped || player.error || !(ps.flags & PLAY_CHAIN))
         dac.running = 0;
     dac_switch = 0;                             /* the DACs still at the last track's rate */

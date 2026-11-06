@@ -4,8 +4,8 @@ State of the ECHO MINI new firmware, kept up to date with each version. The deta
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
 Last update: 2026-11-06, version 0.99 and `main` since (the sound card's remote and Power key,
-the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r16,
-steps 1 to 3, step 3 checked on the device).
+the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r22,
+steps 1 to 4, checked on the device up to r21).
 
 ## Done, validated on the device
 
@@ -81,11 +81,15 @@ and checked on the device before the next; `main` stays the working firmware mea
    13.8 MB cover), the bar of a track resumed paused after a power off shows its length. Left
    blocking: a Musepack seek without a seek table, a folder opened by the browser, a card
    mounted from the browser.
-4. **Core B writes the PCM ring** (in progress; 0.99r17, ETUDE §102: core B reads and writes
-   SYSRAM and PMU-SRAM and reads the DMA position, checked on the device): a 96 KiB PCM ring
-   in HIGHRAM1 written by core B and read by the DMA directly, a 96 KiB input ring in SYSRAM
-   (96 KiB of SYSRAM kept free for the screens), the battery beeps mixed by core B, core B
-   timed by TIMER1 and the DMA position.
+4. **Core B writes the PCM ring** (0.99r17-r22, ETUDE §102-§103; r21 checked on the device):
+   the DMA reads core B's 96 KiB output ring in HIGHRAM1 directly (protocol version 2: core B
+   follows the DMA's position itself and wakes on its SysTick every 2 ms; core A no longer
+   copies PCM), the input ring is 96 KiB in SYSRAM (2 to 3.7 s of MP3, Vorbis, AAC), the
+   battery beeps are mixed by core B, the USB sound card uses the input ring's place: 96 KiB of
+   SYSRAM free for the screens. A 500 ms stall of core A's loop: no underrun in MP3 (the
+   input ring is the limit: 300 ms of FLAC 24/96). On the device: codec changes with the ring
+   kept, 15 rates, the sound card, no core B underrun out of seeks. Left: the resume of a whole
+   card's tree queue at boot still walks in the loop (2.4 s of frozen screen, nothing plays).
 5. Records in the input ring (TRACK, DATA, END, SEEK); a seek never resets an index the other
    core may publish (ReChord's crackle, ETUDE §98).
 6. Core B's clock.

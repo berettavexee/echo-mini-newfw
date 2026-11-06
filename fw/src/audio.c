@@ -12,6 +12,7 @@
 #include "i2c.h"
 #include "log.h"
 #include "regs.h"
+#include "hifi_proto.h"
 
 #define DAC0 0x60
 #define DAC1 0x66
@@ -101,7 +102,22 @@ static uint32_t meas_rd, meas_t;
 static int meas_on;
 static int standby;                             /* paused, headphone stage and ASP powered down */
 
-static uint32_t sysram_ring[0x30000 / 4] __attribute__((section(".dacring"), aligned(32)));
+/* The USB sound card's ring: the place of core B's input ring (SYSRAM, link.ld .hpinring), free
+ * while the sound card runs (no codec then); 0x03038000-0x0304ffff stays free (ETUDE §103) */
+#define SYSRAM_RING      HP_IN_BASE
+#define SYSRAM_RING_SIZE HP_IN_SIZE
+/* Our codecs (version 2 of the protocol, ETUDE §103): the DMA reads core B's output ring in
+ * HIGHRAM1 and core B writes it; while core B runs, the write position is its pcm_wr (ext_wr),
+ * and core A writes nothing there. The SYSRAM ring stays for the USB sound card. */
+static int direct;                              /* audio_start(): core B's ring */
+static uint32_t zeroed_to;                      /* uac.c: the ring is zeroed up to there (bytes) */
+static volatile uint32_t *ext_wr;               /* core B owns the write position */
+/* The beep being mixed (below) */
+static struct { int on, mix; uint32_t frame, on_frames, period, total, step, phase, fade; } bp;
+static int32_t bp_t;                            /* tone of the 32-bit frame being written */
+static int bp_ext;                              /* a pattern sent to core B, maybe not over */
+static uint32_t bp_left;                        /* where core B stopped in it (a track change) */
+static void beep_send(uint32_t from);
 
 static int both(uint32_t reg, uint8_t val)
 {
@@ -359,10 +375,10 @@ static uint32_t i2s_fifo(void)
 
 static void ring_setup(void)
 {
-    audio.ring = (uint32_t)sysram_ring;
-    audio.ring_size = sizeof sysram_ring;
+    audio.ring = direct ? HP_OUT_BASE : SYSRAM_RING;
+    audio.ring_size = direct ? HP_OUT_SIZE : SYSRAM_RING_SIZE;
     for (uint32_t i = 0; i < audio.ring_size / 4; i++)
-        sysram_ring[i] = 0;
+        ((volatile uint32_t *)audio.ring)[i] = 0;
     log_printf("audio: ring %x + %u", audio.ring, audio.ring_size);
 }
 
@@ -397,7 +413,80 @@ static void meas_end(void)
 
 int32_t audio_fill(void)
 {
+    if (ext_wr)
+        audio.wr = *ext_wr;
     return (int32_t)(audio.wr - audio.rd);
+}
+
+/* The byte counters back by a whole number of rings once past 2^30 (core A's alone: core B not
+ * running): the ring's place of a counter is 'counter % size', and the size is not a power of
+ * two, so a counter wrapping at 2^32 would move it (once in 4 GiB: 47 min at 192 kHz / 24 bits,
+ * a ring of misplaced sound). Returns what was taken off. */
+#ifndef AUDIO_REBASE_AT
+#define AUDIO_REBASE_AT 0x40000000u             /* a test build sets it low */
+#endif
+uint32_t audio_rebase(void)
+{
+    if (ext_wr || !audio.ring_size || audio.rd < AUDIO_REBASE_AT)
+        return 0;
+    uint32_t sh = audio.rd / audio.ring_size * audio.ring_size;
+    audio.rd -= sh;
+    audio.wr -= sh;
+    meas_rd -= sh;
+    zeroed_to -= sh;
+#if AUDIO_REBASE_AT < 0x40000000u
+    log_printf("audio: counters back by %u", sh);
+#endif
+    return sh;
+}
+
+void audio_ring_direct(int on)
+{
+    direct = on;
+}
+
+int audio_is_direct(void)
+{
+    return audio.on && audio.ring == HP_OUT_BASE;
+}
+
+/* Core B writes from here on, from audio.wr (set by the caller in its pcm_wr) */
+void audio_attach(volatile uint32_t *wr)
+{
+    ext_wr = wr;
+    if (bp_ext && bp_left < bp.total)           /* a beep cut by the track change: the rest */
+        beep_send(bp_left);
+    else
+        bp_ext = 0;
+}
+
+/* Core B stopped: the write position is core A's again, where core B left it */
+void audio_detach(void)
+{
+    if (!ext_wr)
+        return;
+    audio.wr = *ext_wr;
+    ext_wr = 0;
+    if (bp_ext)
+        bp_left = HP_CTL->beep_frame;
+}
+
+int audio_attached(void)
+{
+    return ext_wr != 0;
+}
+
+/* Silence over [from, from + n) of the ring (byte counters), core B not writing there */
+void audio_zero(uint32_t from, uint32_t n)
+{
+    for (uint32_t i = from & ~3u; (int32_t)(from + n - i) > 0; i += 4)
+        ((volatile uint32_t *)audio.ring)[i % audio.ring_size / 4] = 0;
+}
+
+/* The bytes a second the DMA reads (0 in a pause: it stands) */
+uint32_t audio_bps(void)
+{
+    return audio.on && !audio_paused ? audio.rate * audio.frame_bytes : 0;
 }
 
 void (*ramp_hook)(void);
@@ -432,7 +521,8 @@ void audio_update(void)
         audio.in_ur = 1;
         audio.ring_lost += (uint32_t)-fill;
         audio.lost_all += (uint32_t)-fill;
-        audio.wr = audio.rd;
+        if (!ext_wr)                            /* core B's: it moves on by itself */
+            audio.wr = audio.rd;
         fill = 0;
     } else if (fill > 0)
         audio.in_ur = 0;
@@ -449,7 +539,8 @@ uint32_t audio_free(void)
 /* Copies n bytes (whole frames, n <= audio_free()) at the write position */
 /* ---- beeps mixed into what is written (battery warnings, ETUDE §43): while a pattern runs,
  * the music is lowered by 12 dB and a sine at -12 dBFS (5 ms fades) is added; the DAC volume
- * then applies to both. Heard about 1.1 s later (the ring ahead of the DMA). ---- */
+ * then applies to both. Heard up to a ring later (the ring ahead of the DMA). Our codecs: core B
+ * mixes them (hifi/rt.c, ETUDE §103), from the pattern computed here. ---- */
 static const int16_t beep_sine[64] = {
     0, 803, 1598, 2378, 3135, 3862, 4551, 5197, 5793, 6333, 6811, 7225, 7568, 7839, 8035, 8153,
     8192, 8153, 8035, 7839, 7568, 7225, 6811, 6333, 5793, 5197, 4551, 3862, 3135, 2378, 1598, 803,
@@ -462,8 +553,6 @@ static const struct { uint16_t hz, on_ms, off_ms, count; } beeps[] = {
     [BEEP_REMIND] = { 1000, 120, 0, 1 },
     [BEEP_OFF] = { 500, 200, 150, 2 },
 };
-static struct { int on, mix; uint32_t frame, on_frames, period, total, step, phase, fade; } bp;
-static int32_t bp_t;                            /* tone of the 32-bit frame being written */
 
 void audio_beep(int kind)
 {
@@ -475,7 +564,26 @@ void audio_beep(int kind)
     bp.step = (uint32_t)(((uint64_t)beeps[kind].hz << 32) / audio.rate);
     bp.fade = audio.rate / 200;
     bp.frame = bp.phase = 0;
+    if (ext_wr) {                               /* core B writes the ring: its mixer (r20) */
+        bp_ext = 1;
+        beep_send(0);
+        return;
+    }
     bp.on = 1;
+}
+
+/* The pattern to core B, from its frame 'from' */
+static void beep_send(uint32_t from)
+{
+    volatile struct hp_ctl *c = HP_CTL;
+    c->beep_on = bp.on_frames;
+    c->beep_period = bp.period;
+    c->beep_total = bp.total;
+    c->beep_step = bp.step;
+    c->beep_fade = bp.fade;
+    c->beep_from = from;
+    c->beep_frame = from;
+    c->beep_seq = c->beep_seq + 1;
 }
 
 /* The tone of the next frame (16-bit scale), 0 between the beeps */
@@ -512,6 +620,8 @@ static uint32_t beep_mix(uint32_t w)
 
 void audio_write(const void *src, uint32_t n)
 {
+    if (ext_wr)
+        return;                                 /* core B's ring while it runs */
     const uint32_t *s = src;
     volatile uint32_t *ring = (volatile uint32_t *)audio.ring;
     uint32_t size = audio.ring_size;
@@ -527,17 +637,16 @@ void audio_write(const void *src, uint32_t n)
 static void fill_silence(void)
 {
     audio_update();
-    if (!audio.on)
+    if (!audio.on || ext_wr)
         return;
     while (audio_fill() + 4 <= (int32_t)(audio.ring_size - GUARD)) {
-        sysram_ring[audio.wr % audio.ring_size / 4] = 0;
+        ((volatile uint32_t *)audio.ring)[audio.wr % audio.ring_size / 4] = 0;
         audio.wr += 4;
     }
 }
 
 /* A stream from outside (the USB sound card, uac.c): the producer is not ahead by a whole ring
  * of music but by a few milliseconds, so what the DMA would find past it is old sound. */
-static uint32_t zeroed_to;                      /* the ring is zeroed up to there (a byte count) */
 
 /* The write position 'ahead' bytes after the DMA, silence in between */
 void audio_stream_align(uint32_t ahead)
@@ -789,6 +898,8 @@ void audio_pause(int on)
     }
     audio.vol = vol;
     audio_paused = on;
+    if (ext_wr)
+        HP_CTL->pcm_bps = audio_bps();          /* core B: no laps counted from the time */
     log_printf("audio: %s", on ? "paused" : "resumed");
 }
 
@@ -798,7 +909,7 @@ void audio_pause(int on)
  * again (a skip is not an underrun). */
 void audio_flush(void)
 {
-    if (!audio.on)
+    if (!audio.on || ext_wr)
         return;
     bp.on = bp.mix = 0;                         /* a beep queued is dropped with the rest */
     audio_update();

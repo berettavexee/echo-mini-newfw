@@ -5,6 +5,7 @@
  * in reset by SOFTRST3 bit 2 while its image is copied, then released. The stock codec modules,
  * their parameter block and their mailbox protocol were dropped in 0.61 (ETUDE §9). */
 #include "hifi.h"
+#include "audio.h"
 #include "board.h"
 #include "log.h"
 #include "regs.h"
@@ -61,6 +62,15 @@ void hifi_prepare(void)
     hifi_own_forget();
     hifi_power();
     hifi_stop();
+    if (audio_is_direct()) {                    /* the DMA plays from HIGHRAM1 (ETUDE §103): */
+        REG(CRU_SOFTRST(2)) = 0x000c000c;       /* HIGHRAM0 and HIFIACC only, not the matrix */
+        udelay(10);                             /* nor HIGHRAM1 */
+        REG(CRU_SOFTRST(2)) = 0x000c0000;
+        REG(CRU_SOFTRST(3)) = 0x00800000;
+        REG(CRU_SOFTRST(1)) = 0x40000000;
+        udelay(10);
+        return;
+    }
     /* Fresh HiFi side for every codec, as the stock firmware stops core B (resets 0x20,
      * 0x21, 0x22, 0x32, 0x1e: PD_HIGH matrix, HIGHRAM1, HIGHRAM0, core B, mailbox), plus DMAC2
      * and HIFIACC: a module started again on what it left itself (mailbox interrupt enables,
@@ -314,4 +324,6 @@ void hifi_set_div(uint32_t div)
     REG(CRU_CLKSEL0) = 0x70000000u | (div - 1) << 12;
     hifi_div = div;
     hifi_hz = (cpu_hz > 24000000u ? 400000000u : 24000000u) / div;   /* PLL on, or the crystal */
+    if (powered && HP_CTL->magic == HP_MAGIC)
+        HP_CTL->b_hz = hifi_hz;                 /* core B's SysTick follows (ETUDE §103) */
 }

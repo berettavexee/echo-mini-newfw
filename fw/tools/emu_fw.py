@@ -422,11 +422,13 @@ def main():
     dac_out = open(opt("--dac", None), "wb", buffering=0) if opt("--dac", None) else None
     cap = {"start": None, "done": 0}
 
-    OUT_OFF, OUT_SIZE = 0x38000, 0x8000                          # core B output ring in HIGHRAM1
+    OUT_OFF, OUT_SIZE = 0x28000, 0x18000                         # core B output ring in HIGHRAM1
 
     def capture():
-        # our runtime: everything core B wrote to its output ring (out_wr: offset in the ring)
-        st, out_wr, frames = (struct.unpack_from("<I", sh.hr1, o)[0] for o in (0x0c, 0x30, 0x48))
+        # our runtime: everything core B wrote to its output ring (version 2: pcm_wr, a byte
+        # counter, ETUDE §103)
+        st, out_wr, frames = (struct.unpack_from("<I", sh.hr1, o)[0] for o in (0x0c, 172, 0x48))
+        out_wr %= OUT_SIZE
         if struct.unpack_from("<I", sh.hr1, 0)[0] != 0x5452424e or st not in (3, 4, 5):
             cap["start"] = None
             return
@@ -451,10 +453,15 @@ def main():
             return                                # --cycles: core B runs per slice
         if sh.b and not sh.b.sleeping:
             sh.b.step(5000)
+        if sh.b:
+            sh.b.systick(struct.unpack("<I", uc.mem_read(CLOCK, 4))[0], b_hz(uc))
         if pcm_out and sh.b:
             capture()
     u.hook_add(UC_HOOK_BLOCK, coreb_tick, begin=t, end=t + 4)
     panel, log, regs = Panel(), [], {}
+
+    def b_hz(uc):                                 # core B's clock as core A set it
+        return struct.unpack("<I", uc.mem_read(sym["hifi_hz"], 4))[0] if "hifi_hz" in sym else 0
 
     # cpu_wait (a return here, no SysTick): the time goes on to the next 1 ms tick, as the WFI
     # waits on the device, and core B runs for it (100 instructions a microsecond)
@@ -466,6 +473,8 @@ def main():
             uc.emu_stop()
         if sh.b and not sh.b.sleeping:
             sh.b.step((nxt - now) * 100)
+        if sh.b:
+            sh.b.systick(nxt, b_hz(uc))
         if pcm_out and sh.b:
             capture()
     if "cpu_wait" in sym:
@@ -675,6 +684,8 @@ def main():
     for base, size in ((0x40000000, 0x200000), (0x50000000, 0x40000), (0x60000000, 0xC0000)):
         rd, wr = emu_host.counted("A", base, *periph(base))
         u.mmio_map(base, size, rd, None, wr, None)
+    sar_rd = periph(0x60000000)[0]                # core B reads the DMA's SAR too (ETUDE §103)
+    sh.sar_read = lambda: sar_rd(u, 0x1b8, 4, None) if "dma" in state else 0
 
     def st_rd(uc, off, size, _):
         return regs.get(0xE000E000 + off, 0)
@@ -704,6 +715,8 @@ def main():
                 u.mem_write(CLOCK, struct.pack("<I", int(now) & 0xffffffff))
                 if sh.b and not sh.b.sleeping:
                     sh.b.step(int(k * 1e8 / max(hz, 1000000)))
+                if sh.b:
+                    sh.b.systick(int(now), b_hz(u))
                 if pcm_out and sh.b:
                     capture()
                 if (stop_us and now >= stop_us) or mmc.cut_done:

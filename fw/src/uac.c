@@ -882,6 +882,7 @@ void uac_mode(void)
     fb = (typeof(fb)){ 0 };
     st.frame = 4;
     audio_stop();                                       /* from scratch: not parked, not paused */
+    audio_ring_direct(0);                               /* the SYSRAM ring (ETUDE §103) */
     if (audio_start(rate, 1)) {
         sys_line(36, "audio output failed", WARN);
         mdelay(2000);

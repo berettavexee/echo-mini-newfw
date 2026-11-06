@@ -4,7 +4,7 @@
 MEMORY
 {
     CODE (rx)  : ORIGIN = 0x00000000, LENGTH = 0x20000
-    RAM  (rwx) : ORIGIN = 0x01023000, LENGTH = 0x2D000
+    RAM  (rwx) : ORIGIN = 0x01023000, LENGTH = 0x25000    /* up to HP_DATA_END */
 }
 
 ENTRY(hp_reset)

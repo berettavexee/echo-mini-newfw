@@ -7,7 +7,9 @@ Each LOG gives a table: per format (codec, rate/bits), the tracks seen, the long
 the audio path (between two own_service calls) with the longest named phase inside it, the
 longest gap of the main loops, the lowest fill of the DAC ring and of the input ring (in ms of
 sound), the times core B found the input empty and the DAC ring laps lost (a wait longer
-than the ring: an underrun the DMA position cannot show); then the longest idle loop gap (no track).
+than the ring: an underrun the DMA position cannot show; since 0.99r19 core B writes the DAC
+ring, so they count core A's waits, harmless), core B's own underruns (B ur, the DMA past what
+it wrote: since 0.99r19, the measure that counts); then the longest idle loop gap (no track).
 With several logs, a last table takes them all.
 """
 import os
@@ -18,7 +20,8 @@ import sys
 TRACK = re.compile(r"perf: (?P<name>.+) \[(?P<fmt>[^][]+)\]: gap max (?P<gap>\d+) ms \((?P<ph>.+?) (?P<phms>\d+) ms\), "
                    r"loop gap max (?P<loop>\d+) ms \((?P<lph>.+?) (?P<lphms>\d+) ms\); "
                    r"(?:DAC ring never full|DAC min (?P<dac>\d+) ms; in min \d+ B \((?P<inms>\d+) ms\); "
-                   r"out min \d+ B max \d+ B; in empty (?P<empty>\d+)(?:; laps lost (?P<laps>\d+))?)")
+                   r"out min \d+ B max \d+ B; in empty (?P<empty>\d+)(?:; laps lost (?P<laps>\d+))?"
+                   r"(?:; core B underruns (?P<bur>\d+) \((?P<blost>\d+) B\))?)")
 IDLE = re.compile(r"perf: idle: loop gap max (?P<loop>\d+) ms \((?P<ph>.+?) (?P<phms>\d+) ms\)")
 
 
@@ -37,7 +40,7 @@ def worst(lines):
         m = TRACK.search(line)
         if m:
             r = rows.setdefault(m["fmt"], dict(n=0, gap=(-1, ""), loop=(-1, ""), dac=None, inms=None,
-                                          empty=0, never=0, laps=0))
+                                          empty=0, never=0, laps=0, bur=None))
             r["n"] += 1
             gap, loop = int(m["gap"]), int(m["loop"])
             if gap > r["gap"][0]:
@@ -52,6 +55,8 @@ def worst(lines):
                     r[k] = v if r[k] is None else min(r[k], v)
                 r["empty"] += int(m["empty"])
                 r["laps"] += int(m["laps"] or 0)
+                if m["bur"] is not None:
+                    r["bur"] = (r["bur"] or 0) + int(m["bur"])
             continue
         m = IDLE.search(line)
         if m and (idle is None or int(m["loop"]) > idle[0]):
@@ -65,13 +70,14 @@ def show(title, rows, idle):
         print("   no perf line")
         return
     print(f"   {'format':16} {'tracks':>6} {'gap max ms':>10} {'(phase ms)':<18} {'loop max':>8} "
-          f"{'(phase ms)':<18} {'DAC min':>7} {'in min':>6} {'empty':>5} {'laps':>4}")
+          f"{'(phase ms)':<18} {'DAC min':>7} {'in min':>6} {'empty':>5} {'laps':>4} {'B ur':>4}")
     for fmt in sorted(rows):
         r = rows[fmt]
         na = lambda v: "-" if v is None else str(v)  # noqa: E731
         never = f"  ({r['never']} never full)" if r["never"] else ""
         print(f"   {fmt:16} {r['n']:>6} {r['gap'][0]:>10} {r['gap'][1]:<18} {r['loop'][0]:>8} "
-              f"{r['loop'][1]:<18} {na(r['dac']):>7} {na(r['inms']):>6} {r['empty']:>5} {r['laps']:>4}{never}")
+              f"{r['loop'][1]:<18} {na(r['dac']):>7} {na(r['inms']):>6} {r['empty']:>5} {r['laps']:>4} "
+              f"{na(r['bur']):>4}{never}")
     if idle:
         print(f"   idle: loop gap max {idle[0]} ms ({idle[1]})")
 
