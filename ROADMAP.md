@@ -3,9 +3,7 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-06, version 0.99 and `main` since (the sound card's remote and Power key,
-the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r36,
-steps 1 to 7 done, checked on the device up to r36).
+Last update: 2026-11-06, version 0.100 (the rework merged into `main`).
 
 ## Done, validated on the device
 
@@ -27,11 +25,11 @@ steps 1 to 7 done, checked on the device up to r36).
 | USB sound card at high speed: UAC2, 16, 24 and 32 bits, 44.1 to 96 kHz, bit-perfect (tested with Linux); UAC1 kept at full speed | 0.98 | §87 |
 | USB sound card: 176.4 and 192 kHz in every format (24/32-bit packets every 250 us); phones that ignore the feedback handled with evenly spread corrections; tested with a Pixel 6a and an iPhone | 0.99 | §90, §92, §93 |
 | Pop-free power-down of the DACs (CS43131 datasheet sequence) at the long pause and the stop | 0.99 | §91 |
-| Tags after a big cover: M4A over 512 KiB, Ogg comment headers up to 64 MiB (a 17.9 MB cover: tags in 1.4 s, read during the track before, no gap) | main (after 0.99) | §96 |
-| Plain error messages beyond playback: installer (incomplete, too large, damaged, battery), microSD card (not responding, needs FAT32 or exFAT), USB disk screen | main (after 0.99) | §96 |
-| A queue made by PLAY held (a tree, the whole card) resumes after a power off, same track, same shuffled order (18,257 tracks in 1,396 folders walked again in 2.4 s) | main (after 0.99) | §96 |
-| USB sound card as a headset remote (HID): PLAY play/pause, VOL+ or VOL- twice next or previous, MENU the remote on and off (kept); tested with VLC and YouTube on Linux | main (after 0.99) | §95 |
-| USB sound card: the Power key (screen off and on; held 2 s, the card left, then the power off) | main (after 0.99) | §95 |
+| Tags after a big cover: M4A over 512 KiB, Ogg comment headers up to 64 MiB (a 17.9 MB cover: tags in 1.4 s, read during the track before, no gap) | 0.100 | §96 |
+| Plain error messages beyond playback: installer (incomplete, too large, damaged, battery), microSD card (not responding, needs FAT32 or exFAT), USB disk screen | 0.100 | §96 |
+| A queue made by PLAY held (a tree, the whole card) resumes after a power off, same track, same shuffled order (18,257 tracks in 1,396 folders walked again in 2.4 s) | 0.100 | §96 |
+| USB sound card as a headset remote (HID): PLAY play/pause, VOL+ or VOL- twice next or previous, MENU the remote on and off (kept); tested with VLC and YouTube on Linux | 0.100 | §95 |
+| USB sound card: the Power key (screen off and on; held 2 s, the card left, then the power off) | 0.100 | §95 |
 | Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
 | Real-time clock and its setting screen | 0.48 | §28 |
 | USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
@@ -53,11 +51,11 @@ steps 1 to 7 done, checked on the device up to r36).
 | The chip's accelerators: FLAC LPC (HIFIACC), MP3 synthesis (SYNTH), Vorbis IMDCT (HIFIACC FFT), AAC IMDCT FFTs (HIFIACC), Musepack synthesis (SYNTH): 28 to 65 % less core B load | 0.85-0.93 | §66-§77 |
 | Automatic checks (`make check`, pre-commit hook, GitHub Actions); images reproducible byte for byte; emulator tests in the CI on a shareable test set (CC0 recording) | 0.91, 0.92, 0.99 | §94 |
 
-## The rework (branch `rework`)
+## The rework (0.99r1-r37, merged in 0.100)
 
 A rework of how the work is shared between the two cores (core B: the whole PCM path to the
 DMA; core A: one loop with a time budget, short interrupts), in seven steps, each one checked
-in the emulator, then on the device; `main` stays the working firmware meanwhile.
+in the emulator, then on the device, on the branch `rework`; merged into `main` with 0.100.
 
 | Step | Versions | Checked | ETUDE |
 |---|---|---|---|
@@ -165,6 +163,15 @@ One line per version; the measurements are in `ETUDE.md`.
   a Pixel 6a and an iPhone ignore the feedback in every format, now detected and corrected one
   frame at a time (§90, §92); a false pause fixed; 176.4 and 192 kHz in every format, 24/32-bit
   packets every 250 us (§93); pop-free DAC power-down (§91); docs/USB_AUDIO.md, docs/CS43131.md.
+- 0.100: the rework (§97-§109): one main loop and a stack of screens (the screen wakes without
+  a 120 ms block), a storage task (the next track's tags read ahead, the tree walked while the
+  music plays), core B writes the PCM ring the DMA reads (96 KiB of SYSRAM freed), the input
+  ring in segments (a chained track and a seek open while the loop goes on, gapless checked
+  sample for sample), the card mounted at power-on, finer clock rules for core B and its load
+  in 24-bit WAV halved, a fault record, core B restarted after a fault or a hang, a watchdog;
+  from `main` since 0.99: the sound card's remote and Power key, plain error messages, the
+  resume of a tree queue, tags after big covers, pull requests #2 #7 #8 #9 #10 (§95, §96); the
+  installer with long names (§110).
 
 ## To do
 

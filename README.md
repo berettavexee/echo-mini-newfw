@@ -20,6 +20,9 @@ with gapless playback and ReplayGain.
 - **USB sound card** for a computer or a phone: 16, 24 or 32 bits, 44.1 to 192 kHz,
   asynchronous (bit-perfect with Linux; Android and iPhone play, see `docs/USB_AUDIO.md`), with
   headset-style remote keys for the computer's player (play/pause, next, previous).
+- **Robust**: a fault is recorded on the internal memory and shown at the next start; the HiFi
+  core is restarted by itself after a fault or a hang (the track goes on); a watchdog restarts
+  a frozen player.
 - **Not there (yet)**: equaliser, music library by artist or album (folders only), lyrics.
 
 ## Before you install
@@ -33,7 +36,7 @@ with gapless playback and ReplayGain.
 
 ## Getting started
 
-1. Download `NEWFW096.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
+1. Download `NEWFW100.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
 2. Follow [Installing](MANUAL.md#installing) in the manual.
 3. The [manual](MANUAL.md) shows the keys of each screen.
 
