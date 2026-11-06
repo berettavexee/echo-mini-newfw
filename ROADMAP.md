@@ -4,8 +4,8 @@ State of the ECHO MINI new firmware, kept up to date with each version. The deta
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
 Last update: 2026-11-06, version 0.99 and `main` since (the sound card's remote and Power key,
-the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r31,
-steps 1 to 6 done, checked on the device up to r31).
+the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r36,
+steps 1 to 7 done, checked on the device up to r36).
 
 ## Done, validated on the device
 
@@ -67,21 +67,25 @@ in the emulator, then on the device; `main` stays the working firmware meanwhile
 | 4. Core B writes the PCM ring the DMA reads (96 KiB in HIGHRAM1; core A no longer copies PCM), the input ring 96 KiB in SYSRAM (96 KiB left free for the screens), the battery beeps mixed by core B; r23: the resume of a tree queue plays its track at once, the tree walked meanwhile | r17-r23 | device (r21) | §102-§104 |
 | 5. The input ring in segments (a jump core B cannot serve is a request core A answers: back, forward, Musepack's seek table), a chained track and a seek opened while the loop goes on, gapless checked sample for sample; r26: the card mounted at power-on | r24-r26 | emulator; the card at power-on and album chains on the device (r30, r31) | §105-§106 |
 | 6. Core B's clock: our feedback loop kept, with finer rules (a window of a quarter of the PCM ring; the ring under half a level up, under a quarter the top; over 85 % load up at once, under 65 % for 1 s straight down to the level for 75 %); core B lighter (its SysTick only while playing); r30-r31: core B's load in 24-bit WAV halved again (192 kHz: 63-66 MHz since r18, now 33 MHz), by a shorter PCM ring write and SYSRAM read by aligned words | r27-r31 | device (r30, r31) | §107-§108 |
-| 7. Robustness: a fault record (in sectors preallocated on the internal memory, not in PMU-SRAM only), core B reloaded after a fault, a stall watch | — | to do | §98 |
+| 7. Robustness: a fault record in a sector of NEWFWLOG.TXT written by the fault handler (it survives a power off; a "Fault" screen once at the next boot); core B reloaded after a fault or 500 ms stuck, the same track again 1 s before (passed over the second time); the watchdog at 2.7 s, its interrupt writing the record; an `ECHO_FAULT` test image | r32-r36 | device (r34f-r36f) | §109 |
 
 Margins measured (§103, §106): a 500 ms stall of core A causes no underrun in MP3, Vorbis or
 AAC (3 to 5 s of protection); the tightest case, WAV 24/192, stands about 150 ms. Long tracks:
 1 to 4 clock changes of core B instead of 3 to 19, no underrun.
 
-To test on the device: the resume of a tree queue over two power cycles (r23), seeks (Musepack
-included), the sound card streaming (only entered and left with r30).
+Checked on the device with r31: the resume of a tree queue over three power cycles (the whole
+card, 18,257 tracks: the track at once, the tree walked in 3.4 s meanwhile), seeks, the sound
+card (16/44.1, 24/96, 24/192, no packet lost). Musepack SV7 (no seek table): a seek reads the
+file from its start again on core B (360 to 730 ms of silence, the loop free); kept as it is,
+SV7 being rare (decided 2026-11-06).
 
-Left from the rework (step 7 or later):
+Left from the rework:
+- a long session with the normal image (no fault record, no watchdog reset expected);
 - the keys read in the SysTick interrupt;
 - the screens that stop the music (USB, install, sound card, system) still in loops of their
   own;
-- still blocking the loop: a Musepack seek without a seek table, a folder opened by the
-  browser, a card put in during playback (mounted at its first use, up to 253 ms);
+- still blocking the loop: a folder opened by the browser, a card put in during playback
+  (mounted at its first use, up to 253 ms);
 - at 176.4 and 192 kHz the clock rules swing between 50 and 80 MHz (10 changes a track, the
   ring kept over half); a DMA copy from SYSRAM would save about 5 MHz more there (§108);
 - the next track prepared in the input ring, without restarting core B: left out (nothing

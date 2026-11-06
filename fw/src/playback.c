@@ -334,6 +334,30 @@ void play_index(int i)
     play_step(i, 1);
 }
 
+/* Core B stopped on a fault, or stuck, in the middle of a track (rework step 7, 0.99r33): the
+ * same track again 1 s before where it was (core B loaded again: player.c); a second time on
+ * the same track, it is passed over as one that does not play */
+static uint32_t fr_cluster, fr_n;
+static int fr_vol;
+
+static int fault_retry(void)
+{
+    if (fr_n && fr_cluster == tg_key.cluster && fr_vol == tg_key.vol) {
+        fr_n = 0;
+        log_printf("player: core B stopped twice on %s: passed over", q_name(q_dec));
+        return 0;
+    }
+    fr_cluster = tg_key.cluster;
+    fr_vol = tg_key.vol;
+    fr_n = 1;
+    uint32_t at = player.time_ms > 1000 ? player.time_ms - 1000 : 0;
+    log_printf("player: core B started again on %s at %u ms", q_name(q_dec), at);
+    player_seek_hint(at);
+    seek_async = 1;
+    play_index(q_dec);
+    return 1;
+}
+
 /* The player between two key polls; called during long reads too */
 void ui_background(void)
 {
@@ -361,6 +385,8 @@ void ui_background(void)
     if (r == 1 && browser_walking())
         return;                                 /* the queue is being walked (a resume): the */
                                                 /* next track once it is known (§104) */
+    if (r == PLAYER_EFAULT && fault_retry())
+        return;                                 /* core B again, on the same track */
     player_close(0);                            /* end of the track (or an error) */
     if (r == 1 || player.time_ms > 10000)
         q_errors = 0;                           /* it played: only failures in a row stop */

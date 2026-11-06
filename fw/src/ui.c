@@ -3,6 +3,7 @@
  * natural order ignoring case; VOL+/VOL- move (held: repeat), PLAY opens or plays, BACK goes up,
  * MENU switches between the browser and now playing, MENU held opens the main menu. Playback
  * runs in the background: the main loop services the player between two key polls. */
+#include "crash.h"
 #include "ui_priv.h"
 #include "storage.h"
 
@@ -369,6 +370,18 @@ void ui_main(void)
             lcd_text_clip(8, 92, what, LCD_W - 8, FG, BG);
             lcd_text_clip(8, 118, hint, LCD_W - 8, DIM, BG);
             scr = SCR_BROWSER;
+        }
+        if (crash_due) {                        /* the last session ended on a fault (0.99r32): */
+            crash_due = 0;                      /* once, 3 s */
+            banner_ms = millis() ? millis() : 1;
+            sys_screen_set(1);
+            t_key = ticks();
+            lcd_fill(0, 0, LCD_W, LCD_H, BG);
+            lcd_text_clip_x(8, 20, "Fault", LCD_W, WARN, BG, 2);
+            lcd_text_clip(8, 62, "The last session ended on a fault", LCD_W - 8, FG, BG);
+            lcd_text_clip(8, 88, crash_text[0], LCD_W - 8, DIM, BG);
+            lcd_text_clip(8, 108, crash_text[1], LCD_W - 8, DIM, BG);
+            lcd_text_clip(8, 134, "details: NEWFWLOG.TXT", LCD_W - 8, DIM, BG);
         }
         if (banner_ms && millis() - banner_ms > 3000) {
             banner_ms = 0;

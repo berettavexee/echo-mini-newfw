@@ -21,6 +21,7 @@ extern struct emmc_geom emmc;
 
 int emmc_init(void);
 int emmc_read(uint32_t sector, uint32_t count, void *buf);
+extern volatile int emmc_busy;  /* inside a transfer: a fault there writes no record */
 int emmc_write_fw(uint32_t sector, uint32_t count, const void *buf);
 int emmc_sectors(uint32_t *n);  /* card size (EXT_CSD SEC_COUNT) */
 /* User volume writes: the area must start after the firmware area; writes outside it fail */

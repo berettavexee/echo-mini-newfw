@@ -26,6 +26,7 @@ struct player_heard {
     uint32_t rate, bps, length_ms, time_ms, gen;
 };
 extern struct player_heard player_heard;
+const char *player_file_name(void);    /* the track open (8.3 name), or "" */
 
 /* player_open() flag: keep the DACs running into the next track (same rate and frame size); the
  * track ends without a drain, player_chain_end() drains and lets the next start stop them */

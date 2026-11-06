@@ -14,6 +14,8 @@ void hifi_prepare(void);        /* PD_HIGH on, every HiFi block reset, core B he
 int hifi_load_own(uint32_t codec);
 int hifi_start_own(void);       /* waits for the control block to say ready */
 uint32_t hifi_own_loaded(void); /* our codec whose image is in the HIGHRAM, 0: none */
+void hifi_own_drop(void);       /* the codec loaded forgotten: the next open loads it again
+                                 * (after a core B fault, its code may be damaged) */
 int hifi_restart_own(void);     /* the same codec again, without reloading it (then start_own) */
 void hifi_ring(void);           /* doorbell: core B has something to look at */
 

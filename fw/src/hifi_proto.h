@@ -120,6 +120,8 @@ struct hp_ctl {
     uint32_t pcm_ur, pcm_lost;          /* B: underruns (the DMA overtook core B), bytes */
     uint32_t pcm_min;                   /* B: the lowest fill seen, bytes (after pcm_min_from) */
     uint32_t b_hz;                      /* A: core B's clock (its SysTick: a wake every 2 ms) */
+    uint32_t test;                      /* A: test builds (ECHO_FAULT, 0.99r33): 1 core B faults,
+                                           2 core B is stuck in a loop; B clears it */
     /* A battery beep mixed by core B into what it writes next (0.99r20; core A's own mixer for
      * the SYSRAM ring): the pattern in frames at the DACs' rate, a new one each beep_seq */
     uint32_t beep_seq;                  /* A: moved on after the fields below are set */

@@ -8,6 +8,8 @@
 #include "font.h"
 #include "i2c.h"
 #include "lcd.h"
+#include "hifi_proto.h"
+#include "crash.h"
 #include "log.h"
 #include "regs.h"
 #include "rtc.h"
@@ -100,9 +102,11 @@ void sys_volume_init(void)
                                        "read error" };
     if (r)
         log_printf("log: not written to the volume: %s", why[-r < 6 ? -r : 0]);
-    else
+    else {
         log_printf("log: %s, %u sectors, next %u, wraps %u", LOG_FILE, logs.file_sectors,
                    logs.next, logs.wraps);
+        crash_boot();                           /* a fault of the last session (0.99r32) */
+    }
 }
 
 static void storage_init(void)
@@ -307,6 +311,27 @@ int sys_power_poll(uint32_t now, int mine)
             mdelay(500);
             perf_end(pp);
 #endif
+#ifdef ECHO_FAULT
+            /* test build (rework step 7): Power pressed alone, core B faults, then (the next
+             * press) core B is stuck; with VOL- held, core A faults (a write to 0xfffffff0);
+             * with VOL+ held, core A is stuck (the watchdog) */
+            static int fault_n;
+            int k = key_read();
+            if (k == KEY_VOLDOWN) {
+                log_printf("fault test: core A faults, a write to 0xfffffff0");
+                *(volatile uint32_t *)0xfffffff0u = 0;
+            } else if (k == KEY_VOLUP) {
+                log_printf("fault test: core A stuck (the watchdog)");
+                for (;;)
+                    ;
+            } else if (fault_n++ % 2 == 0) {
+                log_printf("fault test: core B faults");
+                HP_CTL->test = 1;
+            } else {
+                log_printf("fault test: core B stuck");
+                HP_CTL->test = 2;
+            }
+#endif
         }
         sys_t_power = 0;
     }
@@ -431,11 +456,13 @@ int main(void)
     fast = clock_init();
     timer_init();
     timer24_init();
+    uint32_t wdt_was = wdt_init();
     log_init();
     log_printf("=== boot %u: " FW_NAME " " FW_VERSION " (" FW_DATE "), tag %x, r0 %x r2 %x",
                logs.boots, boot_tag & 0xffff, boot_regs[0], boot_regs[2]);
     if (logs.recovered)
         log_printf("log: %u bytes of the previous boot recovered from PMU-SRAM", logs.recovered);
+    log_printf("watchdog: armed, 2.7 s (CR was %x)", wdt_was);
     log_printf("clock: %u MHz%s, mode %x sel0 %x sel1 %x pll %x, tries %u, adc %u/%u",
                cpu_hz / 1000000, fast ? "" : " (fallback: 24 MHz)", cru_mode, cru_sel0, cru_sel1,
                pll_con1_after & 0xffff, mode_tries, adc_cycles_24m, adc_cycles);
@@ -461,6 +488,23 @@ int main(void)
 }
 
 /* Called by the fault handlers: exception number and stacked frame (r0-r3, r12, lr, pc, psr) */
+/* The watchdog's interrupt (0.99r34): the loop went 2.7 s without a kick. The fault record (the
+ * PC it was stuck at), then a reboot; the resume state brings the music back */
+void wdt_fired(const uint32_t *frame)
+{
+    __asm volatile ("cpsid i");
+    (void)REG(WDT_EOI);
+    log_printf("WATCHDOG: the loop stuck for 2.7 s at pc %x lr %x", frame[6], frame[5]);
+    struct crash_info ci = {
+        .core = CRASH_A, .what = "watchdog", .exc = 16 + IRQ_WDT, .pc = frame[6],
+        .lr = frame[5], .psr = frame[7], .sp = (uint32_t)(frame + 8),
+        .stack = (uint32_t)frame >= 0x03000000u && (uint32_t)(frame + 24) <= 0x03050000u
+                 ? frame + 8 : 0,
+    };
+    crash_record(&ci);
+    reboot();
+}
+
 void fault_screen(const uint32_t *frame, uint32_t exc)
 {
     char b[64], *p;
@@ -471,6 +515,18 @@ void fault_screen(const uint32_t *frame, uint32_t exc)
     log_printf("FAULT exc %u pc %x lr %x psr %x cfsr %x hfsr %x bfar %x", exc,
                frame ? frame[6] : 0, frame ? frame[5] : 0, frame ? frame[7] : 0,
                REG(0xe000ed28), REG(0xe000ed2c), REG(0xe000ed38));
+    /* the record on the internal memory, before the screen (0.99r32): it survives a power off */
+    static const char *const exc_name[] = { "fault", "fault", "NMI", "HardFault", "MemManage",
+                                            "BusFault", "UsageFault" };
+    struct crash_info ci = {
+        .core = CRASH_A, .what = exc < 7 ? exc_name[exc] : "exception", .exc = exc,
+        .pc = frame ? frame[6] : 0, .lr = frame ? frame[5] : 0, .psr = frame ? frame[7] : 0,
+        .sp = frame ? (uint32_t)(frame + 8) : 0, .cfsr = REG(0xe000ed28),
+        .hfsr = REG(0xe000ed2c), .bfar = REG(0xe000ed38), .mmfar = REG(0xe000ed34),
+        .stack = frame && (uint32_t)frame >= 0x03000000u && (uint32_t)(frame + 24) <= 0x03050000u
+                 ? frame + 8 : 0,
+    };
+    crash_record(&ci);
     if (!lcd_ready) {
         power_off();
         reboot();

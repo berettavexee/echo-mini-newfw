@@ -82,6 +82,41 @@ TESTS = {
                                 (6000, "PLAY")),
                       expect=[r"uac: start", r"screen off", r"uac: exit \(Power 2 s\)",
                               r"power off \(Power 2 s\)"]),
+    # the fault tests (ECHO_FAULT builds only: Power alone, core B faults, then is stuck; with
+    # VOL- held, core A faults; with VOL+ held, core A is stuck). fault-a: the record written
+    # on the internal memory by core A's fault handler, then logged and shown once by the next
+    # boot (0.99r32)
+    "fault-a": dict(files={"A.WAV": "wav10"}, ms=6000, fault=True,
+                    keys=keys((2000, "PLAY", 100), (3900, "VOL-", 600)),
+                    emu_args=["--gpio-at", "4000:2:5:1,4100:2:5:0"],
+                    expect=[r"fault test: core A faults",
+                            r"crash: the last session ended on a fault \(record \d+\)",
+                            r"crash: core A: HardFault, exception 3",
+                            r"crash: cfsr 00008200 hfsr 40000000 bfar fffffff0$",
+                            r"crash: track A\.WAV at \d+ ms"],
+                    reboot=dict(ms=5000)),
+    # fault-b: core B faults: the same track again 1 s before (0.99r33); then stuck on the same
+    # track (0.99r34: seen after 500 ms without a frame): passed over, the next one plays
+    "fault-b": dict(files={"A.WAV": "wav10", "B.WAV": "wav10"}, keys=keys((2000, "PLAY", 100)),
+                    ms=13000, fault=True,
+                    emu_args=["--gpio-at", "4000:2:5:1,4100:2:5:0,7000:2:5:1,7100:2:5:0"],
+                    expect=[r"fault test: core B faults", r"player: core B error 4",
+                            r"player: core B started again on A\.WAV at \d+ ms",
+                            r"ui: queue 1/2: A\.WAV \(0\)",
+                            r"fault test: core B stuck",
+                            r"player: core B stuck: no frame for \d+ ms",
+                            r"player: core B stopped twice on A\.WAV: passed over",
+                            r"ui: queue 2/2: B\.WAV \(0\)"]),
+    # stall-a: core A stuck (0.99r34): the watchdog's interrupt after 2.7 s, the record, a
+    # reboot; the next boot shows it (the watchdog modelled with --cycles only)
+    "stall-a": dict(files={"A.WAV": "wav10"}, ms=9000, fault=True,
+                    keys=keys((2000, "PLAY", 100), (3900, "VOL+", 600)),
+                    emu_args=["--cycles", "--gpio-at", "4000:2:5:1,4100:2:5:0"],
+                    expect=[r"watchdog: armed, 2\.7 s", r"fault test: core A stuck",
+                            r"WATCHDOG: the loop stuck for 2\.7 s at pc",
+                            r"crash: core A: watchdog, exception 24",
+                            r"crash: track A\.WAV at \d+ ms"],
+                    reboot=dict(ms=5000)),
     # a track saved paused at position 0 (the state written by the test: the keys cannot pause
     # before anything is heard), then a power on: it comes back paused (PR #9: it was lost, its
     # position 0 read as "nothing to resume")
@@ -349,7 +384,7 @@ def run(name, t, img, elf, tmp):
             pos = m.end()
         else:
             fails.append(f"missing: {pat}")
-    for pat in ALWAYS_FORBID + t.get("forbid", []):
+    for pat in ([] if t.get("fault") else ALWAYS_FORBID) + t.get("forbid", []):
         m = re.search(pat, whole, re.M)
         if m:
             fails.append(f"forbidden: {pat}: {whole[max(0, m.start() - 60):m.end() + 60]!r}")
@@ -359,7 +394,8 @@ def run(name, t, img, elf, tmp):
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
-    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or list(TESTS)
+    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or [n for n in TESTS
+                                                                if not TESTS[n].get("fault")]
     failed = 0
     for name in names:
         with tempfile.TemporaryDirectory(prefix=f"emutest_{name}_") as tmp:
@@ -367,6 +403,8 @@ def main():
         print(f"{name}: {'FAIL' if fails else 'PASS'}")
         for f in fails:
             print("  " + f[:300])
+        if os.environ.get("EMUTEST_DUMP"):
+            open(os.environ["EMUTEST_DUMP"], "w").write(whole)
         if fails and os.environ.get("EMUTEST_VERBOSE"):
             print(whole[-4000:])
         failed += bool(fails)

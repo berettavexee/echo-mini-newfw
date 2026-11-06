@@ -176,11 +176,33 @@ class CoreB(emu_host.Hifi):
             self.wlog.append((uc.reg_read(UC_ARM_REG_PC), addr, size, value))
         self.u.hook_add(UC_HOOK_MEM_WRITE, cb, begin=lo, end=hi - 1)
 
+    def fault_entry(self, ex):
+        """A bus fault given to core B's runtime, as the hardware would: the exception frame on
+        its stack, CFSR set, then its HardFault vector (it reports and waits)"""
+        import struct
+        from unicorn import arm_const as ac
+        u = self.u
+        self.faults = getattr(self, "faults", 0) + 1
+        regs = [u.reg_read(getattr(ac, "UC_ARM_REG_" + n)) for n in
+                ("R0", "R1", "R2", "R3", "R12", "LR", "PC")]
+        sp = (u.reg_read(ac.UC_ARM_REG_SP) - 32) & ~7
+        u.mem_write(sp, struct.pack("<8I", *regs, 0x01000000))
+        u.mem_write(0xE000ED28, struct.pack("<I", 0x8200))
+        u.reg_write(ac.UC_ARM_REG_SP, sp)
+        u.reg_write(ac.UC_ARM_REG_LR, 0xFFFFFFF9)
+        vtor = struct.unpack("<I", u.mem_read(0xE000ED08, 4))[0]
+        self.pc = struct.unpack("<I", u.mem_read(vtor + 12, 4))[0] | 1
+        self.sleeping = False
+        print(f"core B: fault given to the runtime: {ex} at pc {regs[6]:#x}")
+
     def step(self, budget=2_000_000):
         self.woken = False
         try:
             self.run(budget=budget)
         except Exception as ex:                                   # noqa: BLE001
+            if "UNMAPPED" in str(ex) and getattr(self, "faults", 0) < 4:
+                self.fault_entry(ex)                              # the firmware's fault (0.99r33)
+                return
             for pc, a, n, v in getattr(self, "wlog", []):
                 print(f"  write pc {pc:#x} addr {a:#x} size {n} value {v:#x}")
             from unicorn import arm_const as ac

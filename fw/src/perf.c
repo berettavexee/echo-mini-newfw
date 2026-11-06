@@ -81,3 +81,8 @@ void perf_restart(struct perf_gap *g)
     for (unsigned i = 0; i < PERF_SLOTS; i++)
         g->acc_ph[i] = k.acc_ph[i], g->acc_us[i] = k.acc_us[i];
 }
+
+const char *perf_phase(void)
+{
+    return ph;
+}

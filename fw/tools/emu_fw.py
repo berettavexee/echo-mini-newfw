@@ -47,9 +47,11 @@ durations.
 import os
 import struct
 import sys
-from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_BLOCK
+from unicorn import (Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_BLOCK,
+                     UC_HOOK_MEM_UNMAPPED)
 from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
-                               UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR)
+                               UC_ARM_REG_R12, UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR,
+                               UC_ARM_REG_XPSR, UC_ARM_REG_IPSR)
 
 
 # --mmc-lat by default with --cycles: a 2 MiB install takes 1,541 ms, the device 1,387 to 1,578
@@ -637,6 +639,13 @@ def main():
         def wr(uc, off, size, val, _):
             a = base + off
             regs[a] = val
+            if a == 0x40120000 and regs.get(0x40120000 + 0x100, 0) & 1:
+                regs[a] = val | 1                                # once on, it stays on (device)
+            if a == 0x40120000 and val & 1:
+                regs[0x40120000 + 0x100] = 1
+            if a == 0x4012000c and val == 0x76:                  # the watchdog kicked (0.99r34)
+                state["wdt_kick"] = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
+                state.pop("wdt_irq", None)
             if 0x40110000 <= a < 0x40110100:                     # mailbox
                 ch = sh.write(a - 0x40110000, val, True)
                 if ch is not None and sh.b:
@@ -719,48 +728,123 @@ def main():
     st_rd, st_wr = emu_host.counted("A", 0xE0000000, st_rd, st_wr)
     u.mmio_map(0xE0000000, 0x100000, st_rd, None, st_wr, None)
 
+    # A bus fault (0.99r32): an access to unmapped memory is not an emulator error but the
+    # firmware's fault, as on the device: the exception frame pushed on the stack, CFSR, HFSR
+    # and BFAR set (BusFault not enabled: escalated to HardFault, exception 3), then the
+    # HardFault vector of the firmware's table
+    bad = {}
+
+    def unmapped(uc, access, addr, size, value, _):
+        bad["addr"] = addr
+        return False
+    u.hook_add(UC_HOOK_MEM_UNMAPPED, unmapped)
+
+    def fault_entry(ex):
+        if "UNMAPPED" not in str(ex) or "addr" not in bad or "fault_screen" not in sym:
+            return False
+        regs_ = [u.reg_read(r) for r in (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
+                                         UC_ARM_REG_R3, UC_ARM_REG_R12, UC_ARM_REG_LR,
+                                         UC_ARM_REG_PC)]
+        xpsr = u.reg_read(UC_ARM_REG_XPSR) | 0x01000000
+        sp_ = u.reg_read(UC_ARM_REG_SP)
+        if sp_ & 4:
+            sp_ -= 4
+            xpsr |= 1 << 9
+        sp_ -= 32
+        u.mem_write(sp_, struct.pack("<8I", *regs_, xpsr))
+        fetch = "FETCH" in str(ex)
+        scb = lambda a: 0xE000E000 + (a - 0xE0000000)            # st_rd's keys  # noqa: E731
+        regs[scb(0xE000ED28)] = 0x0001 if fetch else 0x8200      # IACCVIOL / BFARVALID PRECISERR
+        regs[scb(0xE000ED2C)] = 0x40000000                       # FORCED
+        regs[scb(0xE000ED38)] = bad["addr"]
+        u.reg_write(UC_ARM_REG_SP, sp_)
+        u.reg_write(UC_ARM_REG_LR, 0xFFFFFFF9)
+        u.reg_write(UC_ARM_REG_IPSR, 3)
+        handler = struct.unpack("<I", u.mem_read(vt + 12, 4))[0]
+        u.reg_write(UC_ARM_REG_PC, handler & ~1)
+        log.append(f"FAULT given to the firmware: {ex} at {bad['addr']:#x}, pc {regs_[6]:#x}")
+        return True
+
+    # The watchdog (0.99r34, --cycles only): pclk = the core clock / 4; its count 2^(16 + TORR)
+    # cycles; response mode 1 (CR bit 1): the interrupt (IRQ 8, if enabled in the NVIC) at the
+    # first timeout, a reset at the second one (the run stops)
+    def wdt_check(t, hz):
+        if "wdt_kick" not in state:
+            state["wdt_kick"] = t
+        period = (1 << (16 + (regs.get(0x40120004, 0) & 15))) * 4e6 / max(hz, 1000000)
+        late = t - state["wdt_kick"]
+        if late > 2 * period or (late > period and not regs.get(0x40120000, 0) & 2):
+            log.append(f"WATCHDOG RESET after {late / 1000:.0f} ms without a kick")
+            state["wdt_reset"] = True
+            return False
+        iser = regs.get(0xE000E000 + (0xE000E100 - 0xE0000000), 0)
+        if late <= period or state.get("wdt_irq") or not iser & (1 << 8):
+            return False
+        state["wdt_irq"] = True
+        frame = [u.reg_read(r) for r in (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
+                                         UC_ARM_REG_R3, UC_ARM_REG_R12, UC_ARM_REG_LR,
+                                         UC_ARM_REG_PC)]
+        sp_ = (u.reg_read(UC_ARM_REG_SP) - 32) & ~7
+        u.mem_write(sp_, struct.pack("<8I", *frame, 0x01000000))
+        u.reg_write(UC_ARM_REG_SP, sp_)
+        u.reg_write(UC_ARM_REG_LR, 0xFFFFFFF9)
+        u.reg_write(UC_ARM_REG_IPSR, 24)
+        u.reg_write(UC_ARM_REG_PC, struct.unpack("<I", u.mem_read(vt + 4 * 24, 4))[0] & ~1)
+        log.append(f"WATCHDOG interrupt after {late / 1000:.0f} ms without a kick, pc {frame[6]:#x}")
+        return True
+
     u.reg_write(UC_ARM_REG_SP, sp)
     u.reg_write(UC_ARM_REG_R0, vt)
     u.reg_write(UC_ARM_REG_R1, sp)
     u.reg_write(UC_ARM_REG_R2, pc)
-    try:
-        if not cycles:
-            u.emu_start(pc, 0xffffffff, count=steps)
-        else:                                     # slices: the clock from the instructions
-            k, done, now = int(opt("--slice", "20000")), 0, 0.0
-            hz_at = sym.get("cpu_hz")
-            cur = pc
-            while done < steps:
-                u.emu_start(cur | 1, 0xffffffff, count=k)
-                done += k
-                hz = struct.unpack("<I", u.mem_read(hz_at, 4))[0] if hz_at else 24000000
-                clk = struct.unpack("<I", u.mem_read(CLOCK, 4))[0]
-                start = max(now, float(clk))
-                now = start + k * 1e6 / max(hz, 1000000)
-                u.mem_write(CLOCK, struct.pack("<I", int(now) & 0xffffffff))
-                if sh.b and (not sh.b.sleeping or getattr(sh.b, "woken", False)):
-                    span = now - start                  # at core B's clock (0.99r27), in 8
-                    n = int(k * b_ips(u) / max(hz, 1000000))    # pieces: the TIMER1 core B
-                    for p in range(8):                  # reads moves with the pieces it ran
-                        if not sh.b or (sh.b.sleeping and not sh.b.woken):
-                            break                       # (its load, from its sleeps, measured)
-                        sh.b.t_back = span * (8 - p) / 8
-                        sh.b.step(max(1, n // 8))
+    k, done, now = int(opt("--slice", "20000")), 0, 0.0
+    hz_at = sym.get("cpu_hz")
+    cur, faults = pc, 0
+    while True:
+        try:
+            if not cycles:
+                u.emu_start(cur, 0xffffffff, count=steps)
+            else:                                     # slices: the clock from the instructions
+                while done < steps:
+                    u.emu_start(cur | 1, 0xffffffff, count=k)
+                    done += k
+                    hz = struct.unpack("<I", u.mem_read(hz_at, 4))[0] if hz_at else 24000000
+                    clk = struct.unpack("<I", u.mem_read(CLOCK, 4))[0]
+                    start = max(now, float(clk))
+                    now = start + k * 1e6 / max(hz, 1000000)
+                    u.mem_write(CLOCK, struct.pack("<I", int(now) & 0xffffffff))
+                    if sh.b and (not sh.b.sleeping or getattr(sh.b, "woken", False)):
+                        span = now - start                  # at core B's clock (0.99r27), in 8
+                        n = int(k * b_ips(u) / max(hz, 1000000))    # pieces: the TIMER1 core B
+                        for p in range(8):                  # reads moves with the pieces it ran
+                            if not sh.b or (sh.b.sleeping and not sh.b.woken):
+                                break                       # (its load, from its sleeps, measured)
+                            sh.b.t_back = span * (8 - p) / 8
+                            sh.b.step(max(1, n // 8))
+                        if sh.b:
+                            sh.b.t_back = 0
                     if sh.b:
-                        sh.b.t_back = 0
-                if sh.b:
-                    sh.b.systick(int(now), b_hz(u))
-                if ring_trace and now >= ring_trace[1]:
-                    ring_sample(int(now))
-                    ring_trace[1] = now + 5000
-                if pcm_out and sh.b:
-                    capture()
-                if (stop_us and now >= stop_us) or mmc.cut_done:
-                    break
-                cur = u.reg_read(UC_ARM_REG_PC)
-    except Exception as ex:                                       # noqa: BLE001
-        log.append(f"EXCEPTION {ex} at pc {u.reg_read(UC_ARM_REG_PC):#x}, sp "
-                   f"{u.reg_read(UC_ARM_REG_SP):#x}, lr {u.reg_read(UC_ARM_REG_LR):#x}")
+                        sh.b.systick(int(now), b_hz(u))
+                    if regs.get(0x40120000, 0) & 1 and wdt_check(int(now), hz):
+                        cur = u.reg_read(UC_ARM_REG_PC) | 1
+                        continue
+                    if ring_trace and now >= ring_trace[1]:
+                        ring_sample(int(now))
+                        ring_trace[1] = now + 5000
+                    if pcm_out and sh.b:
+                        capture()
+                    if (stop_us and now >= stop_us) or mmc.cut_done or state.get("wdt_reset"):
+                        break
+                    cur = u.reg_read(UC_ARM_REG_PC)
+            break
+        except Exception as ex:                                   # noqa: BLE001
+            if faults < 2 and fault_entry(ex):    # a bus fault given to the firmware (0.99r32)
+                faults += 1
+                cur = u.reg_read(UC_ARM_REG_PC) | 1
+                continue
+            log.append(f"EXCEPTION {ex} at pc {u.reg_read(UC_ARM_REG_PC):#x}, sp "
+                       f"{u.reg_read(UC_ARM_REG_SP):#x}, lr {u.reg_read(UC_ARM_REG_LR):#x}")
+            break
     panel.flush()
     if emu_host.COUNTS:                                           # EMU_COUNT=1: the busiest
         top = sorted(emu_host.COUNTS.items(), key=lambda kv: -kv[1])[:25]

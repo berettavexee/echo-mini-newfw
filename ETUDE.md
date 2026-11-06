@@ -4223,3 +4223,27 @@ Les autres formats en r31 : FLAC 16/44,1 9 à 10 MHz, MP3 27 MHz, AAC 27 MHz, Vo
 **Émulateur** (r30, r31 ; il ne modélise pas la lenteur de la SYSRAM) : 18 tests `emutest` PASS ; sans blanc exact (`gapless-wav`, `-flac`, `-mixed`) ; `beep-low` identique octet pour octet à la r29 ; `pcm-chain` et `pcm-seek-flac` identiques à la r29 sauf un décalage en un point (1 536 et 320 octets, le temps d'une couture), puis identiques jusqu'à la fin ; la r31 identique octet pour octet à la r30 (`pcm-chain`).
 
 **Question de l'utilisateur, le bip en piste intercalée** : écartée ; le bip attendrait la fin de la piste (ou la couperait : une recherche pour reprendre, 30 à 300 ms de trou) et changerait de fréquence avec les pistes à 96 et 192 kHz ; le mélange par le cœur B tient dans `rt.c` (aucun codec touché) et ne coûte plus rien sans bip (r30).
+
+## 109. Refonte, étape 7 : la robustesse (images 99R32 à 99R36, 2026-11-06, appareil)
+
+**Décisions de l'utilisateur** : le relevé dans NEWFWLOG.TXT ; un écran au démarrage suivant ; après une faute du cœur B en pleine lecture, la même piste rejouée 1 s avant ; le chien de garde à environ 2 s.
+
+**r32 — le relevé de faute** (`crash.c`, `crash.h`) : un secteur de NEWFWLOG.TXT, avant l'état de reprise (`log_crash_read/write` ; l'anneau du journal a un secteur de moins), écrit en texte (`NEWFWCRASH 1 unread=… seq=…` : version, démarrage, heure, cœur, exception, tâche de la boucle, PC, LR, xPSR, SP, CFSR, HFSR, BFAR et MMFAR s'ils sont valides, 16 mots de pile, piste et position). Le gestionnaire de faute du cœur A l'écrit lui-même (le pilote eMMC scrute : pas d'interruption nécessaire), puis vide l'anneau du journal dans le fichier ; rien n'est écrit si la faute vient du pilote eMMC (`emmc_busy`) ou en mode USB. Au démarrage suivant : des lignes `crash:` dans le journal, un écran « Fault » 3 s une fois, le relevé marqué lu. `readlog.py` l'affiche à part.
+
+**r33 — le cœur B relancé** : une faute du cœur B en pleine lecture écrit le relevé, oublie le codec chargé (`hifi_own_drop` : son code a pu être abîmé) et rouvre la même piste 1 s avant la position entendue (ouverture asynchrone, comme une recherche) ; un deuxième incident sur la même piste la fait passer, la suivante joue.
+
+**r34 — les blocages** :
+- cœur B : aucune trame pendant **500 ms** (et non 1 s : la DMA rejoue l'anneau périmé pendant ce temps) alors que la DMA joue, que l'anneau PCM a de la place (8 Kio) et l'anneau d'entrée des données (4 Kio), hors pause, changement de fréquence et ouverture : relevé « core B stall » puis la même relance ;
+- cœur A : le chien de garde (TRM chapitre 20, DesignWare WDT, horloge pclk = cœur / 4) armé à TORR 11 (2^27 cycles : 2,7 s à 200 MHz ; 1,3 s aurait pris la lecture synchrone des étiquettes d'une pochette de 17,9 Mo, 1,4 s), mode « interruption d'abord » (IRQ 8) : l'interruption écrit le relevé « watchdog » avec le PC bloqué puis redémarre ; le reset matériel suit au deuxième délai si elle ne peut pas s'exécuter. Rafraîchi dans la boucle et dans `storage_yield` (une vidange de la tâche de stockage dure jusqu'à 3,4 s).
+
+**r35, r36 — sur l'appareil** :
+- les fautes de bus y sont **imprécises** (CFSR 400, tampon d'écriture) : le PC noté suit l'écriture fautive, BFAR sans valeur ; le relevé ne note BFAR et MMFAR que s'ils sont valides et marque l'imprécision (r35) ;
+- le chien de garde **survit au redémarrage logiciel** (SYSRESETREQ) et **ne peut pas être coupé** : CR = 0 laisse le bit d'activation à 1 et efface seulement le mode d'interruption (« CR was 1 » au démarrage suivant, r35) ; le chargeur et ce qu'il démarre auraient eu un reset direct au bout d'environ 22 s à 24 MHz. r36 : avant un redémarrage, la plus longue période (TORR 15 : environ 6 min jusqu'à l'interruption, 12 min jusqu'au reset au rythme du chargeur), le mode gardé (« CR was b ») ; notre démarrage le réarme à 2,7 s. Le chargeur l'avait laissé désactivé (« CR was a »).
+
+**Image de test `ECHO_FAULT`** : Power seul : le cœur B faute, puis se bloque à l'appui suivant (`hp_ctl.test`) ; VOL- tenu + Power : faute du cœur A (écriture en `0xfffffff0`) ; VOL+ tenu + Power : boucle du cœur A bloquée.
+
+**Sur l'appareil** (`work/hwlog/2026-11-06_0.99r34f/` à `..._0.99r36f/`) : une trentaine de fautes et de blocages du cœur B (MP3, Musepack, Opus, Vorbis) : relance sur la même piste, puis piste passée ; faute du cœur A : relevé relu après une extinction complète (démarrage à froid) ; blocage du cœur A : interruption du chien de garde à 2,7 s, relevé, redémarrage ; écran « Fault » vu aux trois redémarrages.
+
+**Émulateur** : une faute de bus (accès à une adresse non projetée) est remise au firmware au lieu d'arrêter l'émulation, sur les deux cœurs (pile d'exception, CFSR, HFSR, BFAR, vecteur HardFault) ; un modèle du chien de garde (avec `--cycles` : délai sur pclk, interruption 8, reset, le bit d'activation qui ne retombe pas). Tests `emutest` `fault-a`, `fault-b`, `stall-a` (image `ECHO_FAULT` seulement, hors de la liste par défaut). Non-régression : 18 tests `emutest`, `perf-*`, `gov-long`, `perf-stall` sans déclenchement du chien de garde ; sans blanc exact ; `pcm-chain` et `beep-low` identiques aux décalages de timing près (une couture ; les bips 1 ms plus tôt).
+
+**Reste** : une session longue avec l'image normale (aucun relevé, aucun redémarrage par le chien de garde attendu) ; le mode USB du chargeur (rkdeveloptool) redémarrerait au bout de 12 min s'il ne rafraîchit pas le chien de garde.

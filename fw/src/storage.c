@@ -110,6 +110,7 @@ void storage_hold(int on)
 
 void storage_yield(void)
 {
+    wdt_kick();                                 /* a job drained by the loop: it goes on */
     if (running && !held && (int32_t)(ticks() - deadline) >= 0)
         co_swap(&task_sp, main_sp);
 }

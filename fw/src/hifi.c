@@ -330,3 +330,8 @@ void hifi_set_div(uint32_t div)
     if (powered && HP_CTL->magic == HP_MAGIC)
         HP_CTL->b_hz = hifi_hz;                 /* core B's SysTick follows (ETUDE §103) */
 }
+
+void hifi_own_drop(void)
+{
+    hifi_own_forget();
+}

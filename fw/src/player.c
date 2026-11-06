@@ -27,6 +27,7 @@ static int fail(int err, const char *what)
 
 /* ---- our runtime and codecs (ETUDE §19) ---- */
 #include "hifi_proto.h"
+#include "crash.h"
 
 /* Core B's error (enum hp_err) as a player error; its reason into player.why */
 static int b_error(volatile struct hp_ctl *c)
@@ -136,6 +137,7 @@ static struct {
     int flags, warm, kept, changed, full, open, opening;    /* opening: async, headers read */
     uint32_t t0, t_load, t_ready, t_open, t_dac, t_first, t_play, ur0, lost0, i2s0, fb, t_req;
     uint32_t na_frames, na_t, na_in;    /* the last change of the frames decoded: when, input */
+    uint32_t st_frames, st_t;           /* the same for the stall watch (0.99r34) */
     int32_t fill0;
     uint32_t in_min, out_min, out_max, in_empty;  /* perf: the rings once the DAC ring is full */
     uint32_t laps0;                     /* audio.laps_lost at the open */
@@ -857,6 +859,18 @@ static int open_finish(void)
 }
 
 #define NOAUDIO_US    5000000u
+#define STALL_US      500000u                   /* core B stuck (0.99r34): the DMA replays the
+                                                 * ring meanwhile */
+
+/* A fault or a stall of core B (rework step 7): the fault record, and its codec forgotten so that
+ * the next open loads it again (its code may be damaged) */
+static void b_crash(const char *what, volatile struct hp_ctl *c)
+{
+    struct crash_info ci = { .core = CRASH_B, .what = what, .pc = c->fault_pc,
+                             .lr = c->fault_lr, .cfsr = c->fault_cfsr };
+    crash_record(&ci);
+    hifi_own_drop();
+}
 #define NOAUDIO_BYTES (1u << 20)
 
 /* One round of an open track: 0 while it plays, 1 at its end (all of core B's output in the DAC
@@ -938,7 +952,25 @@ int player_service(void)
     if (c->state == HP_ERROR) {
         log_printf("player: core B error %u, fault pc %x lr %x cfsr %x, at %u MHz", c->error,
                    c->fault_pc, c->fault_lr, c->fault_cfsr, hifi_hz / 1000000);
+        if (c->error == HP_ERR_FAULT)
+            b_crash("core B fault", c);
         player.error = b_error(c);
+        return player.error;
+    }
+    /* Core B stuck (0.99r34): no frame for STALL_US while the DMA plays, with room in the PCM
+     * ring and input in the input ring (not in a pause, a rate change, an open) */
+    if (c->frames != ps.st_frames || !ps.st_t || dac_switch || ps.opening || audio_paused ||
+        !audio.on || c->state != HP_PLAYING || c->pcm_hold ||
+        audio_fill() + 8192 > (int32_t)HP_OUT_SIZE || c->in_wr - c->rb_rd < 4096) {
+        ps.st_frames = c->frames;
+        ps.st_t = ticks() | 1;
+    } else if (ticks() - ps.st_t > STALL_US) {
+        log_printf("player: core B stuck: no frame for %u ms (room %u bytes, input %u bytes)",
+                   (ticks() - ps.st_t) / 1000, HP_OUT_SIZE - (uint32_t)audio_fill(),
+                   c->in_wr - c->rb_rd);
+        b_crash("core B stall", c);
+        player.why = HP_WHY_NONE;
+        player.error = PLAYER_EFAULT;
         return player.error;
     }
     if (c->state == HP_END && !out_avail() &&
@@ -1147,4 +1179,9 @@ int player_settled(void)
 int player_is_open(void)
 {
     return ps.open;
+}
+
+const char *player_file_name(void)
+{
+    return own_file.name;
 }

@@ -22,13 +22,18 @@ def main():
     n = len(d) // 512
     sec = [d[512 * i:512 * (i + 1)] for i in range(n)]
     order = (list(range(nxt + 1, n)) if wraps else []) + list(range(1, nxt + 1))
-    order = [i for i in order if not sec[i].startswith(b"NEWFWSTATE")]  # the resume state
+    crash = [s for s in sec if s.startswith(b"NEWFWCRASH")]          # the fault record (0.99r32)
+    order = [i for i in order if not sec[i].startswith((b"NEWFWSTATE", b"NEWFWCRASH"))]
     text = b"".join(sec[i][:fill] if i == nxt else sec[i] for i in order)
     lines = [ln.rstrip(b" ") for ln in text.split(b"\n")]
     out = b"\n".join(ln for ln in lines if ln.strip())
     print(f"# {path}: {n - 1} data sectors, next {nxt} fill {fill}, wraps {wraps}"
           + (" (the oldest lines were overwritten)" if wraps else ""))
     sys.stdout.write(out.decode("utf-8", "replace") + "\n")
+    for c in crash:                             # printed after the log, apart from it
+        print("# fault record:")
+        sys.stdout.write("\n".join(ln.rstrip() for ln in c.decode("ascii", "replace").split("\n")
+                                    if ln.strip()) + "\n")
 
 
 if __name__ == "__main__":

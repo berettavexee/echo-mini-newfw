@@ -326,6 +326,16 @@ static void beep_check(void);
 static uint32_t raw_space(void)
 {
     beep_check();                               /* once a block, not once a word (0.99r30) */
+#ifdef ECHO_FAULT
+    if (ctl->test == 1) {                       /* test build: a bus fault, as a bad pointer */
+        ctl->test = 0;
+        *(volatile uint32_t *)0xfffffff0u = 0;
+    } else if (ctl->test == 2) {                /* a loop without end, as a decoder that hangs */
+        ctl->test = 0;
+        for (;;)
+            ;
+    }
+#endif
     if (ctl->pcm_hold)
         return 0;
     uint32_t lim = HP_OUT_SIZE - HP_OUT_GUARD, fill = ctl->pcm_wr - ctl->pcm_rd;
