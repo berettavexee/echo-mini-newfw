@@ -4050,3 +4050,27 @@ Faite sans l'appareil, comme l'étape 2 ; une image de test à la fin, `NEWFWR15
 **r16 — barre de progression vide à la reprise.** Après une extinction, une piste reprise en pause (« parked ») n'est pas ouverte : sa durée (`player_heard.length_ms`) était inconnue, la barre vide et la recherche refusée jusqu'à la lecture. La durée est maintenant sauvegardée dans l'état de reprise (deux mots après la somme, avec leur propre contrôle : un état écrit par une version plus ancienne se relit, sans barre) et rendue par `len_ms()` au même titre que la position (`now_ms()`) ; la mise en veille longue d'une pause la garde aussi. La recherche marche donc aussi sur une piste reprise en pause. Test `resume-paused-zero` : « paused at 0 ms of 10000 ».
 
 Vérification de la r16 dans l'émulateur : 17 tests `emutest` PASS, `perf-seek-cover` PASS (la r15 y échoue).
+
+## 102. Refonte, étape 4 : sondes du cœur B sur l'appareil (image 99R17, 2026-11-06)
+
+**But** : savoir ce que le cœur B peut atteindre avant de lui confier l'anneau lu par la DMA. L'émulateur laisse tout passer ; seul l'appareil répond. Image de test (`make EXTRA=-DECHO_BPROBE`, version « 0.99r17 », l'image normale inchangée) : à chaque démarrage du cœur B, avant HP_READY, une sonde (`rt.c`, `hp_ctl.bp`) dont chaque accès est une étape numérotée ; une faute est notée puis sautée (le gestionnaire avance le PC d'une instruction, écritures rendues précises par `ACTLR.DISDEFWBUF`), un blocage laisserait l'étape dans le bloc de contrôle. Le cœur A prépare les mots à lire, vérifie ceux écrits, et journalise (`bprobe:`).
+
+**Résultats** (`work/hwlog/2026-11-06_0.99r17/`, deux démarrages, 16 pistes) : aucune faute.
+
+| Accès du cœur B | Résultat |
+|---|---|
+| SYSRAM, BSS du cœur A (`0x03006724`) | lecture et écriture justes (le cœur A relit le mot écrit) |
+| SYSRAM, constante de la zone de code (`0x03067038`) | lecture juste |
+| PMU-SRAM (`0x03090000`) | lecture et écriture justes |
+| SAR du canal 5 du DMAC1 | lisible ; 192 octets par ms (48 kHz × 4 octets), cohérent avec la lecture du cœur A |
+| SysTick, horloge du cœur | 200 035 coups par ms à 200 MHz ; 9 interruptions en 20 ms sur une période de 2 ms |
+| SysTick, horloge de référence | absente (0 coup ; CALIB `0x40000001`, bit NOREF) |
+
+Au passage, la r16 sur l'appareil : trois recherches, « tags kept » à chaque fois, aucun tour perdu ; reprise « paused at 5855 ms of 390026 », barre juste. Défaut noté : au démarrage, la reprise d'une file d'arbre de toute la carte reparcourt l'arbre dans la boucle (2,4 s d'écran figé, rien ne joue encore) ; à passer dans la tâche de stockage.
+
+**Décisions pour l'étape 4** (utilisateur, 2026-11-06) :
+1. anneau PCM de **96 Kio** en HIGHRAM1, écrit par le cœur B et lu directement par la DMA (557 ms en 16/44,1, 64 ms en 24/192) ;
+2. les **bips** de batterie mélangés par le cœur B, à la demande du cœur A (même baisse de 12 dB) ;
+3. le cœur B se règle sur **TIMER1** (24 MHz fixes) et sur la position de la DMA qu'il lit lui-même ; la SysTick n'est pas utilisée (elle suit l'horloge variable du cœur B) ;
+4. anneau d'entrée de **96 Kio en SYSRAM** (et non 192 Kio) : 96 Kio de SYSRAM laissés libres pour les évolutions graphiques. Environ 2,4 s de MP3 à 320 kb/s, 750 ms de FLAC 16/44, 165 ms de FLAC 24/192.
+Le mode carte son USB garde l'anneau du DAC en SYSRAM (à réduire avec lui : voir l'étape).

@@ -185,6 +185,70 @@ int hifi_load_own(uint32_t codec)
     return HIFI_EIMG;
 }
 
+#ifdef ECHO_BPROBE
+/* The probe of the test build (0.99r17, ETUDE §102): words core B reads and writes in SYSRAM
+ * (BSS, and a constant of the code area) and in PMU-SRAM; the answers logged after HP_READY */
+static volatile uint32_t bp_sys[2];
+static volatile uint32_t bp_pmu[2] __attribute__((section(".pmusram")));
+static const uint32_t bp_const = 0x434f4e53u;   /* "CONS" */
+static unsigned bp_runs;
+
+static void bp_prepare(volatile struct hp_ctl *c)
+{
+    bp_sys[0] = 0x5359534du;                    /* "SYSM" */
+    bp_sys[1] = 0;
+    bp_pmu[0] = 0x504d5553u;                    /* "PMUS" */
+    bp_pmu[1] = 0;
+    c->bp.sys_addr = (uint32_t)bp_sys;
+    c->bp.sys_word = bp_sys[0];
+    c->bp.dram_addr = (uint32_t)&bp_const;
+    c->bp.dram_word = bp_const;
+    c->bp.pmu_addr = (uint32_t)bp_pmu;
+    c->bp.pmu_word = bp_pmu[0];
+    c->bp.b_div = hifi_div;
+    c->bp.req = BP_REQ;
+}
+
+static const char *bp_ok(uint32_t got, uint32_t want, int faulted)
+{
+    return faulted ? "FAULT" : got == want ? "ok" : "WRONG";
+}
+
+static void bp_report(volatile struct hp_ctl *c, int ready)
+{
+    uint32_t f = c->bp.faults, sar_a = REG(0x60000000u + 5 * 0x58);
+    bp_runs++;
+    if (!ready || c->bp.step != BP_DONE) {
+        log_printf("bprobe: core B stopped at step %u (faults %x, cfsr %x bfar %x)", c->bp.step,
+                   f, c->bp.cfsr, c->bp.bfar);
+        return;
+    }
+    if (bp_runs == 1) {
+        log_printf("bprobe: SYSRAM %08x read %s (%08x), write %s (core A reads %08x), code area "
+                   "%08x read %s (%08x)", c->bp.sys_addr,
+                   bp_ok(c->bp.got[BP_SYS_RD], c->bp.sys_word, f >> BP_SYS_RD & 1),
+                   c->bp.got[BP_SYS_RD],
+                   bp_ok(bp_sys[1], ~c->bp.sys_word, f >> BP_SYS_WR & 1), bp_sys[1],
+                   c->bp.dram_addr,
+                   bp_ok(c->bp.got[BP_DRAM_RD], c->bp.dram_word, f >> BP_DRAM_RD & 1),
+                   c->bp.got[BP_DRAM_RD]);
+        log_printf("bprobe: PMU-SRAM %08x read %s (%08x), write %s (core A reads %08x)",
+                   c->bp.pmu_addr, bp_ok(c->bp.got[BP_PMU_RD], c->bp.pmu_word, f >> BP_PMU_RD & 1),
+                   c->bp.got[BP_PMU_RD],
+                   bp_ok(bp_pmu[1], ~c->bp.pmu_word, f >> BP_PMU_WR & 1), bp_pmu[1]);
+        log_printf("bprobe: SysTick calib %08x, in 1 ms: %u on the core clock (core B at %u MHz, "
+                   "div %u), %u on the reference; %u interrupts in 20 ms (reload %u); faults %x "
+                   "(cfsr %x bfar %x hfsr %x)", c->bp.st_calib, c->bp.st_core,
+                   hifi_hz / 1000000, c->bp.b_div, c->bp.st_ref, c->bp.st_irqs,
+                   c->bp.st_load, f, c->bp.cfsr, c->bp.bfar, c->bp.hfsr);
+    }
+    if (bp_runs <= 40)
+        log_printf("bprobe: DMA SAR read by core B %08x then %08x %u us later%s; core A now %08x",
+                   c->bp.sar0, c->bp.sar1, c->bp.sar_dt / 24, f >> BP_SAR & 1 ? " (FAULT)" : "",
+                   sar_a);
+}
+#endif
+
 /* Releases core B with our runtime and waits for its control block to say ready */
 int hifi_start_own(void)
 {
@@ -198,6 +262,9 @@ int hifi_start_own(void)
     c->hws.trial = trial;
 #endif
     c->in_end = 0xffffffffu;
+#ifdef ECHO_BPROBE
+    bp_prepare(c);
+#endif
     REG(MBOX + 0x04) = 0xf;
     REG(B2A_STATUS) = 0xf;
     REG(CRU_SOFTRST(3)) = 0x00040000;           /* core B runs */
@@ -206,10 +273,16 @@ int hifi_start_own(void)
         if (c->magic == HP_MAGIC && c->state == HP_READY) {
             log_printf("hifi: our runtime ready after %u us (codec %u, version %u)", ticks() - t0,
                        c->codec, c->version);
+#ifdef ECHO_BPROBE
+            bp_report(c, 1);
+#endif
             return 0;
         }
     }
     log_printf("hifi: our runtime not ready (magic %x state %u)", c->magic, c->state);
+#ifdef ECHO_BPROBE
+    bp_report(c, 0);
+#endif
     return HIFI_ETIMEOUT;
 }
 

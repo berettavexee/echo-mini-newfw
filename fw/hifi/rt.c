@@ -19,11 +19,19 @@ static void fault(void);
 static void doorbell(void);
 
 static volatile int rung;
+#ifdef ECHO_BPROBE
+static void systick(void);
+static volatile int probing;                    /* a fault while set: recorded, passed over */
+#endif
 
 __attribute__((section(".vectors"), used))
 static void (*const vectors[IRQ_DOORBELL + 1])(void) = {
     (void (*)(void))HP_STACK_TOP, hp_reset,
+#ifdef ECHO_BPROBE
+    [2 ... 14] = fault, [15] = systick, [16 ... IRQ_DOORBELL - 1] = fault,
+#else
     [2 ... IRQ_DOORBELL - 1] = fault,
+#endif
     [IRQ_DOORBELL] = doorbell,
 };
 
@@ -50,8 +58,24 @@ __attribute__((naked)) static void fault(void)
         "b hp_fault\n");
 }
 
-static __attribute__((used)) void hp_fault(const uint32_t *frame)
+static __attribute__((used)) void hp_fault(uint32_t *frame)
 {
+#ifdef ECHO_BPROBE
+    if (probing) {                              /* the probe's access: noted, then skipped */
+        uint32_t k = ctl->bp.step;
+        if (!ctl->bp.faults) {
+            ctl->bp.cfsr = REG(SCB_CFSR);
+            ctl->bp.bfar = REG(0xe000ed38u);
+            ctl->bp.hfsr = REG(0xe000ed2cu);
+        }
+        ctl->bp.faults |= 1u << k;
+        REG(SCB_CFSR) = REG(SCB_CFSR);          /* write 1 to clear */
+        REG(0xe000ed2cu) = REG(0xe000ed2cu);
+        uint16_t op = *(const uint16_t *)frame[6];
+        frame[6] += (op & 0xf800) >= 0xe800 ? 4 : 2;    /* a 32-bit Thumb instruction or not */
+        return;
+    }
+#endif
     ctl->fault_pc = frame[6];
     ctl->fault_lr = frame[5];
     ctl->fault_cfsr = REG(SCB_CFSR);
@@ -481,6 +505,87 @@ static void run(void)
     }
 }
 
+
+#ifdef ECHO_BPROBE
+/* ---- the probe of the test build (0.99r17): see hp_ctl.bp ---- */
+#define ST_CSR   0xe000e010u
+#define ST_RVR   0xe000e014u
+#define ST_CVR   0xe000e018u
+#define ST_CALIB 0xe000e01cu
+#define ACTLR    0xe000e008u
+static volatile uint32_t st_count;
+
+static void systick(void)
+{
+    st_count++;
+}
+
+static void spin_ticks(uint32_t t)              /* TIMER1: 24 MHz */
+{
+    uint32_t t0 = TIMER1_NOW();
+    while (TIMER1_NOW() - t0 < t)
+        ;
+}
+
+static uint32_t st_measure(uint32_t csr)       /* SysTick counts in 1 ms (no interrupt) */
+{
+    REG(ST_CSR) = 0;
+    REG(ST_RVR) = 0xffffff;
+    REG(ST_CVR) = 0;
+    REG(ST_CSR) = csr;
+    uint32_t a = REG(ST_CVR);
+    spin_ticks(24000);
+    uint32_t b = REG(ST_CVR);
+    REG(ST_CSR) = 0;
+    return (a - b) & 0xffffff;
+}
+
+static void probe(void)
+{
+    volatile uint32_t *got = ctl->bp.got;
+    REG(ACTLR) |= 2;                            /* DISDEFWBUF: a write's fault is precise */
+    probing = 1;
+    ctl->bp.step = BP_SYS_RD;
+    got[BP_SYS_RD] = REG(ctl->bp.sys_addr);
+    ctl->bp.step = BP_SYS_WR;
+    REG(ctl->bp.sys_addr + 4) = ~ctl->bp.sys_word;
+    got[BP_SYS_WR] = REG(ctl->bp.sys_addr + 4);
+    ctl->bp.step = BP_DRAM_RD;
+    got[BP_DRAM_RD] = REG(ctl->bp.dram_addr);
+    ctl->bp.step = BP_PMU_RD;
+    got[BP_PMU_RD] = REG(ctl->bp.pmu_addr);
+    ctl->bp.step = BP_PMU_WR;
+    REG(ctl->bp.pmu_addr + 4) = ~ctl->bp.pmu_word;
+    got[BP_PMU_WR] = REG(ctl->bp.pmu_addr + 4);
+    ctl->bp.step = BP_SAR;
+    uint32_t t0 = TIMER1_NOW();
+    ctl->bp.sar0 = REG(0x60000000u + 5 * 0x58);
+    spin_ticks(24000);
+    ctl->bp.sar1 = REG(0x60000000u + 5 * 0x58);
+    ctl->bp.sar_dt = TIMER1_NOW() - t0;
+    ctl->bp.step = BP_SYSTICK;
+    ctl->bp.st_calib = REG(ST_CALIB);
+    ctl->bp.st_core = st_measure(5);            /* CLKSOURCE 1: the core clock */
+    ctl->bp.st_ref = st_measure(1);             /* CLKSOURCE 0: the reference clock */
+    uint32_t load = ctl->bp.st_core * 2;        /* 2 ms on the core clock */
+    if (load > 0xffffff)
+        load = 0xffffff;
+    ctl->bp.st_load = load;
+    if (load > 1000) {
+        st_count = 0;
+        REG(ST_RVR) = load - 1;
+        REG(ST_CVR) = 0;
+        REG(ST_CSR) = 7;                        /* core clock, interrupt, enabled */
+        spin_ticks(20 * 24000);
+        REG(ST_CSR) = 0;
+        ctl->bp.st_irqs = st_count;
+    }
+    probing = 0;
+    REG(ACTLR) &= ~2u;
+    ctl->bp.step = BP_DONE;
+}
+#endif
+
 __attribute__((noreturn)) void hp_reset(void)
 {
     for (uint32_t *p = &_sbss; p < &_ebss; p++)
@@ -496,6 +601,10 @@ __attribute__((noreturn)) void hp_reset(void)
     REG(A2B_STATUS) = 0xf;
     REG(A2B_INTEN) |= 1u << 1;
     REG(NVIC_ISER0) = 1u << (IRQ_DOORBELL - 16);
+#ifdef ECHO_BPROBE
+    if (ctl->bp.req == BP_REQ)
+        probe();
+#endif
     ctl->state = HP_READY;
     run();
     for (;;)

@@ -81,7 +81,11 @@ and checked on the device before the next; `main` stays the working firmware mea
    13.8 MB cover), the bar of a track resumed paused after a power off shows its length. Left
    blocking: a Musepack seek without a seek table, a folder opened by the browser, a card
    mounted from the browser.
-4. Core B writes the PCM ring (64 KiB), the input ring in SYSRAM.
+4. **Core B writes the PCM ring** (in progress; 0.99r17, ETUDE §102: core B reads and writes
+   SYSRAM and PMU-SRAM and reads the DMA position, checked on the device): a 96 KiB PCM ring
+   in HIGHRAM1 written by core B and read by the DMA directly, a 96 KiB input ring in SYSRAM
+   (96 KiB of SYSRAM kept free for the screens), the battery beeps mixed by core B, core B
+   timed by TIMER1 and the DMA position.
 5. Records in the input ring (TRACK, DATA, END, SEEK); a seek never resets an index the other
    core may publish (ReChord's crackle, ETUDE §98).
 6. Core B's clock.

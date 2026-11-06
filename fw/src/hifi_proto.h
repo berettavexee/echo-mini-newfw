@@ -150,7 +150,30 @@ struct hp_ctl {
     uint32_t fft_blocks, fft_soft;      /* Vorbis, AAC: IMDCT blocks on HIFIACC, in software
                                            after a timeout (ETUDE §74, §76) */
 #endif
+#ifdef ECHO_BPROBE
+    /* Test build only (0.99r17, rework step 4, ETUDE §102): what core B can reach. Core A sets
+     * the addresses and the words it put there before releasing core B; core B runs the probe
+     * before HP_READY, each access its own step (a fault is caught, recorded and passed over;
+     * a hang leaves 'step' where it stopped) */
+    struct {
+        uint32_t req;                   /* A: BP_REQ: run the probe */
+        uint32_t sys_addr, sys_word;    /* A: a word in SYSRAM (core A's BSS) and its value */
+        uint32_t dram_addr, dram_word;  /* A: a constant in core A's code area (SYSRAM, DRAM) */
+        uint32_t pmu_addr, pmu_word;    /* A: a word in PMU-SRAM and its value */
+        uint32_t step;                  /* B: the step running (BP_* below), BP_DONE at the end */
+        uint32_t got[8];                /* B: the word read at each step */
+        uint32_t faults;                /* B: bit k: step k faulted */
+        uint32_t cfsr, bfar, hfsr;      /* B: of the first fault */
+        uint32_t sar0, sar1, sar_dt;    /* B: DMAC1 channel 5 SAR twice, TIMER1 ticks apart */
+        uint32_t st_calib, st_core, st_ref;  /* B: SysTick CALIB; counts in 1 ms of TIMER1 on the
+                                               core clock and on the reference clock */
+        uint32_t st_irqs, st_load;      /* B: SysTick interrupts in 20 ms, its reload value */
+        uint32_t b_div;                 /* A: core B's clock divider at the start */
+    } bp;
+#endif
 };
+#define BP_REQ 0x42505231u              /* "BPR1" */
+enum { BP_SYS_RD = 1, BP_SYS_WR, BP_DRAM_RD, BP_PMU_RD, BP_PMU_WR, BP_SAR, BP_SYSTICK, BP_DONE };
 #define HWT_MAGIC 0x48575431u           /* "HWT1" */
 
 #define HP_CTL ((volatile struct hp_ctl *)HP_CTL_ADDR)
