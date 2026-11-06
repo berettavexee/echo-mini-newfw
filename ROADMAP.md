@@ -261,7 +261,11 @@ One line per version; the measurements are in `ETUDE.md`.
   - delete a file from the browser (needs writing to FAT32 and exFAT: read only today);
   - format the internal memory or the card, reset the settings;
   - interface languages besides English (the font already covers Latin, Greek, Cyrillic and
-    CJK);
+    CJK): gettext PO files, open to Weblate (docs/TRANSLATING.md, ETUDE §112). Done in the
+    emulator: the strings marked, the catalogues in the image, the Language setting, French
+    (complete), Japanese and Simplified Chinese (81 of 153 strings from pull request #1, the rest
+    proposed, fuzzy); to do: a test on the device, a review of the Japanese and Chinese, the
+    Weblate project;
   - colour themes (minor);
   - daylight saving time: the change between summer and winter time (the real-time clock keeps
     local time today, set by hand on its screen, §28).

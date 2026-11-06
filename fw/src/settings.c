@@ -2,9 +2,10 @@
  * its own in the resume state's sector (resume.c). The ReplayGain mode stays in the resume state
  * (since 0.55); the sleep timer is not kept. */
 #include "ui_priv.h"
+#include "lang.h"
 
-static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1 };
-struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1 };
+static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "" };
+struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "" };
 uint32_t sleep_at;
 
 static const uint16_t screen_s[] = { 10, 30, 60, 120, 300, 0 };     /* 0: never */
@@ -32,14 +33,16 @@ void sleep_cancel(void)
     sleep_sel = 0;
 }
 
-/* ---- storage: 64 words, "NEWFWSET 2", the values, a sum. Version 1 (up to 0.99) had the first
- * 8 bytes of the values, its sum in word 5: read, the others at their defaults ---- */
+/* ---- storage: 64 words, "NEWFWSET 3", the values, a sum. Version 2 (0.99 to 0.100) had the
+ * values up to uac_remote, its sum in word 6; version 1 (up to 0.99) the first 8 bytes, its sum
+ * in word 5: read, the others at their defaults ---- */
 struct set_block {
     char magic[12];
     struct settings s;
     uint32_t sum;
 };
 #define SET_V1_WORDS 5
+#define SET_V2_WORDS 6
 _Static_assert(sizeof(struct set_block) <= 40 * 4, "settings reach the resume's track (resume.c)");
 
 static uint32_t set_sum(const uint32_t *w, unsigned n)
@@ -54,7 +57,7 @@ uint32_t settings_put(uint32_t *w)
 {
     struct set_block *b = (struct set_block *)w;
     __builtin_memset(b, 0, sizeof *b);          /* the padding too: it is in the sum */
-    __builtin_memcpy(b->magic, "NEWFWSET 2  ", 12);
+    __builtin_memcpy(b->magic, "NEWFWSET 3  ", 12);
     b->s = cfg;
     b->sum = set_sum(w, __builtin_offsetof(struct set_block, sum) / 4);
     return b->sum;
@@ -63,13 +66,16 @@ uint32_t settings_put(uint32_t *w)
 void settings_get(const uint32_t *w)
 {
     const struct set_block *b = (const struct set_block *)w;
-    int v2 = !__builtin_memcmp(b->magic, "NEWFWSET 2  ", 12) &&
+    int v3 = !__builtin_memcmp(b->magic, "NEWFWSET 3  ", 12) &&
              b->sum == set_sum(w, __builtin_offsetof(struct set_block, sum) / 4);
+    int v2 = !__builtin_memcmp(b->magic, "NEWFWSET 2  ", 12) &&
+             w[SET_V2_WORDS] == set_sum(w, SET_V2_WORDS);
     int v1 = !__builtin_memcmp(b->magic, "NEWFWSET 1  ", 12) &&
              w[SET_V1_WORDS] == set_sum(w, SET_V1_WORDS);
-    if (v1 || v2) {
+    if (v1 || v2 || v3) {
         cfg = defaults;                         /* each value checked: a bad one, its default */
-        __builtin_memcpy(&cfg, &b->s, v2 ? sizeof cfg : 8);
+        __builtin_memcpy(&cfg, &b->s, v3 ? sizeof cfg : v2 ? SET_V2_BYTES : 8);
+        cfg.lang[sizeof cfg.lang - 1] = 0;
         if (cfg.screen >= N(screen_s))
             cfg.screen = defaults.screen;
         if (cfg.bright < 1 || cfg.bright > 10)
@@ -84,21 +90,23 @@ void settings_get(const uint32_t *w)
             cfg.rg_pre = 0;
         cfg.uac_remote = cfg.uac_remote != 0;
         log_printf("ui: settings %u: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
-                   "off %u, swap %u, remote %u", v2 ? 2 : 1, cfg.screen, bright_pct[cfg.bright - 1],
-                   cfg.names ? "names" : "tags", cfg.rg_pre, cfg.start, cfg.auto_off, cfg.swap_vol,
-                   cfg.uac_remote);   /* RG mode: resume.c */
-    }
+                   "off %u, swap %u, remote %u, language %s", v3 ? 3 : v2 ? 2 : 1, cfg.screen,
+                   bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags", cfg.rg_pre, cfg.start,
+                   cfg.auto_off, cfg.swap_vol, cfg.uac_remote, cfg.lang[0] ? cfg.lang : "en");
+    }                                           /* (RG mode: resume.c) */
+    lang_set_code(cfg.lang);                    /* unknown to this image: English */
     lcd_brightness(bright_pct[cfg.bright - 1]); /* (ReplayGain: when a track is heard) */
 }
 
 /* ---- the screen: VOL+/VOL- the line, PLAY the next value, PLAY held the one before,
  * BACK or MENU back (saved). Each change takes effect at once. ---- */
-enum { S_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START, S_SLEEP, S_AUTO_OFF, S_SWAP,
+enum { S_LANG, S_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START, S_SLEEP, S_AUTO_OFF, S_SWAP,
        S_DEFAULTS, S_COUNT };
 static const char *const s_names[S_COUNT] = {
-    "Date and time", "Screen off after", "Brightness", "Track title", "ReplayGain", "ReplayGain preamp",
-    "At power on", "Sleep timer", "Power off when idle", "Swap VOL+ and VOL-",
-    "Restore the defaults (PLAY)",
+    EN("Language"),                             /* in English: found again in any language */
+    N_("Date and time"), N_("Screen off after"), N_("Brightness"), N_("Track title"),
+    N_("ReplayGain"), N_("ReplayGain preamp"), N_("At power on"), N_("Sleep timer"),
+    N_("Power off when idle"), N_("Swap VOL+ and VOL-"), N_("Restore the defaults (PLAY)"),
 };
 static const uint8_t rg_order[RG_MODES] = { RG_MODE_ALBUM, RG_MODE_TRACK, RG_MODE_AUTO,
                                             RG_MODE_OFF };
@@ -116,17 +124,17 @@ static uint32_t sleep_left(void)                /* minutes, rounded up */
     return sleep_at && left > 0 ? ((uint32_t)left + 59999) / 60000 : 0;
 }
 
-static char *put_min(char *p, uint32_t m)
-{
-    p = put_dec(p, m);
-    return put_str(p, " min");
-}
-
+/* The value of line i, into b[VALUE_MAX] */
+#define VALUE_MAX 48
 static void value_text(int i, char *b)
 {
-    static const char *const start[START_COUNT] = { "resume playing", "resume paused", "browser" };
-    char *p = b;
+    static const char *const start[START_COUNT] = { N_("resume playing"), N_("resume paused"),
+                                                    N_("browser") };
+    char *p = b, *end = b + VALUE_MAX - 1;
     switch (i) {
+    case S_LANG:                                /* its own name (po: the translation of */
+        p = log_format(p, end, "%s", lang_name(lang_current()));   /* N_("English")) */
+        break;
     case S_CLOCK: {                             /* PLAY: its screen (menu.c) */
         struct rtc_tm t;
         int ok = rtc_get(&t);
@@ -141,50 +149,48 @@ static void value_text(int i, char *b)
             *p++ = ':';
             p = put_2(p, t.min);
         } else
-            p = put_str(p, ok < 0 ? "no clock" : "not set");
+            p = log_format(p, end, "%s", ok < 0 ? T("no clock") : T("not set"));
         break;
     }
     case S_SCREEN:
         if (!screen_s[cfg.screen])
-            p = put_str(p, "never");
-        else if (screen_s[cfg.screen] < 60) {
-            p = put_dec(p, screen_s[cfg.screen]);
-            p = put_str(p, " s");
-        } else
-            p = put_min(p, screen_s[cfg.screen] / 60u);
+            p = log_format(p, end, "%s", T("never"));
+        else if (screen_s[cfg.screen] < 60)
+            /* TRANSLATORS: seconds */
+            p = log_format(p, end, T("%u s"), screen_s[cfg.screen]);
+        else
+            /* TRANSLATORS: minutes */
+            p = log_format(p, end, T("%u min"), screen_s[cfg.screen] / 60u);
         break;
     case S_BRIGHT:
-        p = put_dec(p, bright_pct[cfg.bright - 1]);
-        p = put_str(p, " %");
+        p = log_format(p, end, EN("%u %%"), bright_pct[cfg.bright - 1]);
         break;
     case S_NAMES:
-        p = put_str(p, cfg.names ? "file name" : "tags");
+        p = log_format(p, end, "%s", cfg.names ? T("file name") : T("tags"));
         break;
     case S_RG:
-        p = put_str(p, rg_names[rg_mode]);
+        p = log_format(p, end, "%s", tr(rg_names[rg_mode]));
         break;
     case S_RG_PRE:
-        *p++ = cfg.rg_pre < 0 ? '-' : '+';
-        p = put_dec(p, (uint32_t)(cfg.rg_pre < 0 ? -cfg.rg_pre : cfg.rg_pre));
-        p = put_str(p, " dB");
+        p = log_format(p, end, EN("%c%u dB"), cfg.rg_pre < 0 ? '-' : '+',
+                       (uint32_t)(cfg.rg_pre < 0 ? -cfg.rg_pre : cfg.rg_pre));
         break;
     case S_START:
-        p = put_str(p, start[cfg.start]);
+        p = log_format(p, end, "%s", tr(start[cfg.start]));
         break;
     case S_SLEEP:
         if (!sleep_at)
-            p = put_str(p, "off");
-        else {
-            p = put_min(p, sleep_left());
-            p = put_str(p, " left");
-        }
+            p = log_format(p, end, "%s", T("off"));
+        else
+            /* TRANSLATORS: the minutes left before the sleep timer stops the music */
+            p = log_format(p, end, T("%u min left"), sleep_left());
         break;
     case S_AUTO_OFF:
-        p = auto_off_min[cfg.auto_off] ? put_min(p, auto_off_min[cfg.auto_off]) :
-            put_str(p, "never");
+        p = auto_off_min[cfg.auto_off] ? log_format(p, end, T("%u min"), auto_off_min[cfg.auto_off]) :
+            log_format(p, end, "%s", T("never"));
         break;
     case S_SWAP:
-        p = put_str(p, cfg.swap_vol ? "yes" : "no");
+        p = log_format(p, end, "%s", cfg.swap_vol ? T("yes") : T("no"));
         break;
     }
     *p = 0;
@@ -198,6 +204,20 @@ static int step(int v, int n, int d)            /* the next or previous of n val
 static void change(int i, int d)
 {
     switch (i) {
+    case S_LANG: {
+        int n = lang_count(), l = step(lang_current(), n, d);
+        lang_set(l);
+        l = lang_current();                     /* (English if its catalogue failed) */
+        const char *c = l ? lang_code(l) : "";
+        unsigned k = 0;
+        for (; k < sizeof cfg.lang - 1 && c[k]; k++)
+            cfg.lang[k] = c[k];
+        while (k < sizeof cfg.lang)
+            cfg.lang[k++] = 0;
+        browser_lang_changed();
+        log_printf("ui: language %s", l ? lang_code(l) : "en");
+        break;
+    }
     case S_SCREEN:
         cfg.screen = (uint8_t)step(cfg.screen, N(screen_s), d);
         break;
@@ -241,14 +261,18 @@ static void change(int i, int d)
     case S_SWAP:
         cfg.swap_vol ^= 1;
         break;
-    case S_DEFAULTS:
+    case S_DEFAULTS: {
+        char keep[sizeof cfg.lang];             /* the language stays: the defaults are read */
+        __builtin_memcpy(keep, cfg.lang, sizeof keep);  /* in it */
         cfg = defaults;
+        __builtin_memcpy(cfg.lang, keep, sizeof keep);
         rg_mode = RG_MODE_ALBUM;
         sleep_cancel();
         lcd_brightness(bright_pct[cfg.bright - 1]);
         rg_apply();
         log_printf("ui: settings: the defaults");
         break;
+    }
     }
 }
 
@@ -264,11 +288,11 @@ static void draw_row(int i, int top, int sel)
 {
     int y = ROW_Y0 + 16 * (i - top), x1 = list_text_end(S_COUNT, ROWS);
     uint16_t bg = i == sel ? SEL_BG : BG;
-    char b[32];
+    char b[VALUE_MAX];
     value_text(i, b);
     int x = x1 - lcd_text_width(b) - 8;
     lcd_fill(0, y, 12, 16, bg);
-    lcd_text_clip(12, y, s_names[i], x, FG, bg);
+    lcd_text_clip(12, y, i == S_LANG ? s_names[i] : tr(s_names[i]), x, FG, bg);
     text_right(x, x1, y, b, DIR_FG, bg);
 }
 
@@ -293,7 +317,7 @@ static int settings_draw(void)
     const char *pp = perf_begin("settings draw");
     if (s_page) {
         lcd_fill(0, 0, LCD_W, LCD_H, BG);
-        lcd_text(4, 0, "Settings", TITLE_FG, BG);
+        lcd_text(4, 0, T("Settings"), TITLE_FG, BG);
         s_page = 0;
         s_dirty = 1;
     }
@@ -338,6 +362,7 @@ static int settings_key(const struct key_ev *e)
                (ev == EV_PRESS || (ev == EV_LONG && s_sel != S_DEFAULTS))) {
         change(s_sel, ev == EV_PRESS ? 1 : -1);
         s_dirty = 1;
+        s_page |= s_sel == S_LANG;              /* the title too, in the new language */
     } else if ((k == KEY_BACK || k == KEY_MENU) && ev == EV_PRESS) {
         resume_save_later();
         return SCR_POP;

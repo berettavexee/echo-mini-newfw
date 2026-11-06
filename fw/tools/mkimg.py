@@ -14,7 +14,9 @@ Overlay entry 0: code at 0x03050000 (text, then the load copy of .data), data at
 loader, are empty. The codec pack (tools/mkpack.py) follows the code part, 512-aligned, before
 fw_end; header +0x148 = {1, offset, length} (the stock image-pack slot). The font blob
 (tools/mkfusion.py) follows it, 512-aligned; header +0x80 = {offset, length} (the stock 16 px
-font slot, count at +0x74 = 2 as in the stock header, +0x78 = the empty 12 px slot).
+font slot, count at +0x74 = 2 as in the stock header). The languages' catalogues
+(tools/mklang.py) follow it, 512-aligned; header +0x78 = {offset, length} (the stock 12 px font
+slot, empty otherwise; src/lang.c).
 """
 import datetime
 import os
@@ -84,7 +86,9 @@ def main():
     pack_off = (0x200 + len(part) + 511) & ~511
     font = open(a[a.index("--font") + 1], "rb").read() if "--font" in a else b""
     font_off = (pack_off + len(pack) + 511) & ~511
-    fw_end = (font_off + len(font) + 0x3fff) & ~0x3fff
+    lang = open(a[a.index("--lang") + 1], "rb").read() if "--lang" in a else b""
+    lang_off = (font_off + len(font) + 511) & ~511
+    fw_end = (lang_off + len(lang) + 0x3fff) & ~0x3fff
     size = (fw_end + 0x104000) & ~0xfffff
     bcd = lambda v: int(str(v), 16)
     hdr = bytearray(0x200)
@@ -98,7 +102,8 @@ def main():
     if pack:                                    # our codec pack, in the image-pack slot
         struct.pack_into("<3I", hdr, 0x148, 1, pack_off, len(pack))
     if font:                                    # our font blob, in the 16 px font slot
-        struct.pack_into("<I2I2I", hdr, 0x74, 2, 0, 0, font_off, len(font))
+        struct.pack_into("<I2I2I", hdr, 0x74, 2, lang_off if lang else 0, len(lang), font_off,
+                         len(font))
     struct.pack_into("<I", hdr, 0x1f4, fw_end)
     hdr[0x1f8:0x200] = b"RKnanoFW"
 
@@ -107,6 +112,7 @@ def main():
     img[0x200:0x200 + len(part)] = part
     img[pack_off:pack_off + len(pack)] = pack
     img[font_off:font_off + len(font)] = font
+    img[lang_off:lang_off + len(lang)] = lang
     img[fw_end:fw_end + 0x200] = hdr
     img += struct.pack("<I", rkcrc(bytes(img)))
     open(dst, "wb").write(img)

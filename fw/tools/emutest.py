@@ -155,6 +155,15 @@ TESTS = {
                                    r"ui: resume: tree queue under ALBUM, track \1/5\n" + _SKIP +
                                    r"ui: queue \3/5: \4 \(0\)"],
                            reboot=dict(ms=20000)),
+    # the interface's language (ETUDE §112): Settings, Language (its first line) set to the
+    # first catalogue (Français), back; after the reboot the setting read, the catalogue loaded
+    "lang": dict(files={"A.WAV": "wav"}, ms=8000,
+                 keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "PLAY"),
+                           (5200, "PLAY"), (5800, "BACK")),
+                 expect=[r"lang: 3 catalogue\(s\) in FW1", r"lang: fr \(Français\), 153 strings",
+                         r"ui: language fr", r"ui: settings 3: .*language fr",
+                         r"lang: fr \(Français\)"],
+                 reboot=dict(ms=12000)),
     "install-ok": dict(files={"NEWDATE.IMG": "@NEWDATE.IMG"}, fw2=True,
                        keys=keys(*_INST, (14000, "PLAY")), ms=60000,
                        emu_args=["--expect-fw", "@NEWDATE.IMG"],

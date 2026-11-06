@@ -16,6 +16,8 @@ with gapless playback and ReplayGain.
 - **Folder browser** with long names, on the internal memory and the microSD card (FAT32 or
   exFAT). Play a whole folder tree, in order or shuffled.
 - **Settings**: brightness, screen timeout, sleep timer, power off when idle, start-up behaviour.
+- **Languages**: English, French, Japanese, Simplified Chinese (partial); translations are gettext
+  PO files, see [docs/TRANSLATING.md](docs/TRANSLATING.md).
 - Resume where you stopped, seek, clock, USB disk mode, low-battery warning, charging screen.
 - **USB sound card** for a computer or a phone: 16, 24 or 32 bits, 44.1 to 192 kHz,
   asynchronous (bit-perfect with Linux; Android and iPhone play, see `docs/USB_AUDIO.md`), with

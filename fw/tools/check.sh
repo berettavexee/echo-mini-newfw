@@ -3,6 +3,8 @@
 #   - the image builds, warnings as errors (the stricter WARN of the Makefile on our code);
 #   - BSS leaves at least 2 KiB before the DAC ring;
 #   - the log formats match their arguments (log.h, LOG_FORMAT_CHECK);
+#   - the strings shown are marked for translation, po/newfw.pot is up to date (tools/mkpot.py),
+#     the translations keep the printf conversions and fit in a catalogue (tools/mklang.py);
 #   - the host tests of log.c, msc.c, remote.c and perf.c pass;
 #   - ruff (or pyflakes) and codespell find nothing (when installed);
 #   - the functions of ours the linker drops (dead code) are listed, not refused.
@@ -55,6 +57,13 @@ for f in src/*.c; do
     if grep -q 'Wformat' $C/fmt.log; then grep 'Wformat' $C/fmt.log; N=1; fi
 done
 if [ $N = 0 ]; then echo "ok    log_printf formats"; else bad "log_printf formats"; fi
+
+say "translations"
+# every string shown marked (T, N_, EN), po/newfw.pot up to date (make pot): ETUDE §112
+if python3 tools/mkpot.py --check; then :; else bad "translations (make pot)"; fi
+# the catalogues: conversions as in English, size; widths noted (tools/mklang.py)
+if python3 tools/mklang.py --check font/fusion-pixel-12px/fusion-pixel-12px-proportional-ja.bdf; then :
+else bad "translations (po/*.po)"; fi
 
 say "host tests"
 for t in log msc remote perf; do

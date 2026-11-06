@@ -13,6 +13,7 @@
  * Images larger than one copy (the 32 MiB stock image) only go to FW1, as RECHO does. */
 #include "update.h"
 #include "board.h"
+#include "i18n.h"
 #include "emmc.h"
 
 #define CHUNK 8192
@@ -47,18 +48,21 @@ static int same(const uint32_t *a, const uint32_t *b, uint32_t words)
     return 1;
 }
 
+/* cause: for the log (English); title, hint: shown, translated (i18n.h) */
 static const struct { int e; const char *cause, *title, *hint; } upd_msg[] = {
-    { UPD_EREAD, "read error", "Cannot read the file", "copy it to the player again" },
-    { UPD_ENOTFW, "not an RKnanoFW image", "Not a firmware image", "use an ECHO MINI .IMG file" },
-    { UPD_ESHORT, "file shorter than its image", "Incomplete file", "download or copy it again" },
-    { UPD_EBIG, "image larger than the firmware area", "Image too large for this player",
-      "8 GB ECHO MINI images only" },
-    { UPD_ESIZE, "size / layout not accepted", "Unknown image layout",
-      "not an image for this player" },
-    { UPD_ECOPY, "header copy mismatch", "Damaged image", "download it again" },
-    { UPD_ECRC, "CRC mismatch", "Damaged image", "download it again" },
-    { UPD_EWRITE, "flash write failed", "Flash write failed", "restart, then install again" },
-    { UPD_EVERIFY, "flash verify failed", "Flash write failed", "restart, then install again" },
+    { UPD_EREAD, "read error", N_("Cannot read the file"), N_("copy it to the player again") },
+    { UPD_ENOTFW, "not an RKnanoFW image", N_("Not a firmware image"),
+      N_("use an ECHO MINI .IMG file") },
+    { UPD_ESHORT, "file shorter than its image", N_("Incomplete file"),
+      N_("download or copy it again") },
+    { UPD_EBIG, "image larger than the firmware area", N_("Image too large for this player"),
+      N_("8 GB ECHO MINI images only") },
+    { UPD_ESIZE, "size / layout not accepted", N_("Unknown image layout"),
+      N_("not an image for this player") },
+    { UPD_ECOPY, "header copy mismatch", N_("Damaged image"), N_("download it again") },
+    { UPD_ECRC, "CRC mismatch", N_("Damaged image"), N_("download it again") },
+    { UPD_EWRITE, "flash write failed", N_("Flash write failed"), N_("restart, then install again") },
+    { UPD_EVERIFY, "flash verify failed", N_("Flash write failed"), N_("restart, then install again") },
 };
 
 static int upd_find(int e)
@@ -78,13 +82,13 @@ const char *upd_error(int e)
 const char *upd_title(int e)
 {
     int i = upd_find(e);
-    return i < 0 ? "Install failed" : upd_msg[i].title;
+    return i < 0 ? T("Install failed") : tr(upd_msg[i].title);
 }
 
 const char *upd_hint(int e)
 {
     int i = upd_find(e);
-    return i < 0 ? "restart, then try again" : upd_msg[i].hint;
+    return i < 0 ? T("restart, then try again") : tr(upd_msg[i].hint);
 }
 
 int fw_check(struct fat_file *f, struct fw_info *info, progress_fn progress)

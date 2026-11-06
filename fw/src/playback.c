@@ -18,7 +18,7 @@ uint32_t heard_gen;
  * moment the track is heard. Album mode takes the track gain when there is no album gain; auto:
  * the album's, the track's in shuffle; no tag: 0 dB; the preamp (settings) on tagged tracks only.
  * Limited by the peak (when tagged) and by 0 dB of attenuation. */
-const char *const rg_names[RG_MODES] = { "album", "track", "off", "auto" };
+const char *const rg_names[RG_MODES] = { N_("album"), N_("track"), N_("off"), N_("auto") };
 int rg_mode;
 int rg_steps;                                   /* applied to the track heard, 0.5 dB (+: louder) */
 int rg_tag = RG_NONE;                           /* its tag, 1/100 dB */
@@ -107,54 +107,54 @@ void play_failed(const char *name, int code)
 }
 
 static const char *const why_text[] = {
-    [HP_WHY_NONE] = "Not supported: this variant of the format",
-    [HP_WHY_CHANNELS] = "Not supported: more than 2 channels",
-    [HP_WHY_BITS] = "Not supported: this bit depth",
-    [HP_WHY_FLOAT] = "Not supported: floating-point samples",
-    [HP_WHY_COMPRESSED] = "Not supported: compressed WAV or AIFF",
-    [HP_WHY_HEAAC] = "Not supported: HE-AAC (AAC+)",
-    [HP_WHY_AAC_TYPE] = "Not supported: this AAC profile",
-    [HP_WHY_MP4_CODEC] = "Not supported: neither AAC nor ALAC",
-    [HP_WHY_OPUS_MAPPING] = "Not supported: multichannel Opus",
-    [HP_WHY_MEMORY] = "Not supported: too large for the memory",
-    [HP_WHY_RATE] = "Not supported: no sample rate",
+    [HP_WHY_NONE] = N_("Not supported: this variant of the format"),
+    [HP_WHY_CHANNELS] = N_("Not supported: more than 2 channels"),
+    [HP_WHY_BITS] = N_("Not supported: this bit depth"),
+    [HP_WHY_FLOAT] = N_("Not supported: floating-point samples"),
+    [HP_WHY_COMPRESSED] = N_("Not supported: compressed WAV or AIFF"),
+    [HP_WHY_HEAAC] = N_("Not supported: HE-AAC (AAC+)"),
+    [HP_WHY_AAC_TYPE] = N_("Not supported: this AAC profile"),
+    [HP_WHY_MP4_CODEC] = N_("Not supported: neither AAC nor ALAC"),
+    [HP_WHY_OPUS_MAPPING] = N_("Not supported: multichannel Opus"),
+    [HP_WHY_MEMORY] = N_("Not supported: too large for the memory"),
+    [HP_WHY_RATE] = N_("Not supported: no sample rate"),
 };
 
+/* what and hint marked with N_(): tr() to show them (the log keeps the English) */
 void fail_text(int code, uint32_t why, const char **what, const char **hint)
 {
-    static const char check[] = "Check the file on a computer";
-    *hint = check;
+    *hint = N_("Check the file on a computer");
     switch (code) {
     case Q_EEMPTY:
-        *what = "Empty file (0 bytes)";
-        *hint = "Copy it again";
+        *what = N_("Empty file (0 bytes)");
+        *hint = N_("Copy it again");
         break;
     case PLAYER_ENOAUDIO:
-        *what = "Damaged: no audio found";
+        *what = N_("Damaged: no audio found");
         break;
     case PLAYER_EFORMAT:
-        *what = "Damaged, or not what its name says";
+        *what = N_("Damaged, or not what its name says");
         break;
     case PLAYER_EDECODE:
-        *what = "Damaged: decoding error";
+        *what = N_("Damaged: decoding error");
         break;
     case PLAYER_EUNSUPPORTED:
         *what = why_text[why < sizeof why_text / sizeof *why_text ? why : HP_WHY_NONE];
-        *hint = why == HP_WHY_CHANNELS ? "Convert it to stereo" :
-                why == HP_WHY_HEAAC || why == HP_WHY_AAC_TYPE ? "Convert it to AAC-LC, MP3 or Opus" :
-                "Convert it to FLAC, MP3, AAC-LC or Opus";
+        *hint = why == HP_WHY_CHANNELS ? N_("Convert it to stereo") :
+                why == HP_WHY_HEAAC || why == HP_WHY_AAC_TYPE ? N_("Convert it to AAC-LC, MP3 or Opus") :
+                N_("Convert it to FLAC, MP3, AAC-LC or Opus");
         break;
     case HIFI_EREAD:
-        *what = "Read error";
-        *hint = "Reinsert the card, or check the disk";
+        *what = N_("Read error");
+        *hint = N_("Reinsert the card, or check the disk");
         break;
     case HIFI_EIMG:
-        *what = "Its codec is missing from the firmware";
-        *hint = "Install the firmware again";
+        *what = N_("Its codec is missing from the firmware");
+        *hint = N_("Install the firmware again");
         break;
     default:                                    /* timeout, fault, protocol */
-        *what = "Internal error (core B)";
-        *hint = "Please report it with NEWFWLOG.TXT";
+        *what = N_("Internal error (core B)");
+        *hint = N_("Please report it with NEWFWLOG.TXT");
     }
 }
 
