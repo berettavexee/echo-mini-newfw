@@ -251,6 +251,9 @@ static void bp_report(volatile struct hp_ctl *c, int ready)
                    "(cfsr %x bfar %x hfsr %x)", c->bp.st_calib, c->bp.st_core,
                    hifi_hz / 1000000, c->bp.b_div, c->bp.st_ref, c->bp.st_irqs,
                    c->bp.st_load, f, c->bp.cfsr, c->bp.bfar, c->bp.hfsr);
+        log_printf("bprobe: core B at %u MHz, cycles for 32 KiB read: SYSRAM %u, HIGHRAM0 %u, "
+                   "HIGHRAM1 %u; 1,000 reads: DMA SAR %u, TIMER1 %u", hifi_hz / 1000000,
+                   c->bp.c_sys, c->bp.c_hr0, c->bp.c_hr1, c->bp.c_sar, c->bp.c_t1);
     }
     if (bp_runs <= 40)
         log_printf("bprobe: DMA SAR read by core B %08x then %08x %u us later%s; core A now %08x",

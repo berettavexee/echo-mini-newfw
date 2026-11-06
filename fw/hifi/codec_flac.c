@@ -161,20 +161,36 @@ int codec_run(void)
         if (!n)
             return no_frames();
         out_wait(n * 4);
-        for (uint32_t i = 0; i < n; i++) {
-            uint16_t l = (uint16_t)pcm.s16[i * ch], r = (uint16_t)pcm.s16[i * ch + ch - 1];
-            out_word(l | (uint32_t)r << 16);
-        }
+        if (ch >= 2) {                          /* packed in place (word i from sample 2i on), */
+            uint32_t *w = (uint32_t *)pcm.s16;  /* then one block (0.99r30) */
+            if (ch > 2)
+                for (uint32_t i = 0; i < n; i++)
+                    w[i] = (uint16_t)pcm.s16[i * ch] | (uint32_t)(uint16_t)pcm.s16[i * ch + ch - 1] << 16;
+            out_write(w, n);
+        } else
+            for (uint32_t i = 0; i < n; i++) {
+                uint16_t l = (uint16_t)pcm.s16[i];
+                out_word(l | (uint32_t)l << 16);
+            }
         out_done(n);
     } else {
         uint32_t n = (uint32_t)drflac_read_pcm_frames_s32(flac, want, pcm.s32);
         if (!n)
             return no_frames();
         out_wait(n * 8);
-        for (uint32_t i = 0; i < n; i++) {
-            out_word((uint32_t)pcm.s32[i * ch]);
-            out_word((uint32_t)pcm.s32[i * ch + ch - 1]);
-        }
+        if (ch >= 2) {                          /* packed in place, then one block (0.99r30) */
+            uint32_t *w = (uint32_t *)pcm.s32;
+            if (ch > 2)
+                for (uint32_t i = 0; i < n; i++) {
+                    w[2 * i] = (uint32_t)pcm.s32[i * ch];
+                    w[2 * i + 1] = (uint32_t)pcm.s32[i * ch + ch - 1];
+                }
+            out_write(w, 2 * n);
+        } else
+            for (uint32_t i = 0; i < n; i++) {
+                out_word((uint32_t)pcm.s32[i]);
+                out_word((uint32_t)pcm.s32[i]);
+            }
         out_done(n);
     }
     return 1;

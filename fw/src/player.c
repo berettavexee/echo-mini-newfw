@@ -401,10 +401,13 @@ static const uint8_t gov_div[] = { 8, 7, 6, 5, 4, 3, 2 };   /* 50 57 67 80 100 1
 #define GOV_LEVELS ((int)sizeof gov_div)
 static int player_clock;                               /* 0: automatic, else a fixed divider */
 static struct {
-    int level, boost, low, hot;
-    uint32_t t0, t_last, idle_last;
+    int level, boost;
+    uint32_t t0, t_last, idle_last, low_ms;
     int32_t fill_last;
     uint32_t windows, sum_mhz10, max_mhz10, max_load, changes, ms[GOV_LEVELS];
+    uint32_t sum_ms, ups, downs, safety, min_fill_ms;
+    uint32_t acc_busy, acc_el;                  /* the load judged over 250 ms at least */
+    uint64_t wsum_mhz10;                        /* MHz used x ms: the mean over time */
 } gov;
 
 static uint32_t b_idle(void)
@@ -444,6 +447,7 @@ static void gov_start(void)
         gov.changes = 0;
         gov.boost = 1;
     }
+    gov.min_fill_ms = 0xffffffffu;
     gov.t0 = gov.t_last = timer24();
 }
 
@@ -455,10 +459,20 @@ static void gov_begin(void)
     gov.fill_last = audio_fill();
 }
 
+/* The window (0.99r29, ETUDE §107): a quarter of the PCM ring's duration at the rate playing,
+ * 16 to 250 ms (250 at 44.1 kHz / 16 bits, 16 at 192 kHz / 24 bits: the ring lasts 64 ms) */
+static uint32_t gov_window_ticks(void)
+{
+    uint32_t bps = audio.rate * audio.frame_bytes;
+    uint32_t ms = bps ? (uint32_t)((uint64_t)audio.ring_size * 1000 / bps) / 4 : 250;
+    ms = ms < 16 ? 16 : ms > 250 ? 250 : ms;
+    return ms * 24000;                          /* TIMER1: 24 MHz */
+}
+
 static void gov_window(void)
 {
     uint32_t now = timer24(), el = now - gov.t_last;
-    if (el < 6000000)                           /* 250 ms */
+    if (el < gov_window_ticks())
         return;
     uint32_t idle = b_idle(), di = idle - gov.idle_last;
     uint32_t busy = el > di ? el - di : 0;
@@ -466,6 +480,8 @@ static void gov_window(void)
     uint32_t mhz10 = hifi_hz / 100000 * load / 1000;            /* tenths of MHz used */
     gov.windows++;
     gov.sum_mhz10 += mhz10;
+    gov.sum_ms += el / 24000;
+    gov.wsum_mhz10 += (uint64_t)mhz10 * (el / 24000);
     player.b_load = load;
     player.b_mhz10 = mhz10;
     if (mhz10 > gov.max_mhz10)
@@ -475,30 +491,66 @@ static void gov_window(void)
     if (gov.level >= 0)
         gov.ms[gov.level] += el / 24000;
     int32_t fill = audio_fill();
+    uint32_t bps = audio.rate * audio.frame_bytes;
+    int32_t ring_ms = bps ? (int32_t)((uint64_t)audio.ring_size * 1000 / bps) : 0;
+    int32_t fill_ms = bps && fill > 0 ? (int32_t)((uint64_t)fill * 1000 / bps) : 0;
+    if (!gov.boost && (uint32_t)fill_ms < gov.min_fill_ms)
+        gov.min_fill_ms = (uint32_t)fill_ms;
     if (!player_clock) {
         if (gov.boost) {
             if (fill >= (int32_t)audio.ring_size - 16384 || now - gov.t0 > 72000000)
                 gov.boost = 0;                  /* DAC ring full (or 3 s): end of the boost */
         } else {
-            uint32_t need10 = mhz10 * 4 / 3;    /* for a 75 % load */
+            /* the lowest level that keeps the load at 75 % (ETUDE §107) */
+            uint32_t need10 = mhz10 * 4 / 3;
             int want = GOV_LEVELS - 1;
             for (int i = 0; i < GOV_LEVELS; i++)
                 if (4000 / gov_div[i] >= need10) {
                     want = i;
                     break;
                 }
-            gov.hot = load > 850 ? gov.hot + 1 : 0;
-            int falling = fill < (int32_t)(audio.ring_size / 4 * 3) && fill + 4096 < gov.fill_last;
-            if ((falling || gov.hot >= 2) && gov.level < GOV_LEVELS - 1) {
+            /* the load over 250 ms at least (a short window sees a codec's bursts) */
+            gov.acc_busy += busy;
+            gov.acc_el += el;
+            int judged = gov.acc_el >= 6000000;
+            uint32_t lload = judged ? (uint32_t)((uint64_t)gov.acc_busy * 1000 / gov.acc_el) : 0;
+            if (judged) {
+                uint32_t lmhz10 = hifi_hz / 100000 * lload / 1000;
+                need10 = lmhz10 * 4 / 3;
+                want = GOV_LEVELS - 1;
+                for (int i = 0; i < GOV_LEVELS; i++)
+                    if (4000 / gov_div[i] >= need10) {
+                        want = i;
+                        break;
+                    }
+                gov.acc_busy = gov.acc_el = 0;
+            }
+            if (ring_ms && fill_ms < ring_ms / 4) {         /* the ring under a quarter */
+                if (gov.level < GOV_LEVELS - 1)
+                    gov.safety++;
+                gov_set(GOV_LEVELS - 1);
+                gov.low_ms = 0;
+            } else if (ring_ms && fill_ms < ring_ms / 2) {  /* under half: a level up at least */
+                if (gov.level < GOV_LEVELS - 1) {
+                    gov.safety++;
+                    gov_set(want > gov.level ? want : gov.level + 1);
+                }
+                gov.low_ms = 0;
+            } else if (!judged) {
+                ;                                           /* the load not judged yet */
+            } else if (lload > 850 && gov.level < GOV_LEVELS - 1) { /* over 85 %: up at once */
                 gov_set(want > gov.level ? want : gov.level + 1);
-                gov.low = gov.hot = 0;
-            } else if (want < gov.level) {
-                if (++gov.low >= 4) {           /* 1 s below: one level down */
-                    gov_set(gov.level - 1);
-                    gov.low = 0;
+                gov.ups++;
+                gov.low_ms = 0;
+            } else if (lload < 650 && want < gov.level) {   /* under 65 % for 1 s: straight */
+                gov.low_ms += 250;                          /* down to the level for 75 % */
+                if (gov.low_ms >= 1000) {
+                    gov_set(want);
+                    gov.downs++;
+                    gov.low_ms = 0;
                 }
             } else
-                gov.low = 0;
+                gov.low_ms = 0;
         }
     }
     gov.fill_last = fill;
@@ -508,12 +560,14 @@ static void gov_window(void)
 
 static void gov_report(const char *name)
 {
-    uint32_t mean = gov.windows ? gov.sum_mhz10 / gov.windows : 0;
-    log_printf("clock: %s: core B %s, used mean %u.%u MHz, max %u.%u MHz (250 ms), max load %u.%u %%; "
-               "ms at 50/57/67/80/100/133/200 MHz: %u %u %u %u %u %u %u; %u changes", name,
+    uint32_t mean = gov.sum_ms ? (uint32_t)(gov.wsum_mhz10 / gov.sum_ms) : 0;
+    log_printf("clock: %s: core B %s, used mean %u.%u MHz, max %u.%u MHz (window), max load %u.%u %%; "
+               "ms at 50/57/67/80/100/133/200 MHz: %u %u %u %u %u %u %u; %u changes (%u up, %u "
+               "down, %u for the ring); lowest fill %u ms", name,
                player_clock ? "fixed" : "automatic", mean / 10, mean % 10, gov.max_mhz10 / 10,
                gov.max_mhz10 % 10, gov.max_load / 10, gov.max_load % 10, gov.ms[0], gov.ms[1],
-               gov.ms[2], gov.ms[3], gov.ms[4], gov.ms[5], gov.ms[6], gov.changes);
+               gov.ms[2], gov.ms[3], gov.ms[4], gov.ms[5], gov.ms[6], gov.changes, gov.ups,
+               gov.downs, gov.safety, gov.min_fill_ms == 0xffffffffu ? 0 : gov.min_fill_ms);
 }
 
 /* The longest a drain may take: the DAC ring at the rate playing (1.1 s at 44.1 kHz, 6.1 s at

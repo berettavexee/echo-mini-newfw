@@ -259,7 +259,6 @@ void in_skip(uint32_t n)
 #define ST_RVR 0xe000e014u
 #define ST_CVR 0xe000e018u
 
-static uint32_t st_hz;                          /* the core clock the SysTick is set for */
 static int pcm_started;                         /* a frame written: a late DMA is an underrun
                                                  * (before, the silence ahead of a seek runs out
                                                  * while the first frames decode: device, r21) */
@@ -287,25 +286,57 @@ static void pcm_update(void)
     }
     if ((uint32_t)fill < ctl->pcm_min)
         ctl->pcm_min = (uint32_t)fill;
-    if (ctl->b_hz != st_hz) {                   /* a wake every 2 ms while there is room */
-        st_hz = ctl->b_hz;
-        REG(ST_CSR) = 0;
-        if (st_hz) {
-            uint32_t load = st_hz / 500;
-            REG(ST_RVR) = (load > 0xffffff ? 0xffffff : load) - 1;
-            REG(ST_CVR) = 0;
-            REG(ST_CSR) = 7;                    /* the core clock, its interrupt, on */
-        }
-    }
 }
+
+/* The wake of core B while it plays (0.99r28): its SysTick, at the time the DMA takes to free
+ * 4 KiB (2 to 20 ms: 20 ms at 44.1 kHz / 16 bits, 2.7 ms at 192 kHz / 24 bits; 2 ms always
+ * until 0.99r27), on its clock as core A gives it; off otherwise (the doorbell wakes it for a
+ * command). Armed at each sleep while playing: a codec may wait for more room than 4 KiB (an
+ * MP3 frame: 4.5 KiB). */
+static void tick_arm(void)
+{
+    static uint32_t hz, bps;
+    if (ctl->state != HP_PLAYING || ctl->pcm_hold || !ctl->b_hz || !ctl->pcm_bps) {
+        if (hz) {
+            REG(ST_CSR) = 0;
+            hz = 0;
+        }
+        return;
+    }
+    if (ctl->b_hz == hz && ctl->pcm_bps == bps)
+        return;
+    hz = ctl->b_hz;
+    bps = ctl->pcm_bps;
+    uint32_t us = (uint32_t)(4096ull * 1000000 / bps);
+    us = us < 2000 ? 2000 : us > 20000 ? 20000 : us;
+    uint64_t load = (uint64_t)hz / 1000000 * us;
+    REG(ST_CSR) = 0;
+    REG(ST_RVR) = (uint32_t)(load > 0xffffff ? 0xffffff : load) - 1;
+    REG(ST_CVR) = 0;
+    REG(ST_CSR) = 7;                            /* the core clock, its interrupt, on */
+}
+
+/* Room in the ring (0.99r28): the DMA position read again after each sleep, or when the room
+ * known runs under 2 KiB; in between, the room known goes down with what is written (an older
+ * position only gives less room). Before, the SAR was read at every write. */
+static int slept = 1;                           /* set by sleep_until_rung() */
+
+static void beep_check(void);
 
 static uint32_t raw_space(void)
 {
+    beep_check();                               /* once a block, not once a word (0.99r30) */
     if (ctl->pcm_hold)
         return 0;
-    pcm_update();
-    uint32_t fill = ctl->pcm_wr - ctl->pcm_rd;
-    return fill < HP_OUT_SIZE - HP_OUT_GUARD ? HP_OUT_SIZE - HP_OUT_GUARD - fill : 0;
+    uint32_t lim = HP_OUT_SIZE - HP_OUT_GUARD, fill = ctl->pcm_wr - ctl->pcm_rd;
+    uint32_t room = fill < lim ? lim - fill : 0;
+    if (slept || room < 2048) {
+        slept = 0;
+        pcm_update();
+        fill = ctl->pcm_wr - ctl->pcm_rd;
+        room = fill < lim ? lim - fill : 0;
+    }
+    return room;
 }
 
 /* ---- battery beeps (0.99r20, the mixer core A had, ETUDE §43): while a pattern runs, the
@@ -382,14 +413,24 @@ static void raw_write(const uint32_t *w, uint32_t words)
     ctl->pcm_wr += n;
 }
 
+/* One word (0.99r30: the shortest path; it was a beep check and a division a word, which doubled
+ * core B's load in 24-bit WAV, ETUDE §108): the ring offset of the write counter kept, so that
+ * only a wrap or a counter moved elsewhere (a restart, an underrun) costs the modulo; a new beep
+ * pattern is seen at the next room check (raw_space), a block later at most */
+static uint32_t wr_at, wr_off;                  /* the next word's counter, its offset */
+
 static void raw_word(uint32_t w)
 {
-    uint32_t at = ctl->pcm_wr;
-    beep_check();
+    uint32_t at = ctl->pcm_wr, o = wr_off;
+    if (at != wr_at)
+        o = at % HP_OUT_SIZE;
     if (bp.on || bp.mix)
         w = beep_mix(w, at);
-    *(volatile uint32_t *)(HP_OUT_BASE + at % HP_OUT_SIZE) = w;
-    ctl->pcm_wr = at + 4;
+    *(volatile uint32_t *)(HP_OUT_BASE + o) = w;
+    o += 4;
+    wr_off = o == HP_OUT_SIZE ? 0 : o;
+    wr_at = at + 4;
+    ctl->pcm_wr = wr_at;
     pcm_started = 1;
 }
 
@@ -576,11 +617,29 @@ void *rt_alloc(uint32_t n)
 }
 
 /* ---- the C library functions the compiler and the decoders call ---- */
+/* 0.99r31: the source read by aligned words whatever the destination (ETUDE §108): the input
+ * ring is in SYSRAM, where a read costs about 16 cycles of core B whatever its width; a source
+ * off by 1 to 3 bytes (a 24-bit WAV: 6-byte frames) was copied byte by byte, 4 times the reads */
 void *memcpy(void *d, const void *s, size_t n)
 {
     uint8_t *dp = d;
     const uint8_t *sp = s;
-    if (!(((uint32_t)dp | (uint32_t)sp) & 3)) {
+    if (n >= 8)
+        while ((uint32_t)sp & 3) {
+            *dp++ = *sp++;
+            n--;
+        }
+    if ((uint32_t)sp & 3)
+        ;                                       /* short: bytes below */
+    else if ((uint32_t)dp & 3)                  /* words read, bytes written */
+        for (; n >= 4; n -= 4, dp += 4, sp += 4) {
+            uint32_t w = *(const uint32_t *)sp;
+            dp[0] = (uint8_t)w;
+            dp[1] = (uint8_t)(w >> 8);
+            dp[2] = (uint8_t)(w >> 16);
+            dp[3] = (uint8_t)(w >> 24);
+        }
+    else {
         for (; n >= 16; n -= 16, dp += 16, sp += 16) {
             ((uint32_t *)dp)[0] = ((const uint32_t *)sp)[0];
             ((uint32_t *)dp)[1] = ((const uint32_t *)sp)[1];
@@ -631,6 +690,7 @@ int abs(int x)
 /* ---- main loop ---- */
 static void sleep_until_rung(void)
 {
+    tick_arm();
     __asm volatile ("cpsid i");
     if (!rung) {
         uint32_t t0 = TIMER1_NOW();
@@ -642,6 +702,7 @@ static void sleep_until_rung(void)
     rung = 0;
     __asm volatile ("cpsie i");
     ctl->wakeups++;
+    slept = 1;
 }
 
 void rt_wait(void)
@@ -738,6 +799,42 @@ static uint32_t st_measure(uint32_t csr)       /* SysTick counts in 1 ms (no int
     return (a - b) & 0xffffff;
 }
 
+/* Core B's cycles for a task, on its SysTick (24 bits: up to 84 ms at 200 MHz) */
+static uint32_t st_start(void)
+{
+    REG(ST_CSR) = 0;
+    REG(ST_RVR) = 0xffffff;
+    REG(ST_CVR) = 0;
+    REG(ST_CSR) = 5;
+    return REG(ST_CVR);
+}
+
+static uint32_t st_since(uint32_t a)
+{
+    uint32_t b = REG(ST_CVR);
+    REG(ST_CSR) = 0;
+    return (a - b) & 0xffffff;
+}
+
+static uint32_t bench_read(uint32_t base)       /* 32 KiB read through a 1 KiB buffer */
+{
+    static uint32_t buf[256];
+    uint32_t a = st_start();
+    for (uint32_t k = 0; k < 32; k++)
+        memcpy(buf, (const void *)(base + k * 1024), 1024);
+    return st_since(a);
+}
+
+static uint32_t bench_reg(uint32_t reg)         /* 1,000 reads */
+{
+    uint32_t a = st_start(), x = 0;
+    for (int k = 0; k < 1000; k++)
+        x += REG(reg);
+    uint32_t c = st_since(a);
+    __asm volatile("" : : "r"(x));
+    return c;
+}
+
 static void probe(void)
 {
     volatile uint32_t *got = ctl->bp.got;
@@ -780,6 +877,11 @@ static void probe(void)
     }
     probing = 0;
     REG(ACTLR) &= ~2u;
+    ctl->bp.c_sys = bench_read(0x03038000u);    /* SYSRAM, free since 0.99r21 */
+    ctl->bp.c_hr0 = bench_read(0x00000000u);    /* HIGHRAM0 (our code), as core B sees it */
+    ctl->bp.c_hr1 = bench_read(HP_OUT_BASE);    /* HIGHRAM1 (the PCM ring) */
+    ctl->bp.c_sar = bench_reg(0x60000000u + 5 * 0x58);
+    ctl->bp.c_t1 = bench_reg(0x400e0028u);
     ctl->bp.step = BP_DONE;
 }
 #endif

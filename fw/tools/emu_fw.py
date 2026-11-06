@@ -30,8 +30,9 @@ write lost, the emulation stopped); with --dump-disk, the half-written disk is k
 --cycles: the time comes from the instructions run instead (ETUDE §94): core A runs in slices
 of --slice instructions (20000), each one advancing the clock by slice / cpu_hz (the
 firmware's own variable, so it follows the PLL and the clocks on the crystal); ticks() and
-millis() read it, busy waits cost instructions as on the device, core B runs 100 instructions a
-microsecond while awake. TIMER1 (24 MHz) follows the same clock in both modes.
+millis() read it, busy waits cost instructions as on the device, core B runs its clock (hifi_hz,
+the governor's) over --b-cpi instructions a second while awake (100 a microsecond until 0.99r27).
+TIMER1 (24 MHz) follows the same clock in both modes.
 --mmc-lat RC,RS,WC,WS and --sd-lat RC,RS,WC,WS (with --cycles): the eMMC / microSD answer
 after RC + RS x sectors us for a read, WC + WS x sectors us for a write (FIFO empty, data busy
 meanwhile), so that I/O-bound times show. With --cycles the eMMC takes 100,20,450,80 unless
@@ -397,6 +398,7 @@ def main():
     # by a counter that advances by 50 us per call (stored in unused PMU-SRAM).
     t = sym["ticks"] & ~1
     cycles = "--cycles" in sys.argv
+    sh.lazy = cycles                              # core B woken: it runs in A's slices
     # --cycles: a read only (ldr, ldr, nop, nop, bx lr): a store back could, when a slice ends
     # between the load and the store, put the clock back to its value before the slice
     stub = bytes.fromhex("0249" "0868" + ("00bf00bf" if cycles else "32300860") + "7047" "00bf") + \
@@ -475,11 +477,18 @@ def main():
         ring_trace[0].write(f"{t_us} {w[3]} {w[2]} {w[14]} {w[17]} {(w[9] - rb_rd) & 0xffffffff} "
                             f"{(pcm_wr - pcm_rd) & 0xffffffff} {w[10]} {hold}\n")
 
+    # core B runs b_ips instructions a second: its clock (hifi_hz, set by core A's governor)
+    # over --b-cpi (cycles per instruction, 1.0 by default; until 0.99r27: 100 MHz fixed)
+    b_cpi = float(opt("--b-cpi", "1.0"))
+
+    def b_ips(uc):
+        return (b_hz(uc) or 100_000_000) / b_cpi
+
     def b_hz(uc):                                 # core B's clock as core A set it
         return struct.unpack("<I", uc.mem_read(sym["hifi_hz"], 4))[0] if "hifi_hz" in sym else 0
 
     # cpu_wait (a return here, no SysTick): the time goes on to the next 1 ms tick, as the WFI
-    # waits on the device, and core B runs for it (100 instructions a microsecond)
+    # waits on the device, and core B runs for it (at its clock)
     def idle_tick(uc, addr, size, _):
         now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
         nxt = (now // 1000 + 1) * 1000
@@ -487,7 +496,7 @@ def main():
         if stop_us and nxt >= stop_us:
             uc.emu_stop()
         if sh.b and not sh.b.sleeping:
-            sh.b.step((nxt - now) * 100)
+            sh.b.step(int((nxt - now) * b_ips(uc) / 1e6))
         if sh.b:
             sh.b.systick(nxt, b_hz(uc))
         if pcm_out and sh.b:
@@ -726,10 +735,19 @@ def main():
                 done += k
                 hz = struct.unpack("<I", u.mem_read(hz_at, 4))[0] if hz_at else 24000000
                 clk = struct.unpack("<I", u.mem_read(CLOCK, 4))[0]
-                now = max(now, float(clk)) + k * 1e6 / max(hz, 1000000)
+                start = max(now, float(clk))
+                now = start + k * 1e6 / max(hz, 1000000)
                 u.mem_write(CLOCK, struct.pack("<I", int(now) & 0xffffffff))
-                if sh.b and not sh.b.sleeping:
-                    sh.b.step(int(k * 1e8 / max(hz, 1000000)))
+                if sh.b and (not sh.b.sleeping or getattr(sh.b, "woken", False)):
+                    span = now - start                  # at core B's clock (0.99r27), in 8
+                    n = int(k * b_ips(u) / max(hz, 1000000))    # pieces: the TIMER1 core B
+                    for p in range(8):                  # reads moves with the pieces it ran
+                        if not sh.b or (sh.b.sleeping and not sh.b.woken):
+                            break                       # (its load, from its sleeps, measured)
+                        sh.b.t_back = span * (8 - p) / 8
+                        sh.b.step(max(1, n // 8))
+                    if sh.b:
+                        sh.b.t_back = 0
                 if sh.b:
                     sh.b.systick(int(now), b_hz(u))
                 if ring_trace and now >= ring_trace[1]:

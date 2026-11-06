@@ -221,6 +221,9 @@ struct hp_ctl {
                                                core clock and on the reference clock */
         uint32_t st_irqs, st_load;      /* B: SysTick interrupts in 20 ms, its reload value */
         uint32_t b_div;                 /* A: core B's clock divider at the start */
+        /* 0.99r27: core B's cycles (SysTick on its clock) for 32 KiB read from SYSRAM, HIGHRAM0,
+         * HIGHRAM1, and for 1,000 reads of the DMA's SAR and of TIMER1 */
+        uint32_t c_sys, c_hr0, c_hr1, c_sar, c_t1;
     } bp;
 #endif
 };

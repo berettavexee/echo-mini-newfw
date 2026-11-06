@@ -4165,3 +4165,61 @@ Vérification : le PCM que le cœur B écrit (capture `--pcm`, scénarios `pcm-*
 **Marges.** Contre un blocage du cœur A, la protection est la durée de l'anneau d'entrée plus celle de l'anneau PCM (le cœur B décode ce qui reste) : 3 à 5 s en compressé avec perte, 1,9 s en FLAC 16/44,1, 1,1 s en WAV 16/44,1, ≈ 450 ms en FLAC 24/96, ≈ 360 ms en FLAC 24/192, ≈ 300 ms en WAV 24/96, **≈ 150 ms en WAV 24/192**. Contre un retard du cœur B, l'anneau PCM : 0,5 s jusqu'à 48 kHz, 64 ms en 24/192 pour au plus 13 ms de creux au changement de piste. Les anneaux sont donc bien dimensionnés ; le seul point juste est le WAV haute résolution, face aux blocages du cœur A qui restent : un **montage de la carte** demandé par la boucle (45 à 253 ms : plus que 150 ms), la recherche Musepack sans table (≈ 400 ms, le son coupé de toute façon), les ouvertures de pistes choisies à la main (20 à 130 ms, son coupé), un dossier ouvert (1 à 30 ms), l'écriture du journal (3 à 5 ms).
 
 **r26 — la carte montée d'office** (décision de l'utilisateur : plus simple et plus sûr que la tâche de stockage, le montage marche) : au démarrage avant la reprise (rien ne joue), au retour d'une session USB, de l'installateur ou des écrans système (la musique est arrêtée), et quand une carte est remise si rien ne s'entend. Avant, elle l'était au premier accès : une lecture depuis la mémoire interne, puis « SD card » ouvert dans le navigateur, bloquait la boucle le temps du montage. Reste au premier accès : une carte remise pendant une lecture. Test `sd-boot` (une carte FAT32 à la mise sous tension : montée avant la liste du haut) : PASS en r26, échoue en r25.
+
+## 107. Refonte, étape 6 : l'horloge du cœur B (images 99R27P, 99R28, 99R29, 2026-11-06)
+
+**Les autres firmwares** (idées seulement) : aucun ne règle l'horloge du cœur B sur une mesure. Le firmware d'origine (schéma du SDK Rockchip, dont une copie est dans le dépôt de ReChord) a une table de fréquences par « application » : MP3 24 / 36 MHz, AAC 36 / 80, WAV 88, Ogg 120 / 180 / 260, FLAC 150 / 220, APE, ALAC haute résolution et DSD jusqu'à 400 MHz ; le cycle d'attente des mémoires au-delà de 300 MHz seulement. ReChord tient le cœur B à fréquence fixe (100 MHz) ; sa régulation n'est « pas faite, trop risquée sans mesure » ; son gain contre la chaleur a été de faire dormir le cœur B (WFI, SysTick de 1 ms), ce que nous faisons. EchoPod et Podium : PLL divisée sous 100 MHz, pleine vitesse pour AAC, Opus et FLAC avec égaliseur, choisie à l'ouverture. Notre boucle de retour reste une spécificité (décision de l'utilisateur), réglée sur des critères plus fins.
+
+**Ce que montrait la r21 sur l'appareil** : l'accélération à 200 MHz à chaque début de piste puis une descente d'un niveau par seconde (6 s de 200 à 50 MHz : 16 à 41 % du temps à 200 MHz sur des pistes courtes, même pour un WAV de 2 MHz) ; des règles pensées pour l'ancien anneau de 1,1 s, alors que l'anneau PCM ne fait plus que 64 ms en 24/192 ; une charge du cœur B doublée en WAV haute résolution depuis la r18 (24/192 : 35 → 62 MHz ; 176,4 : 32 → 58 ; 128 : 23 → 42).
+
+**r27 — mesurer.** Dans l'émulateur (`--cycles`), le cœur B exécute maintenant un nombre d'instructions proportionnel à son horloge (`hifi_hz` divisé par `--b-cpi`, 1,0 par défaut) au lieu de 100 MHz fixes, ses réveils (sonnette, SysTick) attendent les tranches de temps du cœur A, et le TIMER1 qu'il lit avance avec le travail fait : sa charge, mesurée par ses sommeils, devient visible (elle était à 0) ; elle vaut à peu près la moitié de celle de l'appareil (`--b-cpi 1.8` l'en approche). Image de test `NEWFWR27P` (`ECHO_BPROBE`) : les cycles du cœur B pour lire 32 Kio en SYSRAM, en HIGHRAM0 et en HIGHRAM1, et pour 1 000 lectures du SAR de la DMA et de TIMER1 (sur l'appareil seulement : l'émulateur ne compte pas les cycles de la SysTick).
+
+**r28 — alléger le cœur B.** La position de la DMA n'est plus relue à chaque écriture mais après chaque sommeil, ou quand la place connue tombe sous 2 Kio (une position ancienne ne donne que moins de place). Sa SysTick n'est armée que pendant la lecture, à la période où la DMA libère 4 Kio (2 à 20 ms : 20 ms en 44,1/16, 2,7 ms en 24/192 ; 2 ms toujours avant). Premier essai : un réveil armé seulement sous 4 Kio de place laissait le cœur B dormir pour toujours quand le décodeur MP3 attendait 4,5 Kio (une trame) ; armé à chaque sommeil pendant la lecture. Réveils divisés par deux en 16 bits (210 à 250 par piste de 5 s au lieu de 450 à 575) ; PCM identique à la r23 (`pcm-chain`, `pcm-seek-mpc`), sans blanc (`gapless-mixed`), `perf-stall` PASS.
+
+**r29 — la régulation** (seuils de l'utilisateur) :
+- **la fenêtre** suit l'anneau : un quart de sa durée, de 16 à 250 ms (16 ms en 24/192) ; à chaque fenêtre, les **sécurités** sur l'anneau : sous la moitié de sa durée, un niveau au moins de plus ; sous le quart, le maximum ;
+- **la charge** est jugée sur 250 ms au moins (une fenêtre courte voit les rafales d'un codec : un premier essai, qui jugeait chaque fenêtre, tenait le FLAC 24/96 à 100 MHz pour 38 MHz de besoin) : **au-dessus de 85 %**, on monte aussitôt au niveau qui donne 75 % ; **sous 65 % pendant 1 s**, on descend **directement** à ce niveau (avant : un niveau par seconde) ;
+- l'accélération du début de piste est gardée (décision de l'utilisateur) ;
+- la ligne `clock:` donne les montées, descentes, interventions de sécurité et le plus bas remplissage en ms.
+
+Scénario `gov-long` (Vorbis, Opus, Musepack, FLAC 24/96, WAV 24/192, 20 s chacun, `--cycles --b-cpi 1.8`) :
+
+| Piste | Changements r28 → r29 | Niveau tenu (r29) | Charge moyenne | Plus bas de l'anneau | Manques |
+|---|---|---|---|---|---|
+| Vorbis | 6 → 2 | 50-57 MHz | 36 MHz | 496 ms | 0 |
+| Opus | 3 → 1 | 80 MHz | 57 MHz | 457 ms | 0 |
+| Musepack | 6 → 1 | 50 MHz | 13 MHz | 480 ms | 0 |
+| FLAC 24/96 | 19 → 2 | 50 MHz | 35 MHz | 77 ms (sur 128) | 0 |
+| WAV 24/192 | 4 → 4 | 57 MHz | 41 MHz | 51 ms (sur 64) | 0 |
+
+Les sécurités ne se sont pas déclenchées (l'anneau toujours au-dessus de la moitié). Vérification de la r29 : 18 tests `emutest` PASS ; `perf-stall` PASS ; sans blanc exact (`gapless-wav`, `-flac`, `-mixed`) ; PCM identique à la r23 aux coutures près ; 31 scénarios contre la r26 sans faute, 52 captures identiques sur 54 (l'ordre aléatoire, l'écriture de l'installateur). À voir sur l'appareil : la charge réelle (environ le double), l'Opus le plus lourd, le WAV 24/192, et les sondes de la r27.
+
+## 108. La charge du cœur B en WAV 24 bits : écriture de l'anneau PCM et lecture de la SYSRAM (images 99R27P, 99R30, 99R31, 2026-11-06, appareil)
+
+**Constat** (r21, puis r27p sur l'appareil) : depuis la r18, la charge moyenne du cœur B en WAV 24 bits a doublé (192 kHz : 35 MHz en r17, 62 à 66 MHz ; 96 kHz : 14 → 27 MHz). Le WAV 16 bits bouge peu en valeur absolue (64 kHz : 0,7 → 2,1 MHz).
+
+**La sonde de la r27p** (`work/hwlog/2026-11-06_0.99r27p/`, cœur B à 200 MHz, en cycles) : 32 Kio lus par `memcpy` dans un tampon de 1 Kio : SYSRAM 131 667, HIGHRAM0 49 477, HIGHRAM1 49 445 (la SYSRAM 2,7 fois plus lente : environ 16 cycles par mot) ; 1 000 lectures du SAR de la DMA : 16 003, de TIMER1 : 20 996. Les accès de la sonde : SYSRAM et PMU-SRAM lues et écrites justes, aucune faute (comme en r17, §102).
+
+**Deux causes** :
+1. **l'écriture mot à mot dans l'anneau PCM** (`raw_word`) : depuis la r18, chaque mot y faisait la vérification des bips (lecture du bloc de contrôle), un modulo sur 96 Kio (une division : la taille n'est pas une puissance de deux) et trois écritures ; la r17 faisait une lecture, une écriture et une comparaison. En 24 bits, deux mots par trame ;
+2. **la lecture de l'anneau d'entrée en SYSRAM** (depuis la r18 ; il était en HIGHRAM) : le `memcpy` du cœur B ne copiait par mots que si la source et la destination étaient alignées ; une trame de 6 octets (24 bits stéréo) laisse la position de lecture désalignée une fois sur deux, et la copie se faisait alors octet par octet, chaque octet coûtant une lecture complète de la SYSRAM.
+
+**r30** : `raw_word` réduit au plus court (le décalage dans l'anneau gardé d'un mot au suivant, le modulo seulement si le compteur a bougé ailleurs ; le retour au début par comparaison) ; la vérification des bips une fois par bloc (`raw_space`, `raw_write`) au lieu d'une fois par mot ; le WAV non 16 bits stéréo converti dans un tampon local de 256 mots puis écrit par `out_write`, le FLAC stéréo (16 et 24 bits) écrit d'un bloc (les trames tassées sur place au-delà de deux canaux). **r31** : `memcpy` lit la source par mots alignés quelle que soit la destination (les premiers octets un par un, puis des mots lus, écrits par mots ou par octets).
+
+**Sur l'appareil** (`work/hwlog/2026-11-06_0.99r30/`, `..._0.99r31/` ; les 15 fréquences de `test_rates`, tous les formats, 33 et 46 pistes) — charge moyenne du cœur B :
+
+| WAV 24 bits | r17 | r27p | r30 | r31 |
+|---|---|---|---|---|
+| 88,2 kHz | 12 MHz | 24 MHz | 11,5 MHz | 11,6 MHz |
+| 96 kHz | 14 MHz | 27 MHz | 13 MHz | 13,1 MHz |
+| 128 kHz | 23 MHz | 44,5 MHz | 26,7 MHz | 19,3 MHz |
+| 176,4 kHz | 32 MHz | 61 MHz | 40 MHz | 36,2 MHz |
+| 192 kHz | 35 MHz | 63 à 66 MHz | 44 à 47 MHz | 33,1 MHz |
+
+Les autres formats en r31 : FLAC 16/44,1 9 à 10 MHz, MP3 27 MHz, AAC 27 MHz, Vorbis 37 à 47 MHz, Opus 54 à 62 MHz. Aucun manque du cœur B, aucune faute, aucun tour perdu en r31 (deux « tours perdus » en r30 en 24/192 : l'estimation du cœur A pendant le démarrage des DAC, 338 ms pour un anneau de 64 ms ; aucun manque du cœur B). Plus bas de l'anneau PCM : 56 ms sur 64 en 24/192, 81 ms sur 128 en FLAC 24/96. La carte est montée au démarrage (15 ms, exFAT). Les échecs d'ouverture des journaux sont les fichiers de `test_floor0` (Vorbis floor 0, refusés par conception, §62) et de `test_damanged_files`.
+
+**Reste** : à 176,4 et 192 kHz la régulation oscille entre 50 et 80 MHz (10 changements par piste, charge jusqu'à 100 % sur une fenêtre de 16 ms), l'anneau restant au-dessus de la moitié (38 à 45 ms sur 64) ; une copie par DMA de la SYSRAM vers la HIGHRAM (idée de l'utilisateur) gagnerait encore environ 5 MHz en 24/192 (4 cycles par octet en mots alignés), pour un canal du DMAC partagé avec le cœur A : écartée pour l'instant.
+
+**Émulateur** (r30, r31 ; il ne modélise pas la lenteur de la SYSRAM) : 18 tests `emutest` PASS ; sans blanc exact (`gapless-wav`, `-flac`, `-mixed`) ; `beep-low` identique octet pour octet à la r29 ; `pcm-chain` et `pcm-seek-flac` identiques à la r29 sauf un décalage en un point (1 536 et 320 octets, le temps d'une couture), puis identiques jusqu'à la fin ; la r31 identique octet pour octet à la r30 (`pcm-chain`).
+
+**Question de l'utilisateur, le bip en piste intercalée** : écartée ; le bip attendrait la fin de la piste (ou la couperait : une recherche pour reprendre, 30 à 300 ms de trou) et changerait de fréquence avec les pistes à 96 et 192 kHz ; le mélange par le cœur B tient dans `rt.c` (aucun codec touché) et ne coûte plus rien sans bip (r30).

@@ -8,11 +8,11 @@
 #elif defined(ECHO_FFTCMP)
 #define FW_VERSION "0.99fc"            /* test build: AAC sound from HIFIACC, compared */
 #elif defined(ECHO_BPROBE)
-#define FW_VERSION "0.99r17"           /* test build: what core B can reach (rework step 4) */
+#define FW_VERSION "0.99r27p"          /* test build: what core B can reach, its costs (rework) */
 #elif defined(ECHO_HWTEST)
 #define FW_VERSION "0.99hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.99r26"        /* the rework branch (ROADMAP, ETUDE §97) */
+#define FW_VERSION "0.99r31"        /* the rework branch (ROADMAP, ETUDE §97) */
 #endif
 #define FW_DATE    "2026-11-01"
 

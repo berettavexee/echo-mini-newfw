@@ -4,8 +4,8 @@ State of the ECHO MINI new firmware, kept up to date with each version. The deta
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
 Last update: 2026-11-06, version 0.99 and `main` since (the sound card's remote and Power key,
-the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r26,
-steps 1 to 5, checked on the device up to r21).
+the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r31,
+steps 1 to 6 done, checked on the device up to r31).
 
 ## Done, validated on the device
 
@@ -56,61 +56,40 @@ steps 1 to 5, checked on the device up to r21).
 ## The rework (branch `rework`)
 
 A rework of how the work is shared between the two cores (core B: the whole PCM path to the
-DMA; core A: one loop with a time budget, short interrupts), in seven steps, each one released
-and checked on the device before the next; `main` stays the working firmware meanwhile.
+DMA; core A: one loop with a time budget, short interrupts), in seven steps, each one checked
+in the emulator, then on the device; `main` stays the working firmware meanwhile.
 
-1. **Measure** (in progress, 0.99r1-r4, ETUDE §97): the longest gap of the audio path and of
-   the main loops, with the operation behind it, the rings' lowest fill, the DAC ring laps a
-   long wait hides; `fw/tools/perfreport.py` makes the table, the emulator's `perf-*` scenarios
-   (`--cycles`) and device sessions fill it. Found so far, to take out of the audio path before
-   a small PCM ring: the screen waking (120 ms), the DACs starting (337 ms), the card mounting
-   (253 ms), the tags after a big Ogg cover (up to 1.4 s measured); at 24/192 the margin is
-   only 121 ms today. Left: a long device session on r4, the table in the rework document.
-2. **One loop and a stack of screens** (0.99r5-r9, ETUDE §99; checked on the device with r9, the
-   sleep timer still to try there): the screen wakes without blocking (the 120 ms gap gone), the main menu,
-   the settings and the date and time are screens on a stack served by the main loop (its
-   services run whatever the screen), the sleep timer's fade is a step of the loop, the loop's
-   tasks are named in the perf lines. Left: the keys read in the SysTick interrupt (needs a
-   SysTick in the emulator, or the device), the screens that stop the music still in loops of
-   their own (USB, install, sound card, system).
-3. **A storage task** (0.99r10-r16, ETUDE §100-§101; checked on the device with r15): a
-   coroutine run by the main loop 4 ms a pass; the next track's tags read ahead (a 17.9 MB Ogg
-   cover no longer between two tracks), the tree walk and a card mounted there (the whole card,
-   18,257 tracks, in 3.2 s with the music on: 27 ms at most out of the audio path), saves
-   written after the frame. r16: a seek keeps the track's tags (a 2 s block on an Opus with a
-   13.8 MB cover), the bar of a track resumed paused after a power off shows its length. Left
-   blocking: a Musepack seek without a seek table, a folder opened by the browser, a card
-   mounted from the browser.
-4. **Core B writes the PCM ring** (0.99r17-r22, ETUDE §102-§103; r21 checked on the device):
-   the DMA reads core B's 96 KiB output ring in HIGHRAM1 directly (protocol version 2: core B
-   follows the DMA's position itself and wakes on its SysTick every 2 ms; core A no longer
-   copies PCM), the input ring is 96 KiB in SYSRAM (2 to 3.7 s of MP3, Vorbis, AAC), the
-   battery beeps are mixed by core B, the USB sound card uses the input ring's place: 96 KiB of
-   SYSRAM free for the screens. A 500 ms stall of core A's loop: no underrun in MP3 (the
-   input ring is the limit: 300 ms of FLAC 24/96). On the device: codec changes with the ring
-   kept, 15 rates, the sound card, no core B underrun out of seeks. 0.99r23 (ETUDE §104): the
-   resume of a tree queue plays its track at once, the tree walked in the storage task meanwhile
-   (a whole card: about 2.4 s sooner).
-5. **The input ring in segments, the open without a wait** (0.99r24-r25, ETUDE §105): the
-   input ring holds segments of the stream (contiguous in the file and in the ring, their
-   starts in a list of the control block); a jump core B cannot serve is a request core A
-   answers with a new segment (back, forward, Musepack's seek table: one mechanism); the
-   track's hints in a header. A chained track and a seek open while the loop goes on. Gapless
-   checked sample for sample at the DMA (a recording cut in three: WAV, FLAC, WAV/FLAC/WAV).
-   Preparing the next track in the input ring and switching tracks without restarting core B
-   (planned as r26) would change nothing audible now: left out unless a need shows.
-   The rings' use and margins measured (ETUDE §106): well sized; the tightest case, WAV
-   24/192, stands about 150 ms of a core A stall. 0.99r26: the card is mounted at power-on,
-   after the USB, installer and system screens and when put in while nothing plays (it was
-   mounted at its first use: up to 253 ms of the loop).
-6. Core B's clock.
-7. Robustness: a fault record (in sectors preallocated on the internal memory rather than in
-   PMU-SRAM only, ETUDE §98), core B reloaded after a fault, a stall watch.
+| Step | Versions | Checked | ETUDE |
+|---|---|---|---|
+| 1. Measure: the longest gaps of the audio path and of the loops, with the operation behind them, the rings' lowest fill (`fw/tools/perfreport.py`, the emulator's `perf-*` scenarios) | r1-r4 | device (77 min session, r4) | §97 |
+| 2. One loop and a stack of screens: the screen wakes without blocking (the 120 ms gap gone), menu, settings and clock screens served by the main loop, the sleep timer's fade a step of the loop | r5-r9 | device (r9) | §99 |
+| 3. A storage task (a coroutine, 4 ms a pass): the next track's tags read ahead (a 17.9 MB Ogg cover no longer between two tracks), the tree walk (the whole card, 18,257 tracks, 27 ms at most out of the audio path), saves after the frame; a seek keeps the tags | r10-r16 | device (r15, r16) | §100-§101 |
+| 4. Core B writes the PCM ring the DMA reads (96 KiB in HIGHRAM1; core A no longer copies PCM), the input ring 96 KiB in SYSRAM (96 KiB left free for the screens), the battery beeps mixed by core B; r23: the resume of a tree queue plays its track at once, the tree walked meanwhile | r17-r23 | device (r21) | §102-§104 |
+| 5. The input ring in segments (a jump core B cannot serve is a request core A answers: back, forward, Musepack's seek table), a chained track and a seek opened while the loop goes on, gapless checked sample for sample; r26: the card mounted at power-on | r24-r26 | emulator; the card at power-on and album chains on the device (r30, r31) | §105-§106 |
+| 6. Core B's clock: our feedback loop kept, with finer rules (a window of a quarter of the PCM ring; the ring under half a level up, under a quarter the top; over 85 % load up at once, under 65 % for 1 s straight down to the level for 75 %); core B lighter (its SysTick only while playing); r30-r31: core B's load in 24-bit WAV halved again (192 kHz: 63-66 MHz since r18, now 33 MHz), by a shorter PCM ring write and SYSRAM read by aligned words | r27-r31 | device (r30, r31) | §107-§108 |
+| 7. Robustness: a fault record (in sectors preallocated on the internal memory, not in PMU-SRAM only), core B reloaded after a fault, a stall watch | — | to do | §98 |
+
+Margins measured (§103, §106): a 500 ms stall of core A causes no underrun in MP3, Vorbis or
+AAC (3 to 5 s of protection); the tightest case, WAV 24/192, stands about 150 ms. Long tracks:
+1 to 4 clock changes of core B instead of 3 to 19, no underrun.
+
+To test on the device: the resume of a tree queue over two power cycles (r23), seeks (Musepack
+included), the sound card streaming (only entered and left with r30).
+
+Left from the rework (step 7 or later):
+- the keys read in the SysTick interrupt;
+- the screens that stop the music (USB, install, sound card, system) still in loops of their
+  own;
+- still blocking the loop: a Musepack seek without a seek table, a folder opened by the
+  browser, a card put in during playback (mounted at its first use, up to 253 ms);
+- at 176.4 and 192 kHz the clock rules swing between 50 and 80 MHz (10 changes a track, the
+  ring kept over half); a DMA copy from SYSRAM would save about 5 MHz more there (§108);
+- the next track prepared in the input ring, without restarting core B: left out (nothing
+  audible to gain today) unless a need shows.
 
 Ideas from the other projects for it (ETUDE §98): still screens not redrawn and the loop in WFI
-(EchoPod), the first frame drawn before the backlight (no 120 ms block), cold code built for
-size (Podium), a wired headset remote on the 3.5 mm mic contact (Podium; a feature, not part
-of the rework).
+(EchoPod), cold code built for size (Podium), a wired headset remote on the 3.5 mm mic contact
+(Podium; a feature, not part of the rework).
 
 ## Waiting for a test on the device
 
@@ -188,7 +167,7 @@ One line per version; the measurements are in `ETUDE.md`.
 - Screen writes by DMA: a band (for instance 320 x 16) drawn into a buffer, then sent to the
   panel by the DMA, instead of the CPU writing each pixel: a scrolling line (the long title's
   32-pixel marquee every 33 ms, since PR #2) and full redraws (11 to 14 ms today) would no
-  longer hold core A. Goes with step 2 of the rework (one loop, banded drawing).
+  longer hold core A. After the rework (its one loop, step 2, makes room for banded drawing).
 
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64); more varied seeds for the FAT
   target (its coverage stops growing after 20 minutes).
@@ -234,9 +213,12 @@ One line per version; the measurements are in `ETUDE.md`.
   from the instructions run (`--cycles`) with TIMER1 on both cores, eMMC and microSD latency
   (`--mmc-lat`, `--sd-lat`), the eMMC's fitted on the device and the default with `--cycles`
   (an install within 7 %; the default mode's clock suits behaviour, not durations), the
-  HIFIACC DMA chain. To do: fit `--sd-lat` (the device walks 18,257 tracks on the card in
-  2.37 s, mounts it in 253 ms), which needs a card image of that size (1 below). Ideas from the other projects' emulators (Podium, EchoPod, ReChord;
-  ideas only, their code is GPL-3), by usefulness:
+  HIFIACC DMA chain; with the rework: core B's SysTick and the DMA position it reads, core B
+  run at its clock (`--b-cpi`, its load measurable), the PCM ring's fill traced
+  (`--ring-trace`), a card mounted at power-on (`sd-boot`) (§103-§107). To do: fit `--sd-lat`
+  (the device walks 18,257 tracks on the card in 2.37 s, mounts it in 253 ms), which needs a
+  card image of that size (1 below). Ideas from the other projects' emulators (Podium,
+  EchoPod, ReChord; ideas only, their code is GPL-3), by usefulness:
   1. volumes generated on demand (a sparse disk whose files, valid FLAC frames, are made when
      read): libraries larger than the PC's RAM, cluster sizes (512 bytes), the files a Mac leaves
      (Spotlight, fseventsd, `._` files);
@@ -288,8 +270,8 @@ One line per version; the measurements are in `ETUDE.md`.
   - MOD, then S3M, with a small permissive player (micromod, BSD); IT (libxmp-lite, MIT) only
     with samples read from the card through a cache;
   - mixing is light; the limit is memory: the samples must stay resident (about 170 KiB free
-    in core B's data today; 300-350 KiB with a smaller DAC ring, the input/output rings and
-    the PMU-SRAM, if core B can read the SYSRAM: to be checked in the TRM first);
+    in core B's data today; more with the PMU-SRAM and the SYSRAM, which core B reads and
+    writes, checked on the device, §102);
   - enough for most MODs, the small S3Ms, few ITs.
 - Album covers (skipped today).
 - M3U playlists.
@@ -310,8 +292,8 @@ One line per version; the measurements are in `ETUDE.md`.
   gapless (ADTS has no encoder delay), a fuzzing target. None in the library.
 - Ogg seek, a distant prospect (§75): core A passes the granule of the page it found to core B,
   which starts on the target's page without decoding the page before for nothing (some 100 ms
-  less in Vorbis); Opus keeps an 80 ms pre-roll (RFC 7845). Also: fill the DAC ring with silence
-  at a seek, so that the short gap is silence and not a repeat of the old sound.
+  less in Vorbis); Opus keeps an 80 ms pre-roll (RFC 7845). (The ring filled with silence at a
+  seek: done in the rework, §103.)
 - Bluetooth output, a prospect: the 8 GB model has a Bluetooth module with its own stack,
   powered from GPIO2.7 and driven over UART1 at 115,200 baud with short ASCII commands; GPIO2.0
   and GPIO2.14 route the sound (EchoPod streams to headphones this way, and found that the

@@ -115,7 +115,8 @@ class CoreB(emu_host.Hifi):
         if off in (0x28, 0x2c):
             self.t1["reads"] += 1
             now = struct.unpack_from("<I", self.sh.sram, CLOCK - 0x03000000)[0]
-            n = now * 24 + self.t1["reads"] * 12
+            now -= getattr(self, "t_back", 0)    # --cycles: the part of the slice not run yet
+            n = int(now * 24) + self.t1["reads"] * 12
             return ~(n >> (32 if off == 0x2c else 0)) & 0xffffffff
         return self.t1["regs"].get(off, 0)
 
@@ -136,9 +137,13 @@ class CoreB(emu_host.Hifi):
             uc.emu_stop()
 
     def deliver(self, ch):
-        """A2B message on channel ch: the interrupt, if enabled, then let the core run"""
+        """A2B message on channel ch: the interrupt, if enabled, then let the core run (with
+        --cycles, sh.lazy: it runs in the time slices of core A, its work then takes time)"""
         if self.sh.get(0x00) & 1 << ch:
             self._irq(0x1a if ch == 1 else 0x1b)
+        if getattr(self.sh, "lazy", False):
+            self.woken = True
+            return
         self.step()
 
     def systick(self, now_us, hz):
@@ -157,7 +162,10 @@ class CoreB(emu_host.Hifi):
             self.st_next = now_us + period
             if self.sleeping:
                 self._irq(15)
-                self.step()
+                if getattr(self.sh, "lazy", False):
+                    self.woken = True
+                else:
+                    self.step()
 
     def watch(self, lo, hi):
         """EMU_WATCH: the last writes into [lo, hi), shown when core B faults"""
@@ -169,6 +177,7 @@ class CoreB(emu_host.Hifi):
         self.u.hook_add(UC_HOOK_MEM_WRITE, cb, begin=lo, end=hi - 1)
 
     def step(self, budget=2_000_000):
+        self.woken = False
         try:
             self.run(budget=budget)
         except Exception as ex:                                   # noqa: BLE001
