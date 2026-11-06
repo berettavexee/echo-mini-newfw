@@ -40,49 +40,66 @@ static int b_error(volatile struct hp_ctl *c)
 static uint32_t fed_since_ring, freed_since_ring;
 static int mp4_on;                              /* the input is mp4.c's packet stream */
 
-/* Input ring from the file, in pieces up to the ring end, as much as fits (MP4: the packet
- * stream, once 4 KiB of room are free) */
+/* Input ring from the file (version 3, ETUDE §105): the stream in segments; feed_pos is the
+ * stream offset of the next byte written. Core B's requests (another offset: back, or forward
+ * past what is written) start a new segment there. MP4: the packet stream, once 4 KiB of room
+ * are free (no request then). */
+static uint32_t feed_pos, feed_ack;
+
+static void feed_start(void)
+{
+    volatile struct hp_ctl *c = HP_CTL;
+    feed_pos = feed_ack = 0;
+    c->in_wr = 0;
+    c->seg[0].seq = 0;
+    c->seg[0].ring0 = 0;
+    c->seg[0].off0 = 0;
+    c->seg[0].prev_end = 0;
+    c->seg_wr = 1;
+}
+
 static void feed(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
-    uint32_t wr = c->in_wr, rd = c->in_rd;
-    if (c->rewind_seq != c->rewind_ack) {       /* core B wants an earlier offset (it waits) */
-        wr = rd = c->rewind_pos;
-        c->in_rd = rd;
+    uint32_t wr = c->in_wr;
+    if (c->req_seq != feed_ack && c->seg_wr - c->seg_rd < HP_SEGS) {
+        feed_ack = c->req_seq;                  /* core B wants another offset (it waits) */
+        uint32_t pos = c->req_pos;
+        feed_pos = pos < file->size ? pos : file->size;
+        volatile struct hp_seg *g = &c->seg[c->seg_wr % HP_SEGS];
+        g->seq = feed_ack;
+        g->prev_end = wr;
+        wr += (feed_pos - wr) % 512;            /* the same place in a sector as in the file */
         c->in_wr = wr;
-        c->rewind_ack = c->rewind_seq;
+        g->ring0 = wr;
+        g->off0 = feed_pos;
+        c->seg_wr = c->seg_wr + 1;
         fed_since_ring++;
     }
     if (mp4_on) {
-        uint32_t room = HP_IN_SIZE - (wr - rd), nr;
+        uint32_t room = HP_IN_SIZE - (wr - c->rb_rd), nr;
         if (mp4_done() || room < 4096)
             return;
         uint32_t n = mp4_feed(wr, room, &nr);
         c->in_wr = wr + n;
+        feed_pos += n;
         fed_since_ring += n;
         player.reads += nr;
         player.read_bytes += n;
         if (mp4_done())
-            c->in_end = wr + n;
+            c->in_end = feed_pos;
         return;
     }
-    if ((int32_t)(rd - wr) > 0) {               /* core B skipped past what we wrote */
-        wr = rd;
-        if (wr > file->size)
-            wr = file->size;
-        c->in_wr = wr;
-        fed_since_ring++;
-    }
-    for (int k = 0; k < 4 && wr < file->size; k++) {
-        uint32_t room = HP_IN_SIZE - (wr - c->in_rd), o = wr % HP_IN_SIZE;
+    for (int k = 0; k < 4 && feed_pos < file->size; k++) {
+        uint32_t room = HP_IN_SIZE - (wr - c->rb_rd), o = wr % HP_IN_SIZE;
         uint32_t n = room < HP_IN_SIZE - o ? room : HP_IN_SIZE - o;
         if (n > 8192)
             n = 8192;
-        if (n >= file->size - wr)
-            n = file->size - wr;
-        else if (wr % 512) {                    /* after a skip: back to sector alignment */
-            if (n > 512 - wr % 512)
-                n = 512 - wr % 512;
+        if (n >= file->size - feed_pos)
+            n = file->size - feed_pos;
+        else if (feed_pos % 512) {              /* after a jump: back to sector alignment */
+            if (n > 512 - feed_pos % 512)
+                n = 512 - feed_pos % 512;
         }
         else if (room < 8192)
             break;                              /* wait for 8 KiB of room: fewer, longer reads */
@@ -90,18 +107,17 @@ static void feed(void)
             n &= ~511u;
         if (!n)
             break;
-        if (fat_pread(file, &cur, wr, (void *)(HP_IN_BASE + o), n) != (int)n) {
-            log_printf("player: read error at %u (+%u)", wr, n);
+        if (fat_pread(file, &cur, feed_pos, (void *)(HP_IN_BASE + o), n) != (int)n) {
+            log_printf("player: read error at %u (+%u)", feed_pos, n);
             break;
         }
         wr += n;
+        feed_pos += n;
         c->in_wr = wr;
         fed_since_ring += n;
         player.reads++;
         player.read_bytes += n;
     }
-    if (wr == file->size)
-        c->in_end = wr;
 }
 
 /* One round: positions both ways, input, doorbell when core B may have something to do */
@@ -117,8 +133,8 @@ static int dac_switch;                          /* the next track's rate waits f
 
 /* The state of the track open (non-blocking playback, below) */
 static struct {
-    int flags, warm, kept, changed, full, open;
-    uint32_t t0, t_load, t_ready, t_open, t_dac, t_first, t_play, ur0, lost0, i2s0, fb;
+    int flags, warm, kept, changed, full, open, opening;    /* opening: async, headers read */
+    uint32_t t0, t_load, t_ready, t_open, t_dac, t_first, t_play, ur0, lost0, i2s0, fb, t_req;
     uint32_t na_frames, na_t, na_in;    /* the last change of the frames decoded: when, input */
     int32_t fill0;
     uint32_t in_min, out_min, out_max, in_empty;  /* perf: the rings once the DAC ring is full */
@@ -137,12 +153,12 @@ static int perf_load(uint32_t img)
 static void perf_rings(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
-    uint32_t out = out_avail(), in = c->in_wr - c->in_rd;
+    uint32_t out = out_avail(), in = c->in_wr - c->rb_rd;
     if (out < ps.out_min)
         ps.out_min = out;
     if (out > ps.out_max)
         ps.out_max = out;
-    if (c->in_end != 0xffffffffu && c->in_wr >= c->in_end)
+    if (c->in_end != 0xffffffffu && feed_pos >= c->in_end)
         return;                                 /* all fed: the input may run out */
     if (!ps.in_full && in < HP_IN_SIZE - 8192)
         return;                                 /* a track starting: its ring not filled yet */
@@ -584,6 +600,9 @@ void player_ogg_hint(uint32_t page, uint32_t seg)
     hint_seg = seg;
 }
 
+static int open_step(void);
+static int open_finish(void);
+
 int player_open(const struct fat_file *f, uint32_t codec, int flags)
 {
     volatile struct hp_ctl *c = HP_CTL;
@@ -650,18 +669,21 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
     if (ps.kept)
         audio_update();
     c->in_end = mp4_on ? 0xffffffffu : f->size; /* known from the start (MP3 length estimate) */
-    c->comment_end_page = codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS ? cpage : 0;
-    c->comment_end_seg = cseg;
-    c->seek_ms = seek;
-    c->seek_offset = 0;
-    if (c->comment_end_page)
-        log_printf("player: comment header ends at page %u, segment %u", c->comment_end_page,
-                   c->comment_end_seg);
+    feed_start();                               /* the stream from its start (version 3) */
+    c->trk.codec = codec;
+    c->trk.size = c->in_end;
+    c->trk.comment_end_page = codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS ? cpage : 0;
+    c->trk.comment_end_seg = cseg;
+    c->trk.seek_ms = seek;
+    c->trk.seek_offset = 0;
+    if (c->trk.comment_end_page)
+        log_printf("player: comment header ends at page %u, segment %u", c->trk.comment_end_page,
+                   c->trk.comment_end_seg);
     uint64_t end_g = 0;
     if (codec == HP_CODEC_OPUS || codec == HP_CODEC_VORBIS) {
         end_g = ogg_end_granule(file);
-        c->end_granule_lo = (uint32_t)end_g;
-        c->end_granule_hi = (uint32_t)(end_g >> 32);
+        c->trk.end_granule_lo = (uint32_t)end_g;
+        c->trk.end_granule_hi = (uint32_t)(end_g >> 32);
         cur.index = cur.cluster = 0;
         log_printf("player: last Ogg granule %u", (uint32_t)end_g);
     }
@@ -671,34 +693,63 @@ int player_open(const struct fat_file *f, uint32_t codec, int flags)
         uint32_t rate = ogg_rate(f), reads = 0, t_seek = ticks();
         uint64_t g = (uint64_t)seek * rate / 1000;
         if (rate && g)
-            c->seek_offset = ogg_page_before(f, g, end_g, cpage, &reads);
+            c->trk.seek_offset = ogg_page_before(f, g, end_g, cpage, &reads);
         cur.index = cur.cluster = 0;
         log_printf("player: start at %u ms: Ogg page at %u, %u reads in %u us", seek,
-                   c->seek_offset, reads, ticks() - t_seek);
+                   c->trk.seek_offset, reads, ticks() - t_seek);
     } else if (seek)
         log_printf("player: start at %u ms", seek);
     feed();
     command(HP_CMD_OPEN);
     player.state = ST_OPEN;
-    for (uint32_t ts = ticks(); c->state != HP_FORMAT;) {
+    ps.t_req = ticks();
+    if (flags & PLAY_ASYNC) {                   /* the headers read while the loop goes on: */
+        ps.open = ps.opening = 1;               /* player_service() finishes it (0.99r25) */
+        return 0;
+    }
+    for (;;) {
         wdt_kick();
         if (ps.kept)
             audio_update();
-        feed();
-        if (fed_since_ring) {
-            fed_since_ring = 0;
-            hifi_ring();
-        }
-        if (c->state == HP_ERROR || ticks() - ts > 3000000) {
-            log_printf("player: open failed: state %u error %u why %u, fault pc %x lr %x cfsr %x, "
-                       "in %u/%u", c->state, c->error, c->why, c->fault_pc, c->fault_lr,
-                       c->fault_cfsr, c->in_rd, c->in_wr);
-            r = c->state == HP_ERROR ? b_error(c) : HIFI_ETIMEOUT;
-            hifi_stop();
-            audio_detach();
-            return fail(r, "our codec could not open the file");
-        }
+        int w = open_step();
+        if (w < 0)
+            return w;
+        if (w)
+            break;
     }
+    return open_finish();
+}
+
+/* One round of the open: the input fed; 1 once core B knows the format, < 0 on a failure */
+static int open_step(void)
+{
+    volatile struct hp_ctl *c = HP_CTL;
+    feed();
+    if (fed_since_ring) {
+        fed_since_ring = 0;
+        hifi_ring();
+    }
+    if (c->state == HP_FORMAT)
+        return 1;
+    if (c->state == HP_ERROR || ticks() - ps.t_req > 3000000) {
+        log_printf("player: open failed: state %u error %u why %u, fault pc %x lr %x cfsr %x, "
+                   "in %u/%u", c->state, c->error, c->why, c->fault_pc, c->fault_lr,
+                   c->fault_cfsr, c->in_rd, feed_pos);
+        int r = c->state == HP_ERROR ? b_error(c) : HIFI_ETIMEOUT;
+        hifi_stop();
+        audio_detach();
+        ps.open = ps.opening = 0;
+        return fail(r, "our codec could not open the file");
+    }
+    return 0;
+}
+
+/* The format known: the DACs, core B released on the ring */
+static int open_finish(void)
+{
+    volatile struct hp_ctl *c = HP_CTL;
+    const struct fat_file *f = &own_file;
+    ps.opening = 0;
     ps.t_open = ticks();
     player.rate = c->rate;
     player.channels = c->channels;
@@ -760,8 +811,21 @@ int player_service(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
     if (!ps.open)
-        return 1;
+        return player.state == ST_ERROR ? player.error : 1;
     wdt_kick();
+    if (ps.opening) {                           /* an open of PLAY_ASYNC: its headers */
+        perf_tick(&perf_play);
+        audio_update();
+        gov_window();
+        int w = open_step();
+        if (w <= 0)
+            return w;
+        const char *pp = perf_begin("open");
+        w = open_finish();
+        perf_end(pp);
+        if (w)
+            return w;
+    }
     own_service();
     gov_window();
     if (dac_switch) {

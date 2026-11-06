@@ -627,6 +627,9 @@ int sd_watch(void)
     log_printf("ui: card %s", in ? "inserted" : "removed");
     sd_forget();
     sd_bad = 0;
+    if (in && (!q_playing || audio_paused))
+        sd_open();                              /* nothing heard: mounted at once (§106); */
+                                                /* while music plays: at its first use */
     int stopped = 0;
     if (!in && q_on_sd()) {
         if (q_playing || player_is_open())

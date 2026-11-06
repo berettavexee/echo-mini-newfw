@@ -65,6 +65,9 @@ TESTS = {
     "sd-nofs": dict(files={"A.WAV": "wav"}, sd=True, ms=11000,
                     keys=keys((2000, "BACK"), (3000, "VOL-"), (4000, "PLAY")),
                     expect=[r"ui: card not readable: no FAT32 or exFAT volume"]),
+    # a card in at power-on: mounted at once, before the resume lists the top level (0.99r26, §106)
+    "sd-boot": dict(files={"A.WAV": "wav"}, sd="fat", ms=9000, keys="",
+                    expect=[r"ui: card mounted in \d+ ms: FAT32", r"ui: folder 0: "]),
     "sd-noreply": dict(files={"A.WAV": "wav"}, sd=True, emu_args=["--sd-noreply"], ms=11000,
                        keys=keys((2000, "BACK"), (3000, "VOL-"), (4000, "PLAY")),
                        expect=[r"ui: card not readable: no reply"]),
@@ -207,7 +210,8 @@ def run_set(group, t, img, elf, tmp):
     text = read_log(dump) if os.path.exists(dump) else ""
     fails = [] if text else [f"no log (emulator: {out.stderr.strip()[-300:]!r})"]
     seen, tags, fmt = set(), None, None
-    for line in text.splitlines():
+    lines = text.splitlines()
+    for at, line in enumerate(lines):
         if "ui: tags in " in line:
             tags, fmt = line, None
         elif "player: format: " in line:
@@ -215,6 +219,13 @@ def run_set(group, t, img, elf, tmp):
         mq = re.search(r"ui: queue \d+/\d+: (\S+) \((-?\d+)\)", line)
         if not mq or mq.group(1) not in names or mq.group(1) in seen:
             continue
+        if fmt is None:                         # a chained track opens while the loop goes on
+            for nxt in lines[at + 1:]:          # (0.99r25): its format comes after the queue
+                if "ui: tags in " in nxt:       # line, before the next track's tags
+                    break
+                if "player: format: " in nxt:
+                    fmt = nxt
+                    break
         m = names[mq.group(1)]
         seen.add(mq.group(1))
         what = f"{m['file']}: "
@@ -313,6 +324,9 @@ def run(name, t, img, elf, tmp):
         sd = ["--sd", os.path.join(tmp, "sd.img")]
         with open(sd[1], "wb") as f:
             f.truncate(64 << 20)
+        if t["sd"] == "fat":                    # or a FAT32 volume on the whole card
+            subprocess.run(["/usr/sbin/mkfs.fat", "-F", "32", "-n", "CARD", sd[1]], check=True,
+                           stdout=subprocess.DEVNULL)
     out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--keys",
                           t["keys"], "--ms", str(t["ms"]), "--steps", "30000000000",
                           "--dump-disk", dump] + sd + [at(a) for a in t.get("emu_args", [])],

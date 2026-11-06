@@ -460,6 +460,21 @@ def main():
     u.hook_add(UC_HOOK_BLOCK, coreb_tick, begin=t, end=t + 4)
     panel, log, regs = Panel(), [], {}
 
+    # --ring-trace FILE (with --cycles): every 5 ms of simulated time, the fill of core B's input
+    # ring (ring bytes held: in_wr - rb_rd, version 3) and of the PCM ring (pcm_wr - pcm_rd),
+    # with the state, codec, rate, frame size and the stream offset read (ETUDE §106)
+    ring_trace = [open(opt("--ring-trace", None), "w"), 0.0] if opt("--ring-trace", None) else None
+
+    def ring_sample(t_us):
+        w = struct.unpack_from("<20I", sh.hr1, 0)
+        if w[0] != 0x5452424e:
+            ring_trace[0].write(f"{t_us} - - - - - - -\n")
+            return
+        rb_rd, = struct.unpack_from("<I", sh.hr1, 144)
+        pcm_wr, pcm_rd, hold = struct.unpack_from("<2I", sh.hr1, 172) + struct.unpack_from("<I", sh.hr1, 168)
+        ring_trace[0].write(f"{t_us} {w[3]} {w[2]} {w[14]} {w[17]} {(w[9] - rb_rd) & 0xffffffff} "
+                            f"{(pcm_wr - pcm_rd) & 0xffffffff} {w[10]} {hold}\n")
+
     def b_hz(uc):                                 # core B's clock as core A set it
         return struct.unpack("<I", uc.mem_read(sym["hifi_hz"], 4))[0] if "hifi_hz" in sym else 0
 
@@ -717,6 +732,9 @@ def main():
                     sh.b.step(int(k * 1e8 / max(hz, 1000000)))
                 if sh.b:
                     sh.b.systick(int(now), b_hz(u))
+                if ring_trace and now >= ring_trace[1]:
+                    ring_sample(int(now))
+                    ring_trace[1] = now + 5000
                 if pcm_out and sh.b:
                     capture()
                 if (stop_us and now >= stop_us) or mmc.cut_done:
@@ -735,6 +753,11 @@ def main():
         names = ("magic version codec state error info cmd seq ack in_wr in_rd in_end out_wr "
                  "out_rd rate ch bits fb frames wakeups loops fpc flr cfsr").split()
         log.append("core B ctl: " + " ".join(f"{n}={v:#x}" for n, v in zip(names, c)))
+        if c[1] >= 3:                                            # version 3: the input ring
+            w = struct.unpack_from("<3I", sh.hr1, 136) + struct.unpack_from("<16I2I", sh.hr1, 240)
+            log.append(f"core B input: req_pos={w[0]:#x} req_seq={w[1]} rb_rd={w[2]:#x} "
+                       f"seg_wr={w[19]} seg_rd={w[20]} segs=" +
+                       " ".join(f"{w[3 + 4 * i]}:{w[4 + 4 * i]:#x}:{w[5 + 4 * i]:#x}" for i in range(4)))
         if sh.b:
             log.append(f"core B pc {sh.b.pc:#x} sleeping {sh.b.sleeping}")
     ms = struct.unpack("<I", u.mem_read(CLOCK, 4))[0] // 1000

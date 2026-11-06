@@ -471,11 +471,6 @@ void audio_detach(void)
         bp_left = HP_CTL->beep_frame;
 }
 
-int audio_attached(void)
-{
-    return ext_wr != 0;
-}
-
 /* Silence over [from, from + n) of the ring (byte counters), core B not writing there */
 void audio_zero(uint32_t from, uint32_t n)
 {

@@ -201,6 +201,9 @@ static void prep_next(void)
         prep.state = PREP_NONE;
 }
 
+static int seek_async;                          /* the next q_open: a seek's (same track) */
+
+/* chain: 2 from the end of a track (PLAY_ASYNC), else 0 or 1 */
 static int q_open(int i, int chain)
 {
     struct fat_file f;
@@ -244,10 +247,11 @@ static int q_open(int i, int chain)
                    "never used", prep.ms, storage_stack_free());
     prep.state = PREP_NONE;
     int was_on = audio.on;
-    (void)chain;
+    int async = chain == 2 || seek_async;       /* a chained track, a seek: the loop goes on */
+    seek_async = 0;                             /* while core B reads the headers (0.99r25); */
     player_ogg_hint(tg_next.ogg_end_page, tg_next.ogg_end_seg);  /* core B skips the comment header */
-    pp = perf_begin("open");
-    int r = player_open(&f, flags & F_CODEC, PLAY_CHAIN);
+    pp = perf_begin("open");                    /* one chosen: waited for (its failure shown) */
+    int r = player_open(&f, flags & F_CODEC, PLAY_CHAIN | (async ? PLAY_ASYNC : 0));
     perf_end(pp);
     if (!r && (!was_on || audio.vol == 0xff))
         fresh = 1;
@@ -363,7 +367,7 @@ void ui_background(void)
     int first = q_dec, err = r < 0 ? r : 0;     /* the first that failed, why */
     for (int n = q_next_index(q_dec, 0); n >= 0; n = q_next_index(n, 0)) {
         q_dec = n;
-        int o = q_open(q_dec, 1);
+        int o = q_open(q_dec, 2);
         if (o == 0)
             return;                             /* the next one, gapless when it can */
         if (!err) {
@@ -439,6 +443,7 @@ void seek_end(int go)
         return;
     }
     player_seek_hint(sk_ms);
+    seek_async = 1;
     play_index(q_cur);
 }
 

@@ -61,7 +61,6 @@ void audio_ring_direct(int on);
 int audio_is_direct(void);
 void audio_attach(volatile uint32_t *wr);
 void audio_detach(void);
-int audio_attached(void);
 void audio_zero(uint32_t from, uint32_t n);
 uint32_t audio_bps(void);
 uint32_t audio_rebase(void);    /* the counters back by whole rings past 2^30; what was taken */

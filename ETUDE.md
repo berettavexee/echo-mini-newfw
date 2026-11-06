@@ -4128,3 +4128,40 @@ Faite dans l'émulateur, la r21 essayée ensuite sur l'appareil. Les décisions 
 | r23 | **1,17 s** | 2,54 s (parcours de 1 675 ms dans la tâche, le son continu) |
 
 Sur l'appareil, où le parcours prend 2,4 s, le gain attendu est d'environ 2,4 s. `resume-library-pause` : pause et reprise pendant le parcours, puis la file retrouvée. 17 tests `emutest` PASS ; 32 scénarios r22 contre r23 (avec `shuffle-library`) sans faute, 56 captures identiques sur 57 (l'écriture de l'installateur).
+
+## 105. Refonte, étape 5 : l'anneau d'entrée en segments, l'ouverture sans attente (images 99R24 et 99R25, 2026-11-06)
+
+**r24 — l'anneau d'entrée en segments, la piste dans un en-tête** (protocole version 3). Les codecs du cœur B lisent `in_rd` et `in_end` comme des positions du fichier et sautent à des positions absolues (`in_seek`) : la vue « fichier » leur est gardée. L'anneau contient des **segments** : des suites d'octets contiguës à la fois dans le fichier et dans l'anneau ; leurs débuts (numéro, compteur d'anneau, position du fichier, fin du précédent) sont dans une file du bloc de contrôle (`seg[]`, le cœur A ajoute, le cœur B prend dans l'ordre). Un saut que le cœur B ne peut pas servir (en arrière, ou au-delà de ce qui est écrit) devient une **demande** (`req_seq`, `req_pos`) ; le cœur A y répond par un nouveau segment de ce numéro, ce qui précédait est sauté. Le retour en arrière du Musepack (§61, `rewind_*`) passe par là, comme les sauts de pochettes et les recherches de tous les codecs. Un nouveau segment commence au même endroit d'un secteur que sa position dans le fichier (quelques octets de l'anneau sautés) : sans cela, le cœur A, qui lit des secteurs entiers, ne pouvait plus écrire les derniers octets avant la fin de l'anneau (premier essai : lecture figée après le retour en arrière de dr_flac). Les indications de la piste (point de départ, page Ogg, fin des commentaires, dernière granule) passent dans un **en-tête de piste** (`trk`), que le cœur B recopie à l'ouverture. Chaque indice n'a toujours qu'un cœur qui le déplace.
+
+Vérification : le PCM que le cœur B écrit (capture `--pcm`, scénarios `pcm-*`) comparé à la r23 par blocs de 4 Kio : enchaînement de 9 formats, pochettes de 8 et 17 Mo (identique octet pour octet), recherches en Vorbis, Opus, Musepack SV8 et FLAC : tous les blocs retrouvés dans l'ordre, sauf 1 ou 2 aux coutures (les captures autour d'un redémarrage, et la position visée par une recherche, qui dépend du moment de la touche) ; 17 tests `emutest` PASS.
+
+**r25 — l'ouverture sans attente.** Depuis la r19, le son ne dépend plus de la boucle du cœur A : un blocage de l'ouverture (20 à 190 ms) ne fige plus que l'écran et les touches, et le redémarrage du cœur B coûte 40 µs. Le gain de l'étape est donc que le cœur A n'attende plus le cœur B : une piste enchaînée et une recherche s'ouvrent en `PLAY_ASYNC` (le cœur B lit les en-têtes, `player_service()` termine l'ouverture). Une piste choisie à la main reste ouverte en attendant (son refus s'affiche, « Cannot play »). Restent dans la phase « open » le travail propre du cœur A : le chargement du codec depuis la mémoire interne, la recherche de la dernière page et de la page visée en Ogg (jusqu'à 65 ms pour une recherche dans l'Opus à pochette de 17 Mo, contre 79).
+
+**Sans blanc** (scénarios `gapless-*`, `fw/tools/gapcheck.py`) : un enregistrement coupé en trois fichiers de 58 816, 75 411 et 86 273 trames, joué comme un dossier ; dans ce que la DMA a lu, l'enregistrement entier se retrouve **échantillon pour échantillon** (220 500 trames d'affilée) en WAV, en FLAC, et en WAV puis FLAC puis WAV (changement de codec à fréquence égale). Le changement de fréquence garde son court silence (40 ms devant la DMA, 9 ms de changement).
+
+**Vérification de la r25** : 17 tests `emutest` PASS (`set-covers` et `set-ci` adaptés : une piste enchaînée, ouverte sans attente, écrit sa ligne de format après sa ligne de file) ; 33 scénarios contre la r23 sans faute, 48 captures identiques sur 54 (les autres : barre de progression, ordre aléatoire, écriture de l'installateur, et la barre de `battery-gauge`, décalée de 4 pixels : les pistes de 4 s en boucle s'ouvrent un peu plus tôt).
+
+**Conséquence pour la suite du plan** : la r26 prévue (préparer la piste suivante dans l'anneau d'entrée, passer d'une piste à l'autre sans redémarrer le cœur B) ne changerait plus rien d'audible ; l'enchaînement est déjà exact, et la boucle n'attend plus.
+
+## 106. Les anneaux d'entrée et PCM : usage et marges ; la carte montée d'office (image 99R26, 2026-11-06)
+
+**Mesure.** L'émulateur relève, avec `--ring-trace` (`--cycles`), toutes les 5 ms le remplissage de l'anneau d'entrée (octets d'anneau gardés : `in_wr - rb_rd`) et de l'anneau PCM (`pcm_wr - pcm_rd`) ; scénarios `ring-chain`, `ring-covers`, `ring-queue` (album puis aléatoire), `ring-gapless-mixed` sur la r25 ; avec la session r21 de l'appareil (61 pistes, 21 formats ou fréquences).
+
+**Régime établi** : l'anneau PCM reste à moins de 50 ms du plein dans tous les formats (le cœur B se réveille toutes les 2 ms) ; l'anneau d'entrée à 80-90 % (le cœur A le complète dès 8 Kio libres). Les deux font 96 Kio : ce qui change d'un format à l'autre est leur durée.
+
+| Format | Débit | Entrée : capacité / plus bas | PCM : capacité / plus bas (émul. ; appareil) |
+|---|---|---|---|
+| Opus, Vorbis | 175-190 kb/s | 4,3-4,5 s / 3,9 s | 512-557 / 473-522 ; 466-512 ms |
+| AAC, MP3 320 | 260-320 kb/s | 2,5-3 s / 2,1-2,9 s | 557 / 508-511 ; 505-509 ms |
+| FLAC 16/44,1 | ≈ 650 kb/s | 1,3 s / 0,5-0,6 s | 557 / 511 ; 509 ms |
+| WAV 16/44,1 | 1 411 kb/s | 557 / 506 ms | 557 / 533 ; 528 ms |
+| FLAC, ALAC 24/96 | 2,2-2,4 Mb/s | 325-350 / 174-286 ms | 128 / 117-122 ; 96-119 ms |
+| WAV 24/96 | 4,6 Mb/s | 170 / 153 ms | 128 / 119 ms |
+| FLAC 24/192 | 2,6 Mb/s | 300 / 88 ms | 64 / 58 ms |
+| WAV 24/176,4-192 | 8,5-9,2 Mb/s | 85-92 / 64-76 ms | 64-70 / 58-62 ms |
+
+**Changement de piste** : enchaînement d'album (même codec, même fréquence) : l'anneau PCM baisse de 7 à 50 ms le temps que le cœur B redémarre et écrive (appareil : 482 ms au plus bas, depuis 528-533 ; émulateur : 485-526 ms en 16 bits, 51 ms sur 64 en 24/192) ; changement de codec à fréquence égale : idem (code rechargé en 1 à 4 ms) ; changement de fréquence : 9 ms et 40 ms de silence devant la DMA ; saut, recherche : l'anneau remis à zéro, première trame 23 à 312 ms plus tard (silence) ; aléatoire : comme un enchaînement, la lecture du dossier par le cœur A ne touche plus le son. Aucun manque du cœur B dans ces cas.
+
+**Marges.** Contre un blocage du cœur A, la protection est la durée de l'anneau d'entrée plus celle de l'anneau PCM (le cœur B décode ce qui reste) : 3 à 5 s en compressé avec perte, 1,9 s en FLAC 16/44,1, 1,1 s en WAV 16/44,1, ≈ 450 ms en FLAC 24/96, ≈ 360 ms en FLAC 24/192, ≈ 300 ms en WAV 24/96, **≈ 150 ms en WAV 24/192**. Contre un retard du cœur B, l'anneau PCM : 0,5 s jusqu'à 48 kHz, 64 ms en 24/192 pour au plus 13 ms de creux au changement de piste. Les anneaux sont donc bien dimensionnés ; le seul point juste est le WAV haute résolution, face aux blocages du cœur A qui restent : un **montage de la carte** demandé par la boucle (45 à 253 ms : plus que 150 ms), la recherche Musepack sans table (≈ 400 ms, le son coupé de toute façon), les ouvertures de pistes choisies à la main (20 à 130 ms, son coupé), un dossier ouvert (1 à 30 ms), l'écriture du journal (3 à 5 ms).
+
+**r26 — la carte montée d'office** (décision de l'utilisateur : plus simple et plus sûr que la tâche de stockage, le montage marche) : au démarrage avant la reprise (rien ne joue), au retour d'une session USB, de l'installateur ou des écrans système (la musique est arrêtée), et quand une carte est remise si rien ne s'entend. Avant, elle l'était au premier accès : une lecture depuis la mémoire interne, puis « SD card » ouvert dans le navigateur, bloquait la boucle le temps du montage. Reste au premier accès : une carte remise pendant une lecture. Test `sd-boot` (une carte FAT32 à la mise sous tension : montée avant la liste du haut) : PASS en r26, échoue en r25.

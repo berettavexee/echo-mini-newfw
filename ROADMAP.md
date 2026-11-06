@@ -4,8 +4,8 @@ State of the ECHO MINI new firmware, kept up to date with each version. The deta
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
 Last update: 2026-11-06, version 0.99 and `main` since (the sound card's remote and Power key,
-the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r23,
-steps 1 to 4, checked on the device up to r21).
+the emulator's tests, pull requests #2 #7 #8 #9 #10); the rework on its own branch (0.99r26,
+steps 1 to 5, checked on the device up to r21).
 
 ## Done, validated on the device
 
@@ -91,8 +91,18 @@ and checked on the device before the next; `main` stays the working firmware mea
    kept, 15 rates, the sound card, no core B underrun out of seeks. 0.99r23 (ETUDE §104): the
    resume of a tree queue plays its track at once, the tree walked in the storage task meanwhile
    (a whole card: about 2.4 s sooner).
-5. Records in the input ring (TRACK, DATA, END, SEEK); a seek never resets an index the other
-   core may publish (ReChord's crackle, ETUDE §98).
+5. **The input ring in segments, the open without a wait** (0.99r24-r25, ETUDE §105): the
+   input ring holds segments of the stream (contiguous in the file and in the ring, their
+   starts in a list of the control block); a jump core B cannot serve is a request core A
+   answers with a new segment (back, forward, Musepack's seek table: one mechanism); the
+   track's hints in a header. A chained track and a seek open while the loop goes on. Gapless
+   checked sample for sample at the DMA (a recording cut in three: WAV, FLAC, WAV/FLAC/WAV).
+   Preparing the next track in the input ring and switching tracks without restarting core B
+   (planned as r26) would change nothing audible now: left out unless a need shows.
+   The rings' use and margins measured (ETUDE §106): well sized; the tightest case, WAV
+   24/192, stands about 150 ms of a core A stall. 0.99r26: the card is mounted at power-on,
+   after the USB, installer and system screens and when put in while nothing plays (it was
+   mounted at its first use: up to 253 ms of the loop).
 6. Core B's clock.
 7. Robustness: a fault record (in sectors preallocated on the internal memory rather than in
    PMU-SRAM only, ETUDE §98), core B reloaded after a fault, a stall watch.

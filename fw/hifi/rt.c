@@ -91,27 +91,93 @@ static __attribute__((used)) void hp_fault(uint32_t *frame)
         wfi();
 }
 
-/* ---- rings ---- */
+/* ---- the input ring (version 3, ETUDE §105) ----
+ * The ring holds segments: runs of the stream contiguous both in the stream and in the ring,
+ * their starts in ctl->seg[] (core A appends them). The segment read is seg[seg_rd]: its data
+ * end where the next one starts, or at core A's write counter. A stream offset core B wants and
+ * does not have (back, or forward past what is written) is asked for (req_seq, req_pos); core A
+ * answers with a new segment of that seq, and what came before it is dropped. */
+static uint32_t want;                           /* the seq whose data are read (0: the open's) */
+
+static volatile struct hp_seg *seg_cur(void)
+{
+    return &ctl->seg[ctl->seg_rd % HP_SEGS];
+}
+
+static int seg_has_next(void)
+{
+    return ctl->seg_wr - ctl->seg_rd > 1;
+}
+
+/* The ring counter where the data of the segment read end (so far) */
+static uint32_t seg_limit(void)
+{
+    return seg_has_next() ? ctl->seg[(ctl->seg_rd + 1) % HP_SEGS].prev_end : ctl->in_wr;
+}
+
+/* Onto the segment that holds in_rd: stale ones (an older seq) dropped, the next one taken when
+ * the read one is used up and the next continues it (or answers the request). 0 when the
+ * segment read is the one wanted and holds in_rd. */
+static int seg_settle(void)
+{
+    for (;;) {
+        if (ctl->seg_wr == ctl->seg_rd)
+            return -1;                          /* nothing yet */
+        volatile struct hp_seg *g = seg_cur();
+        if (g->seq == want) {
+            uint32_t at = g->ring0 + (ctl->in_rd - g->off0);
+            if ((int32_t)(seg_limit() - at) > 0 || !seg_has_next())
+                return 0;                       /* in_rd within it, or the last one */
+        }
+        if (!seg_has_next())
+            return -1;                          /* an older seq, the answer not there yet */
+        ctl->seg_rd++;                          /* used up, or stale */
+        g = seg_cur();
+        ctl->rb_rd = g->ring0;
+        if (g->seq == want && g->off0 != ctl->in_rd && (int32_t)(g->off0 - ctl->in_rd) > 0)
+            ctl->in_rd = g->off0;               /* an answer starts where it was asked */
+    }
+}
+
 uint32_t in_avail(void)
 {
-    return ctl->in_wr - ctl->in_rd;
+    if (seg_settle())
+        return 0;
+    volatile struct hp_seg *g = seg_cur();
+    uint32_t at = g->ring0 + (ctl->in_rd - g->off0), lim = seg_limit();
+    return (int32_t)(lim - at) > 0 ? lim - at : 0;
 }
 
 int in_ended(void)
 {
-    return ctl->in_end != 0xffffffffu && ctl->in_wr == ctl->in_end;
+    if (ctl->in_end == 0xffffffffu || seg_settle() || seg_has_next())
+        return 0;
+    volatile struct hp_seg *g = seg_cur();
+    return g->off0 + (ctl->in_wr - g->ring0) == ctl->in_end;   /* the stream written to its end */
 }
 
 static uint32_t peek_at(uint32_t off, void *dst, uint32_t n)
 {
-    uint32_t a = in_avail(), o = (ctl->in_rd + off) % HP_IN_SIZE;
+    uint32_t a = in_avail();
     a = a > off ? a - off : 0;
     if (n > a)
         n = a;
+    if (!n)
+        return 0;
+    volatile struct hp_seg *g = seg_cur();
+    uint32_t o = (g->ring0 + (ctl->in_rd - g->off0) + off) % HP_IN_SIZE;
     uint32_t k = HP_IN_SIZE - o < n ? HP_IN_SIZE - o : n;
     memcpy(dst, (const void *)(HP_IN_BASE + o), k);
     memcpy((uint8_t *)dst + k, (const void *)HP_IN_BASE, n - k);
     return n;
+}
+
+static void consumed(void)                      /* core A's room follows in_rd */
+{
+    if (!seg_settle()) {
+        volatile struct hp_seg *g = seg_cur();
+        ctl->rb_rd = g->ring0 + (ctl->in_rd - g->off0);
+    }
 }
 
 uint32_t in_peek(void *dst, uint32_t n)
@@ -119,10 +185,15 @@ uint32_t in_peek(void *dst, uint32_t n)
     return peek_at(0, dst, n);
 }
 
+static int ring_full(void)                      /* as full as core A keeps it */
+{
+    return ctl->in_wr - ctl->rb_rd >= HP_IN_SIZE - 8192;
+}
+
 uint32_t in_peek_ahead(uint32_t off, void *dst, uint32_t n)
 {
     /* core A refills when 8 KiB are free (player.c feed()) */
-    while (in_avail() < off + n && !in_ended() && in_avail() < HP_IN_SIZE - 8192)
+    while (in_avail() < off + n && !in_ended() && !ring_full())
         rt_wait();
     return peek_at(off, dst, n);
 }
@@ -142,32 +213,25 @@ uint32_t in_read_wait(void *dst, uint32_t n)
     return got;
 }
 
-/* Forward only. Within what core A has written: consumed here; beyond: in_rd is set past in_wr,
- * which tells core A to go on reading from there (its write position follows). */
-/* Backwards: core A is asked to feed again from pos (the ring emptied), then waited for */
-static int in_rewind(uint32_t pos)
-{
-    uint32_t seq = ctl->rewind_seq + 1;
-    ctl->rewind_pos = pos;
-    ctl->rewind_seq = seq;                      /* core A polls it with the ring */
-    while (ctl->rewind_ack != seq)
-        rt_wait();
-    return 0;
-}
-
+/* The stream from pos: within what the segment read holds, at once; else asked of core A (back,
+ * or forward past what is written: core A jumps there, nothing read in between), waited for */
 int in_seek(uint32_t pos)
 {
-    if ((int32_t)(pos - ctl->in_rd) < 0)
-        return in_rewind(pos);
     if (ctl->in_end != 0xffffffffu && pos > ctl->in_end)
         return -1;
-    if ((int32_t)(pos - ctl->in_wr) <= 0)
+    if ((int32_t)(pos - ctl->in_rd) >= 0 && pos - ctl->in_rd <= in_avail()) {
         ctl->in_rd = pos;
-    else {
-        ctl->in_rd = pos;
-        while ((int32_t)(ctl->in_wr - pos) < 0)
-            rt_wait();
+        consumed();
+        return 0;
     }
+    want = ctl->req_seq + 1;
+    ctl->req_pos = pos;
+    ctl->req_seq = want;                        /* core A polls it with the ring */
+    ctl->rb_rd = ctl->in_wr;                    /* what is there now: dropped (A's room) */
+    ctl->in_rd = pos;
+    while (seg_settle())
+        rt_wait();
+    consumed();
     return 0;
 }
 
@@ -175,6 +239,7 @@ uint32_t in_read(void *dst, uint32_t n)
 {
     n = in_peek(dst, n);
     ctl->in_rd += n;
+    consumed();
     return n;
 }
 
@@ -182,6 +247,7 @@ void in_skip(uint32_t n)
 {
     uint32_t a = in_avail();
     ctl->in_rd += n < a ? n : a;
+    consumed();
 }
 
 /* ---- the PCM ring the DMA reads (version 2, ETUDE §103) ----
@@ -596,8 +662,15 @@ static void run(void)
         if (seq != ctl->ack_seq) {
             uint32_t cmd = ctl->cmd;
             ctl->ack_seq = seq;
-            if (cmd == HP_CMD_OPEN && ctl->state == HP_READY)
+            if (cmd == HP_CMD_OPEN && ctl->state == HP_READY) {
+                ctl->seek_ms = ctl->trk.seek_ms;        /* the track's hints, for the codecs */
+                ctl->seek_offset = ctl->trk.seek_offset;
+                ctl->comment_end_page = ctl->trk.comment_end_page;
+                ctl->comment_end_seg = ctl->trk.comment_end_seg;
+                ctl->end_granule_lo = ctl->trk.end_granule_lo;
+                ctl->end_granule_hi = ctl->trk.end_granule_hi;
                 ctl->state = HP_OPENING;
+            }
             else if (cmd == HP_CMD_PLAY && ctl->state == HP_FORMAT)
                 ctl->state = HP_PLAYING;
             else if (cmd == HP_CMD_STOP)

@@ -283,6 +283,8 @@ static void menu_action(int m, int *scr)
         sd_forget();                            /* the card unwatched meanwhile: maybe changed */
         log_printf("ui: card to be set up again (after the %s)", m == M_SYSTEM ? "system screen" :
                    m == M_INSTALL ? "installer" : "USB session");
+        if (sd_present())
+            sd_open();                          /* at once: the music stopped (§106) */
         if (m == M_USB_RW || m == M_INSTALL || m == M_USB_RO) {
             path_root(FAT_VOL_INT);             /* the volume may have changed */
             dir_load(&path[1].dir);
@@ -322,7 +324,9 @@ void ui_main(void)
     fat_root(VOL_TOP, &path[0].dir);
     copy_name(path[0].name, "Storage", sizeof path[0].name);
     path[0].sel = path[0].top = 0;
-    resume_load();
+    if (sd_present())
+        sd_open();                              /* the card mounted at once (0.99r26, ETUDE §106): */
+    resume_load();                              /* nothing plays yet */
     if (!depth && !dir_n) {                     /* nothing saved: the internal volume */
         path_root(FAT_VOL_INT);
         dir_load(&path[1].dir);

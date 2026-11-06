@@ -30,6 +30,8 @@ extern struct player_heard player_heard;
 /* player_open() flag: keep the DACs running into the next track (same rate and frame size); the
  * track ends without a drain, player_chain_end() drains and lets the next start stop them */
 #define PLAY_CHAIN 1
+#define PLAY_ASYNC 2    /* player_open() returns once core B reads the headers; player_service()
+                           finishes the open (0.99r25) */
 void player_chain_end(void);
 /* The same without blocking, from the main loop (the end of the queue): 1 once the DMA is past
  * the last frame, 0 meanwhile */

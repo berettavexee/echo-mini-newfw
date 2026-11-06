@@ -30,7 +30,9 @@
 #define HP_DMA_SAR    0x600001b8u       /* DMAC1 channel 5 SAR: the DMA's read address */
 
 #define HP_MAGIC      0x5452424eu       /* "NBRT" */
-#define HP_VERSION    2                 /* 2: core B writes the ring the DMA reads (0.99r19) */
+#define HP_VERSION    3                 /* 2: core B writes the ring the DMA reads (0.99r19);
+                                           3: segments in the input ring, the track (0.99r24) */
+#define HP_SEGS       4
 
 enum hp_state {
     HP_BOOT, HP_READY,                  /* runtime up, waiting for OPEN */
@@ -59,8 +61,12 @@ struct hp_ctl {
     uint32_t cmd, cmd_seq;              /* A: a new command is a new cmd_seq */
     uint32_t ack_seq;                   /* B: last cmd_seq taken */
     /* input ring, written by A */
-    uint32_t in_wr;                     /* A: bytes written */
-    uint32_t in_rd;                     /* B: bytes consumed */
+    /* Version 3 (0.99r24, ETUDE §105): the ring holds segments of the stream, each a run of
+     * bytes contiguous both in the stream (file offsets) and in the ring; their starts are in
+     * seg[] (A). in_rd stays the stream offset core B reads at (the codecs see the file). */
+    uint32_t in_wr;                     /* A: ring bytes written (a counter, the ring holds 'size'
+                                           bytes at 'counter % size') */
+    uint32_t in_rd;                     /* B: the stream offset read up to */
     uint32_t in_end;                    /* A: total stream length (0xffffffff: not known yet) */
     /* output ring, written by B */
     uint32_t out_wr;                    /* B: offset of the next byte written */
@@ -89,10 +95,11 @@ struct hp_ctl {
     uint32_t seek_offset;               /* A, Ogg: page to jump to (granule <= target - 1 s), 0: B
                                            guesses in proportion to the stream */
     uint32_t start_frame;               /* B: position of the first frame written (a seek) */
-    /* B asks A to read the input again from an earlier offset (0.80, ETUDE §61: Musepack SV8
-     * reads its seek table at the end of the file, then comes back): B sets rewind_pos and
-     * increments rewind_seq; A empties the ring, feeds from rewind_pos and sets rewind_ack */
-    uint32_t rewind_pos, rewind_seq, rewind_ack;
+    /* B asks A for the stream from another offset (version 3: forward past what is written, or
+     * back: Musepack SV8 reads its seek table at the end of the file, then comes back, ETUDE
+     * §61): B sets req_pos, then moves req_seq on; A answers with a segment of that seq starting
+     * at req_pos. B moves rb_rd: the ring bytes it is done with (A's room). */
+    uint32_t req_pos, req_seq, rb_rd;
     uint32_t hacc_sub, hacc_soft;       /* FLAC: LPC subframes on HIFIACC, in software after a
                                            timeout (ETUDE §67) */
     uint32_t synth_gran, synth_soft;    /* MP3: granules on SYNTH, in software (ETUDE §71) */
@@ -120,6 +127,25 @@ struct hp_ctl {
     uint32_t beep_from;                 /* A: the pattern's frame to start at (a track change
                                            restarts core B: the rest of the pattern goes on) */
     uint32_t beep_frame;                /* B: the pattern's frames written so far */
+    /* Version 3: the segments of the input ring (A appends, B takes them in order) */
+    struct hp_seg {
+        uint32_t seq;                   /* 0 from the open; a req_seq answered */
+        uint32_t ring0;                 /* the ring counter of its first byte */
+        uint32_t off0;                  /* its stream offset (ring0 = off0 modulo 512: the reads
+                                           stay whole sectors) */
+        uint32_t prev_end;              /* the ring counter where the segment before it ends
+                                           (ring0 - prev_end bytes of padding between) */
+    } seg[HP_SEGS];
+    uint32_t seg_wr;                    /* A: segments appended */
+    uint32_t seg_rd;                    /* B: segments done with (the one read: seg_rd) */
+    /* Version 3: the track, written by A before OPEN (the hints the codecs read; B copies them
+     * into the fields above when it opens) */
+    struct hp_trk {
+        uint32_t codec, size;
+        uint32_t seek_ms, seek_offset;
+        uint32_t comment_end_page, comment_end_seg;
+        uint32_t end_granule_lo, end_granule_hi;
+    } trk;
 #if defined(ECHO_HWTEST) || defined(ECHO_HWSYN) || defined(ECHO_FFTCMP)
     /* Test build only (ETUDE §66): HIFIACC's LPC against dr_flac, per track, written by core B
      * and logged by core A at the end of the track */
