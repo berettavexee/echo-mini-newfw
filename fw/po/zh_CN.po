@@ -705,3 +705,18 @@ msgstr "无法共享内部存储"
 #, fuzzy
 msgid "its volume overlaps the firmware area"
 msgstr "其卷与固件区域重叠"
+
+#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#: src/settings.c
+msgid "Clock"
+msgstr ""
+
+#. TRANSLATORS: the value of the line "Clock": the time shown or not
+#: src/settings.c
+msgid "shown"
+msgstr ""
+
+#. TRANSLATORS: the value of the line "Clock": the time shown or not
+#: src/settings.c
+msgid "hidden"
+msgstr ""

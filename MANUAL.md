@@ -236,6 +236,7 @@ power off (except the sleep timer).
 |---|---|---|
 | Language | the language of the screens: English, Français, 日本語, 简体中文 (the catalogues of the image; see below). This line stays in English, so that it can be found in any language | English |
 | Date and time | shows the date and time; PLAY opens the clock screen (below) | |
+| Clock | **shown**: the time at the top of the play screen and the browser (once the clock is set); **hidden**: not shown | shown |
 | Screen off after | 10 s, 30 s, 1 min, 2 min, 5 min, never | 30 s |
 | Brightness | 10 steps: 8, 12, 17, 23, 30, 39, 50, 63, 80, 100 % (even steps to the eye) | 100 % |
 | Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder | tags |

@@ -213,7 +213,9 @@ struct settings {
     uint8_t uac_vol;                            /* USB sound card's volume + 1, 0: the playback's */
     uint8_t uac_remote;                         /* USB sound card: the keys sent to the host (HID) */
     char lang[8];                               /* the interface's language: its code (lang.h), */
-};                                              /* "" English (0.101) */
+                                                /* "" English (0.101) */
+    uint8_t hide_clock;                         /* the clock not shown (§120): 0 in a block of */
+};                                              /* 0.101 (its padding byte), shown */
 #define SET_V2_BYTES 9                          /* the values up to uac_remote (version 2) */
 extern struct settings cfg;
 extern uint32_t sleep_at;                       /* the sleep timer ends (millis), 0: off */

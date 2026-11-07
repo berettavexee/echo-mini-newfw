@@ -52,6 +52,7 @@ ALAC on the accelerator).
 | USB sound card as a headset remote (HID): PLAY play/pause, VOL+ or VOL- twice next or previous, MENU the remote on and off (kept); tested with VLC and YouTube on Linux | 0.100 | §95 |
 | USB sound card: the Power key (screen off and on; held 2 s, the card left, then the power off) | 0.100 | §95 |
 | ALAC's adaptive predictor on HIFIACC (orders 3 to 30; checked against our decoder on the device): core B at 9.5 MHz on 16-bit ALAC instead of 35; the end of Imdct36 and SYNTH as pending IRQs | 0.101 | §113-§116 |
+| The clock shown or hidden (Settings, the line Clock) | 0.101c1 | §120 |
 | Pause when the headphones are unplugged (the last plug out; plugging back does not play) | 0.101u1 | §119 |
 | Interface languages (gettext PO files, catalogues in the image, the Language setting): English, French, Japanese and Simplified Chinese (partial) | 0.101 | §112 |
 

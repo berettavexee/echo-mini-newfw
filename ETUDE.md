@@ -4392,3 +4392,15 @@ Idée de la PR #1 (CHEYAN), sur la feuille de route ; reprise de zéro, comporte
 **Test** `unplug-pause` (suite par défaut) : les deux sorties branchées au démarrage ; la 3,5 mm sort (pas de pause), puis la 4,4 mm (pause) ; rebranchée (pas de lecture avant PLAY) ; PLAY, PLAY (pause à la main), ressortie : rien de plus. `emutest.py` accepte maintenant un `check` pour tous les tests, plus seulement ceux des jeux de fichiers.
 
 **Sur l'appareil** (`work/hwlog/2026-11-07_0.101u1/`) : trois débranchements de la prise 3,5 mm pendant la lecture, chacun suivi de `audio: paused` 3 ms plus tard ; rebranchée, rien ; PLAY relance. Conforme pour l'utilisateur. La prise 4,4 mm n'est pas essayée (pas de câble) : seul l'émulateur la couvre.
+
+## 120. L'horloge affichée ou masquée (0.101c1, 2026-11-07)
+
+Idée de la PR #5 (CHEYAN), reprise de zéro sur proposition validée. Une ligne **Clock** des réglages, sous « Date and time » : **shown** (par défaut, comme avant) ou **hidden** ; PLAY bascule, effet immédiat (`clock_min = -1` : l'heure redessinée ou effacée), « Restore the defaults » la remet. Masquée, l'emplacement de l'heure reste vide sur l'écran de lecture et le navigateur (`draw_clock()` y dessine une chaîne vide) ; la largeur du titre ne change pas ; l'horloge tourne toujours.
+
+**Stockage sans migration** : le champ `hide_clock` (0 = affichée) prend l'octet de remplissage qui suivait `lang[8]` dans `struct settings` ; la somme du bloc reste au mot 8 (vérifié à la compilation), et cet octet, couvert par la somme, valait toujours 0 (le bloc est mis à zéro avant d'être rempli). Un bloc écrit par la 0.101 se lit donc tel quel (horloge affichée), et la 0.101 lit le nôtre (elle ignore l'octet) : format toujours « NEWFWSET 3 ». Journal : `ui: clock hidden|shown` au changement, `clock …` dans la ligne `ui: settings` au démarrage.
+
+**Traductions** : « Clock », « shown », « hidden » ajoutées au modèle (156 chaînes), traduites en français (« Horloge », « affichée », « masquée ») ; en japonais et en chinois, vides (affichées en anglais). Ajoutées à la main aux fichiers PO : `msgmerge` dupliquait des commentaires et réordonnait les drapeaux.
+
+**Tests** : `clock-hide` (les réglages ouverts au menu, la ligne basculée, retour ; au redémarrage la ligne `ui: settings` dit `clock hidden`) ; `lang` attend maintenant un nombre quelconque de chaînes. L'émulateur n'a pas d'horloge réglée : le dessin se vérifie sur l'appareil.
+
+**Sur l'appareil** (`work/hwlog/2026-11-07_0.101c1/`) : le bloc de réglages écrit par l'image précédente (0.101u1, sans le champ) relu `clock shown` au premier démarrage, ce qui confirme la compatibilité ; masquée et réaffichée plusieurs fois, en anglais, français, japonais et chinois ; masquée avant l'arrêt, relue `clock hidden` au démarrage suivant. Conforme pour l'utilisateur.
