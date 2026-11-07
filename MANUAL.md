@@ -89,7 +89,7 @@ From top to bottom:
 |---|---|
 | **PLAY** | pause / play |
 | **PLAY held** | next track. On the last track (play mode "in order"), it stops; PLAY then plays that last track again from its start |
-| **BACK** | back to the start of the track; within its first 3 s, the track before (in shuffle: the one heard before) |
+| **BACK** | back to the start of the track; within its first 3 s, the track before (in shuffle: the one heard before). So a double press of BACK goes to the track before |
 | **BACK held** | next play mode: in order → repeat all → repeat one → shuffle → in order. Shuffle plays every track of the queue once, in a random order, then another order |
 | **VOL+** / **VOL-** | volume up / down, 1 dB a step (held: repeats) |
 | **VOL+ held, then VOL-** | seek mode (below) |
