@@ -194,6 +194,46 @@ for _g in SET_GROUPS:                           # the test set (mktestset.py), o
 SET_SECONDS = 3                                 # the files of a set made here (mktestset.py)
 # the CI's share of the set: each format once (with Unicode tags in each container, Musepack's
 # APEv2 included), the high rates, and the cover skip past the 512 KiB window (M4A: a small one)
+
+
+def check_hwa(text):
+    """The ALAC bench (ETUDE §113), against the emulator's model of the filter: on every track
+    the coefficients reversed exact, without a timeout; in stream order, caught out on some
+    track (beyond order 1, where both orders are the same)"""
+    fails, tracks, caught = [], 0, 0
+    for m in re.finditer(r"hwa: (\S+): (\d+) predictions, coefficients reversed: (\d+) exact, "
+                         r"(\d+) differ; in stream order: \d+ exact, (\d+) differ; \d+ skipped, "
+                         r"(\d+) timeouts", text):
+        name, n, differ, s_differ, tmo = m.group(1), *(int(m.group(k)) for k in (2, 4, 5, 6))
+        tracks += 1
+        caught += s_differ > 0
+        if differ or tmo or not n:
+            fails.append(f"hwa: {name}: {n} predictions, {differ} differ, {tmo} timeouts")
+    if tracks < 2:
+        fails.append(f"hwa: {tracks} track(s) logged")
+    if not caught:
+        fails.append("hwa: the stream order never differed (the bench sees nothing?)")
+    return fails
+
+
+def check_hwi(text):
+    """The Imdct36 bench: the end seen as IRQ 7 on each transform, SYNTH's as IRQ 1"""
+    fails = []
+    m = re.search(r"\((\d+) IRQ 7, (\d+) timeouts\)", text)
+    if not m or m.group(1) == "0" or m.group(2) != "0":
+        fails.append(f"hwi: {m.group(0) if m else 'no IRQ 7 line'}")
+    m = re.search(r"IRQ 1 pending at (\d+) of (\d+) ends", text)
+    if not m or m.group(1) != m.group(2) or m.group(1) == "0":
+        fails.append(f"hws: {m.group(0) if m else 'no IRQ 1 line'}")
+    return fails
+
+
+# The benches of the accelerators (ETUDE §113): the test image only (make EXTRA=-DECHO_HWTEST),
+# not in the default list
+TESTS["hwt-alac"] = dict(set="alacorder", seconds=1, hwtest=True, check=check_hwa)
+TESTS["hwt-imdct"] = dict(set="formats", pick=["formats/mp3-16-44100.mp3"], hwtest=True,
+                          check=check_hwi)
+
 TESTS["set-ci"] = dict(set="tags,formats,covers", pick=[
     "tags/wav-unicode.wav", "tags/aiff-unicode.aiff", "tags/flac-unicode.flac",
     "tags/mp3-unicode.mp3", "tags/vorbis-unicode.ogg", "tags/opus-unicode.opus",
@@ -308,6 +348,8 @@ def run_set(group, t, img, elf, tmp):
         mm = re.search(pat, text + "\n" + out.stdout, re.M)
         if mm:
             fails.append(f"forbidden: {pat}")
+    if "check" in t:
+        fails += t["check"](text)
     return fails, text + "\n" + out.stdout
 
 
@@ -412,8 +454,8 @@ def run(name, t, img, elf, tmp):
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
-    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or [n for n in TESTS
-                                                                if not TESTS[n].get("fault")]
+    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or [
+        n for n in TESTS if not TESTS[n].get("fault") and not TESTS[n].get("hwtest")]
     failed = 0
     for name in names:
         with tempfile.TemporaryDirectory(prefix=f"emutest_{name}_") as tmp:

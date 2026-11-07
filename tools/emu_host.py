@@ -25,6 +25,7 @@ helper reads the core clock from the parameter block (left zero: no delay). Peri
 other than the mailbox are plain RAM. Only block hooks are used (Unicorn 2.1 mis-executes
 Thumb IT blocks with code or memory-write hooks); the mailbox is an MMIO mapping.
 """
+import array
 import ctypes
 import os
 import struct
@@ -66,6 +67,41 @@ def counted(core, base, rd, wr):
     return crd, cwr
 
 
+class Imdct36:
+    """Imdct36, the MP3 36-point IMDCT (ETUDE.md sections 68, 70 and 113, docs/MP3ACC.md), seen by
+    core B at 0x60010000: the 18 inputs at +0x000..+0x044 (the last one starts it), the 36
+    outputs at +0x048..+0x0d4; +0x800 the mode (1: the transform at the input's scale, 3: divided
+    by 4096, as measured in section 70), +0x80c written 0 to acknowledge. The end is IRQ 7 of
+    core B (the stock module's handler, section 113): pend(7). Model: the exact transform
+    cos(pi / 72 * (2i + 1 + 18) * (2k + 1)), rounded; the device's 20-bit coefficients are less
+    exact (section 70), so close, not bit-exact.
+    """
+    def __init__(self):
+        import math
+        self.cos = [[math.cos(math.pi / 72 * (2 * i + 1 + 18) * (2 * k + 1)) for k in range(18)]
+                    for i in range(36)]
+        self.x, self.y, self.reg = [0] * 18, [0] * 36, {}
+        self.pend = lambda irq: None
+
+    def rd(self, uc, off, size, _):
+        if off < 0x48:
+            return self.x[off >> 2]
+        if off < 0xd8:
+            return self.y[(off - 0x48) >> 2]
+        return self.reg.get(off, 0)
+
+    def wr(self, uc, off, size, val, _):
+        if off < 0x48:
+            self.x[off >> 2] = val - (1 << 32) if val & 0x80000000 else val
+            if off == 0x44:
+                div = 4096 if self.reg.get(0x800, 0) & 2 else 1
+                self.y = [int(round(sum(a * b for a, b in zip(self.x, c)) / div)) & 0xffffffff
+                          for c in self.cos]
+                self.pend(7)
+        else:
+            self.reg[off] = val
+
+
 class Synth:
     """SYNTH, the MPEG polyphase synthesis (ETUDE.md sections 68-71 and 77, docs/MP3ACC.md), seen
     by core B at 0x60050000: +0x804 channel (bit 0) and phase, the 32 subband samples written to
@@ -95,6 +131,7 @@ class Synth:
         self.n = np.cos((16 + i) * (2 * k + 1) * np.pi / 64)       # matrixing
         self.io = [0] * 32
         self.reg = {}
+        self.pend = lambda irq: None                               # its end: IRQ 1 (section 113)
         self.clear()
 
     def clear(self):
@@ -109,6 +146,7 @@ class Synth:
         y = np.clip(np.rint((v[self.idx] * self.win).sum(axis=1) / 8192), -32768, 32767)
         self.io = [int(t) & 0xffffffff for t in y.astype(np.int64)]
         self.reg[0x80c] = 1
+        self.pend(1)
 
     def rd(self, uc, off, size, _):
         return self.io[off >> 2] if off < 0x80 else self.reg.get(off, 0)
@@ -126,6 +164,45 @@ class Synth:
             self.reg[off] = val
 
 
+_native = None
+
+
+def _i32(a):
+    """An array.array("i") as an int32_t * for ctypes (no copy)"""
+    return ctypes.cast(a.buffer_info()[0], ctypes.POINTER(ctypes.c_int32))
+
+
+def native():
+    """emu_accel.c built into tools/__pycache__ (once per version of the source) and loaded, or
+    None when there is no C compiler (or with EMU_NATIVE=0): the models then run in Python, the
+    same arithmetic"""
+    global _native
+    if _native is None and os.environ.get("EMU_NATIVE") == "0":
+        _native = False                                           # EMU_NATIVE=0: Python only
+    if _native is None:
+        import hashlib
+        import subprocess
+        here = os.path.dirname(os.path.abspath(__file__))
+        src = os.path.join(here, "emu_accel.c")
+        tag = hashlib.sha1(open(src, "rb").read()).hexdigest()[:12]
+        so = os.path.join(here, "__pycache__", f"emu_accel.{tag}.so")
+        try:
+            if not os.path.exists(so):
+                os.makedirs(os.path.dirname(so), exist_ok=True)
+                tmp = f"{so}.{os.getpid()}"
+                subprocess.run([os.environ.get("CC", "cc"), "-O2", "-shared", "-fPIC", "-o", tmp,
+                                src], check=True, capture_output=True)
+                os.replace(tmp, so)
+            lib = ctypes.CDLL(so)
+            p32, p16, i = ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int16), ctypes.c_int
+            lib.flac_lpc.argtypes = [p32, p32, i, p32, i, i]
+            lib.alac_pred.argtypes = [p32, p32, i, p16, i, i, i]
+            _native = lib
+        except (OSError, subprocess.CalledProcessError):
+            _native = False
+    return _native or None
+
+
 class Accel:
     """HIFIACC LPC (FLAC FIR) and DMAC2 model, from the register map of ETUDE.md section 1.5.
 
@@ -140,12 +217,20 @@ class Accel:
     start); +0x24 size << 29 (64: 0 .. 1024: 4), bit 27 no scaling (0: result / N), bit 20
     real input (imaginary part ignored); imaginary parts at 0x01061000, real parts at
     0x01062000, inputs in bit-reversed order, forward transform in natural order, in place.
+
+    ALAC (ETUDE.md section 113, from the stock module 79; not yet checked on the device): +0x0c
+    function 3 (0x60000000 | n << 15, | 3 = start), +0x28 order << 16 | lpc_quant << 8 |
+    bps << 24, the coefficients at 0x01069000 (one per 32-bit word, low 16 bits, signed; in
+    FFmpeg's order: word k multiplies the sample order - k before), the input the first
+    order + 1 decoded samples then the residuals; the output, ALAC's adaptive predictor (FFmpeg's
+    lpc_prediction, Apple's dp_dec.c), with its 32-bit sums.
     While +0x0c still selects the FFT, the data memory reads as one value (here FFT_BUSY), as
     on the device: the code must write 0 to +0x0c before reading. The model is the exact
     transform rounded to integers; the device's twiddles have about 14 bits (error up to
     0.008 % of the peak), so results are close, not bit-exact.
     """
     HACC, DMA, FIN, FOUT, COEF = 0x01060000, 0x01070000, 0x01060040, 0x010600a0, 0x0106b000
+    ALAC_COEF = 0x01069000
     FFT_IM, FFT_RE, FFT_BUSY = 0x01061000, 0x01062000, 0x0badf00d
 
     def __init__(self, u, hifi):
@@ -204,6 +289,7 @@ class Accel:
             return
         if a == self.HACC + 0x0c and val & 3 == 3:
             self.n = (val >> 15) & 0x1fff
+            self.func = val >> 29
             self.reg[self.HACC + 8] = self.reg.get(self.HACC + 8, 0) & ~0x8000
             self._compute()
 
@@ -211,29 +297,80 @@ class Accel:
         n = getattr(self, "n", 0)
         if not n or len(self.fin) < n:
             return
-        cfg = self.reg.get(self.HACC + 0x2c, 0)
-        order, shift = (cfg >> 16) & 0xff, (cfg >> 8) & 0xff
-        coef = [struct.unpack("<i", struct.pack("<I", self.reg.get(self.COEF + 4 * i, 0)))[0]
-                for i in range(order)]
-        x = [struct.unpack("<i", struct.pack("<I", v & 0xffffffff))[0] for v in self.fin[:n]]
+        x = list(memoryview(array.array("I", [v & 0xffffffff for v in self.fin[:n]])).cast("B")
+                 .cast("i"))                                      # signed, in one pass
         del self.fin[:n]
-        y = x[:order]
-        for i in range(order, n):
-            acc = sum(coef[k] * y[i - order + k] for k in range(order))
-            y.append(x[i] + (acc >> shift))
+        if getattr(self, "func", 5) == 3:
+            y = self._alac(x)
+        else:
+            cfg = self.reg.get(self.HACC + 0x2c, 0)
+            order, shift = (cfg >> 16) & 0xff, (cfg >> 8) & 0xff
+            coef = [struct.unpack("<i", struct.pack("<I", self.reg.get(self.COEF + 4 * i, 0)))[0]
+                    for i in range(order)]
+            lib = native()
+            if lib:
+                xa, ya = array.array("i", x), array.array("i", bytes(4 * n))
+                lib.flac_lpc(_i32(xa), _i32(ya), n, (ctypes.c_int32 * max(order, 1))(*coef),
+                             order, shift)
+                y = ya.tolist()
+            else:
+                y = x[:order]
+                for i in range(order, n):
+                    acc = sum(coef[k] * y[i - order + k] for k in range(order))
+                    y.append(x[i] + (acc >> shift))
         self.fout += y
         self.n = 0
         self.reg[self.HACC + 8] = self.reg.get(self.HACC + 8, 0) | 0x8000
         self._service()
 
+    def _alac(self, x):
+        """ALAC's adaptive predictor on x (order + 1 decoded samples, then residuals)"""
+        cfg = self.reg.get(self.HACC + 0x28, 0)
+        order, quant, bps = (cfg >> 16) & 0x1f, (cfg >> 8) & 0xf, (cfg >> 24) & 0x3f
+        def s16(v):
+            v &= 0xffff
+            return v - 0x10000 if v & 0x8000 else v
+        def s32(v):
+            v &= 0xffffffff
+            return v - (1 << 32) if v & 0x80000000 else v
+        def ext(v):                                               # sign_extend(v, bps)
+            v &= (1 << bps) - 1
+            return v - (1 << bps) if v >> (bps - 1) & 1 else v
+        sign = lambda v: (v > 0) - (v < 0)
+        c = [s16(self.reg.get(self.ALAC_COEF + 4 * k, 0)) for k in range(order)]
+        lib = native()
+        if lib and 1 <= bps <= 32:
+            n = len(x)
+            xa, ya = array.array("i", x), array.array("i", bytes(4 * n))
+            lib.alac_pred(_i32(xa), _i32(ya), n, (ctypes.c_int16 * max(order, 1))(*c), order,
+                          quant, bps)
+            return ya.tolist()
+        y = x[:order + 1]
+        half = 1 << (quant - 1) if quant else 0
+        for i in range(order + 1, len(x)):
+            d, pred = y[i - order - 1], y[i - order:i]
+            acc = s32(sum((pred[j] - d) * c[j] for j in range(order)))
+            v = s32(acc + half) >> quant
+            y.append(ext(v + d + x[i]))
+            e = x[i]
+            es = sign(e)
+            j = 0
+            while es and j < order and e * es > 0:
+                dv = d - pred[j]
+                sg = sign(dv) * es
+                c[j] = s16(c[j] - sg)
+                e -= ((dv * sg) >> quant) * (j + 1)
+                j += 1
+        return y
+
     def _fft(self):
-        import cmath
         cfg = self.reg.get(self.HACC + 0x24, 0)
         n = 64 << min((cfg >> 29) & 7, 4)
         s32 = lambda v: v - (1 << 32) if v & 0x80000000 else v
         x = [complex(s32(self.reg.get(self.FFT_RE + 4 * i, 0)),
                      0 if cfg & (1 << 20) else s32(self.reg.get(self.FFT_IM + 4 * i, 0)))
              for i in range(n)]
+        import cmath
         # the input is already in bit-reversed order: iterative radix-2 butterflies
         m = 2
         while m <= n:
@@ -252,27 +389,34 @@ class Accel:
         self.reg[self.HACC + 8] = self.reg.get(self.HACC + 8, 0) | 0x8000
 
     def _block(self, sar, dar, ctl, ctlh):
-        """Run one DMA block; return False if it must wait for the accelerator."""
+        """Run one DMA block; return False if it must wait for the accelerator. Memory is read
+        and written once per block (one Unicorn call each, not one per word)."""
         width = 1 << ((ctl >> 4) & 7)
         n = ctlh & 0xfff
         if sar == self.FOUT and len(self.fout) < n:
             return False
-        sinc, dinc = (ctl >> 9) & 3, (ctl >> 7) & 3
-        for i in range(n):
-            s = sar if sar in (self.FOUT,) or sinc else sar + i * width
-            dd = dar if dar in (self.FIN,) or dinc else dar + i * width
-            if s == self.FOUT:
-                v = self.fout.pop(0) & 0xffffffff
-            elif 0x01060000 <= s < 0x01080000:
-                v = self.reg.get(s, 0)
-            else:
-                v = int.from_bytes(self.u.mem_read(s, width), "little")
-            if dd == self.FIN:
-                self.fin.append(v)
-            elif 0x01060000 <= dd < 0x01080000:
-                self.reg[dd] = v
-            else:
-                self.u.mem_write(dd, v.to_bytes(width, "little"))
+        sinc, dinc = (ctl >> 9) & 3, (ctl >> 7) & 3              # nonzero: the address stays
+        fmt = {1: "B", 2: "H", 4: "I"}[width]
+        if sar == self.FOUT:
+            vals = [v & 0xffffffff for v in self.fout[:n]]
+            del self.fout[:n]
+        elif 0x01060000 <= sar < 0x01080000:
+            vals = [self.reg.get(sar if sinc else sar + i * width, 0) for i in range(n)]
+        elif sinc:
+            vals = [int.from_bytes(self.u.mem_read(sar, width), "little")] * n
+        else:
+            vals = list(memoryview(bytes(self.u.mem_read(sar, n * width))).cast(fmt))
+        if dar == self.FIN:
+            self.fin += vals
+        elif 0x01060000 <= dar < 0x01080000:
+            for i, v in enumerate(vals):
+                self.reg[dar if dinc else dar + i * width] = v
+        elif dinc:
+            if vals:
+                self.u.mem_write(dar, (vals[-1] & ((1 << 8 * width) - 1)).to_bytes(width, "little"))
+        else:
+            mask = (1 << 8 * width) - 1
+            self.u.mem_write(dar, struct.pack(f"<{n}{fmt}", *(v & mask for v in vals)))
         if dar == self.FIN:
             self._compute()
         return True

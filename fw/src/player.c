@@ -1134,10 +1134,15 @@ void player_close(int stopped)
                    c->hws.hw[0], c->hws.hw[1], c->hws.hw[2], c->hws.hw[3], c->hws.st_before,
                    c->hws.st_after);
         if (c->hws.syn_timed)
-            log_printf("hws: synth time: hw %u us, sw %u us over %u calls (18 slots each)",
-                       c->hws.syn_hw_ticks / 24, c->hws.syn_sw_ticks / 24, c->hws.syn_timed);
+            log_printf("hws: synth time: hw %u us, sw %u us over %u calls (18 slots each); "
+                       "IRQ 1 pending at %u of %u ends", c->hws.syn_hw_ticks / 24,
+                       c->hws.syn_sw_ticks / 24, c->hws.syn_timed, c->hws.syn_irq, c->hws.polled);
         if (c->hws.im_calls) {
-            log_printf("hwi: mode %u shift %d: %u transforms (%u polled, %u timeouts); hw %u us, "
+            if (c->hws.im_polled)
+                log_printf("hwi: IRQ 7 pending after %u..%u ticks (24 MHz), mean %u",
+                           c->hws.im_lat_min, c->hws.im_lat_max,
+                           c->hws.im_lat_sum / c->hws.im_polled);
+            log_printf("hwi: mode %u shift %d: %u transforms (%u IRQ 7, %u timeouts); hw %u us, "
                        "mdct_18 %u us; sum |ref| %u, |hw| %u (x1000); dot %d (x1e6)",
                        c->hws.im_mode, c->hws.im_shift, c->hws.im_calls, c->hws.im_polled,
                        c->hws.im_timeouts, c->hws.im_hw_ticks / 24, c->hws.im_sw_ticks / 24,
@@ -1153,6 +1158,30 @@ void player_close(int stopped)
         }
         c->hws.slots = 0;
         c->hws.trial++;                         /* the next track tries the next shift */
+    }
+    if (c->hwa.magic == HWT_MAGIC && (c->hwa.subframes || c->hwa.skipped)) {
+        /* test build: HIFIACC's ALAC filter against our predictor (ETUDE §113) */
+        log_printf("hwa: %s: %u predictions, coefficients reversed: %u exact, %u differ; in stream "
+                   "order: %u exact, %u differ; %u skipped, %u timeouts; hw %u us (DMA "
+                   "included), software %u us", own_file.name, c->hwa.subframes, c->hwa.exact,
+                   c->hwa.differ, c->hwa.s_exact, c->hwa.s_differ, c->hwa.skipped,
+                   c->hwa.timeouts, c->hwa.hw_ticks / 24, c->hwa.sw_ticks / 24);
+        char b[240], *p = b, *end = b + sizeof b - 1;
+        p = log_format(p, end, "hwa: per order (exact/differ):");
+        for (int k = 1; k <= 30; k++)
+            if (c->hwa.ok_o[k] || c->hwa.diff_o[k])
+                p = log_format(p, end, " %d:%u/%u", k, c->hwa.ok_o[k], c->hwa.diff_o[k]);
+        p = log_format(p, end, "; per lpc_quant:");
+        for (int k = 0; k < 16; k++)
+            if (c->hwa.ok_q[k] || c->hwa.diff_q[k])
+                p = log_format(p, end, " %d:%u/%u", k, c->hwa.ok_q[k], c->hwa.diff_q[k]);
+        *p = 0;
+        log_printf("%s", b);
+        if (c->hwa.differ)
+            log_printf("hwa: first difference: order %u, lpc_quant %u, %u bits, %u samples, at "
+                       "%u: ours %d, hw %d", c->hwa.f_order, c->hwa.f_quant, c->hwa.f_bps,
+                       c->hwa.f_n, c->hwa.f_idx, c->hwa.f_sw, c->hwa.f_hw);
+        c->hwa.magic = 0;
     }
 #endif
     command(HP_CMD_STOP);

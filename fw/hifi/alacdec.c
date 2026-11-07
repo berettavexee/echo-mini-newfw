@@ -194,8 +194,8 @@ next:   ;
         coefs[i] = a[i];
 }
 
-__attribute__((noinline)) static void unpc_block(const int32_t *pc, int32_t *out, uint32_t num, int16_t *coefs,
-                       uint32_t act, uint32_t chanbits, uint32_t denshift)
+__attribute__((noinline)) static void unpc_block_sw(const int32_t *pc, int32_t *out, uint32_t num,
+                       int16_t *coefs, uint32_t act, uint32_t chanbits, uint32_t denshift)
 {
     uint32_t cs = 32 - chanbits;
     int32_t denhalf = 1 << (denshift - 1);
@@ -262,6 +262,22 @@ __attribute__((noinline)) static void unpc_block(const int32_t *pc, int32_t *out
     for (uint32_t i = 0; i < act; i++)
         coefs[i] = a[i];
 }
+
+#ifdef ECHO_HWTEST
+/* Test build only (ETUDE §113): each prediction again on HIFIACC's ALAC filter, compared
+ * (hwtest_alac.c, included by codec_alac.c); the output stays ours */
+
+static void unpc_block(const int32_t *pc, int32_t *out, uint32_t num, int16_t *coefs,
+                       uint32_t act, uint32_t chanbits, uint32_t denshift)
+{
+    int test = coefs && pc != out && echo_alac_pre(coefs, act, num);
+    unpc_block_sw(pc, out, num, coefs, act, chanbits, denshift);
+    if (test)
+        echo_alac_post(pc, out, num, act, chanbits, denshift);
+}
+#else
+#define unpc_block unpc_block_sw
+#endif
 
 /* ---- set-up ---- */
 int alac_init(struct alac *a, const uint8_t *c, uint32_t n, void *(*alloc)(uint32_t))

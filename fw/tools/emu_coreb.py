@@ -88,11 +88,24 @@ class CoreB(emu_host.Hifi):
         def dmac_wr(uc, off, size, val, _):
             self.dmac[off] = val
         mmio(0x60000000, 0x1000, dmac_rd, dmac_wr)
-        u.mem_map(0x60001000, 0x4f000)
+        u.mem_map(0x60001000, 0xf000)
+        self.imd = emu_host.Imdct36()                               # Imdct36 model (§113)
+        self.imd.pend = self.nvic_pend
+        mmio(0x60010000, 0x1000, self.imd.rd, self.imd.wr)
+        u.mem_map(0x60011000, 0x3f000)
         self.syn = emu_host.Synth()                                 # SYNTH model
+        self.syn.pend = self.nvic_pend
         mmio(0x60050000, 0x2000, self.syn.rd, self.syn.wr)
         u.mem_map(0x60052000, 0x100000 - 0x52000)
         u.mem_map(0xE0000000, 0x100000)
+        # the NVIC's clear registers (the rest is RAM): ICER clears ISER's bits, ICPR ISPR's
+        from unicorn import UC_HOOK_MEM_WRITE
+        def nvic_wr(uc, access, addr, size, value, _):
+            reg = 0xE000E100 if addr < 0xE000E1A0 else 0xE000E200
+            old = struct.unpack("<I", uc.mem_read(reg + (addr & 0x1c), 4))[0]
+            uc.mem_write(reg + (addr & 0x1c), struct.pack("<I", old & ~value & 0xffffffff))
+        u.hook_add(UC_HOOK_MEM_WRITE, nvic_wr, begin=0xE000E180, end=0xE000E19f)
+        u.hook_add(UC_HOOK_MEM_WRITE, nvic_wr, begin=0xE000E280, end=0xE000E29f)
         code = bytes(sh.hr0)
         self.wfi = code.find(bytes.fromhex("30bf7047"))
         if self.wfi < 0:
@@ -107,6 +120,12 @@ class CoreB(emu_host.Hifi):
         # the delay helper waits on SysTick with the frequency of the parameter block; there is
         # no SysTick here, so it gets 0 (no delay), as in emu_host.py
         struct.pack_into("<2I", sh.hr1, 0x20, 0, 0)
+
+    def nvic_pend(self, irq):
+        """An accelerator's end: its interrupt pending in ISPR0 (never enabled by our runtime,
+        whose vectors 16 to 25 are faults: the test bench polls the bit, ETUDE §113)"""
+        old = struct.unpack("<I", self.u.mem_read(0xE000E200, 4))[0]
+        self.u.mem_write(0xE000E200, struct.pack("<I", old | 1 << irq))
 
     def _t1rd(self, uc, off, size, _):
         """TIMER1 (CURRENT_VALUE at 0x28 / 0x2c), counting down at 24 MHz from core A's clock

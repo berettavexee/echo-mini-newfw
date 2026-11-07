@@ -97,12 +97,15 @@ void echo_imdct_hook(const int32_t *x, uint32_t sw)
     volatile __typeof__(ctl->hws) *h = &ctl->hws;
     int32_t sh = h->im_shift;
     uint32_t t0 = TIMER1_NOW();
+    /* the end: IRQ 7 pending (ETUDE §113; the stock module 73 takes it as an interrupt; ours
+     * stays disabled, its vector is a fault), cleared before the inputs */
+    REG(NVIC_ICPR0) = 1u << IRQ_IMD;
     for (int k = 0; k < 18; k++)
         REG(IMD + 4 * k) = sh >= 0 ? (uint32_t)(x[k] >> sh) : (uint32_t)x[k] << -sh;
-    uint32_t t1 = TIMER1_NOW(), st = 0;
+    uint32_t t1 = TIMER1_NOW(), lat = 0;
     int polled = 0;
-    while (TIMER1_NOW() - t1 < 200 * 24u)
-        if ((st = REG(IMD + 0x80c)) != 0) {
+    while ((lat = TIMER1_NOW() - t1) < 200 * 24u)
+        if (REG(NVIC_ISPR0) & 1u << IRQ_IMD) {
             polled = 1;
             break;
         }
@@ -110,10 +113,18 @@ void echo_imdct_hook(const int32_t *x, uint32_t sw)
     for (int i = 0; i < 36; i++)
         hw[i] = (int32_t)REG(IMD + 0x48 + 4 * i);
     REG(IMD + 0x80c) = 0;                       /* acknowledge, as module 73 */
+    REG(NVIC_ICPR0) = 1u << IRQ_IMD;
     h->im_hw_ticks += TIMER1_NOW() - t0;
     h->im_sw_ticks += sw;
     h->im_polled += polled;
     h->im_timeouts += !polled;
+    if (polled) {
+        if (!h->im_lat_min || lat < h->im_lat_min)
+            h->im_lat_min = lat ? lat : 1;
+        if (lat > h->im_lat_max)
+            h->im_lat_max = lat;
+        h->im_lat_sum += lat;
+    }
     for (int i = 0; i < 36; i++) {
         int64_t acc = 0;
         for (int k = 0; k < 18; k++)
@@ -149,6 +160,7 @@ void echo_synth_hook(const int32_t *work, const int16_t *out, int nch, int ch, u
         for (int sb = 0; sb < 32; sb++)
             x[sb] = sh >= 0 ? work[sb * 18 + s] >> sh : (int32_t)((uint32_t)work[sb * 18 + s] << -sh);
         uint32_t st0 = REG(SYN + 0x80c);
+        REG(NVIC_ICPR0) = 1u << IRQ_SYN;        /* its end as IRQ 1 too (ETUDE §113) */
         REG(SYN + 0x804) = (uint32_t)ch | (15 - syn_phase[ch]) << 1;
         for (int sb = 0; sb < 32; sb++)
             REG(SYN + 4 * sb) = (uint32_t)x[sb];
@@ -163,7 +175,9 @@ void echo_synth_hook(const int32_t *work, const int16_t *out, int nch, int ch, u
             }
         h->polled += polled;
         h->timeouts += !polled;
+        h->syn_irq += polled && (REG(NVIC_ISPR0) & 1u << IRQ_SYN) != 0;
         REG(SYN + 0x80c) = 0x11;                /* acknowledge, as module 73 */
+        REG(NVIC_ICPR0) = 1u << IRQ_SYN;
         REG(SYN + 0x810) = 0;
         int16_t hw[32];
         for (int k = 0; k < 32; k++)

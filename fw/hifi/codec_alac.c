@@ -7,6 +7,9 @@
 #include <string.h>
 #include "rt.h"
 #include "alacdec.h"
+#ifdef ECHO_HWTEST
+#include "hwtest_alac.c"
+#endif
 
 const uint32_t codec_id = HP_CODEC_ALAC;
 

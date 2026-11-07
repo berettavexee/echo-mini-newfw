@@ -182,10 +182,11 @@ One line per version; the measurements are in `ETUDE.md`.
 
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64); more varied seeds for the FAT
   target (its coverage stops growing after 20 minutes).
-- The accelerators still to map (`docs/HIFIACC.md`, `docs/MP3ACC.md`): HIFIACC's ALAC filter
-  (memory at `0x01069000`, stock module 79), its APE decoder (module 80) and its 64-bit MAC (TRM
-  chapter 26); Imdct36 for MP3 (mapped, no end flag found, §70). Each checked on the device with
-  a comparison bench, with an emulator model. Done: LPC, FFT, SYNTH.
+- The accelerators (`docs/HIFIACC.md`, `docs/MP3ACC.md`): mapped from the stock modules but not
+  yet checked on the device (§113): HIFIACC's ALAC filter (module 79), its APE filters (module
+  80), the FIFOs without DMA, Imdct36's end (IRQ 7). Still unknown: the 64-bit MAC (no stock
+  module uses it). Each to check on the device with a comparison bench, with an emulator model.
+  Done: LPC, FFT, SYNTH.
 - Actions on the plug events (to be proposed and agreed first):
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
