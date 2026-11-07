@@ -265,16 +265,20 @@ static int pcm_started;                         /* a frame written: a late DMA i
 
 static void pcm_update(void)
 {
+    static uint32_t last_bps;                   /* 0: paused at the last look */
     uint32_t pos = REG(HP_DMA_SAR) - HP_OUT_BASE, now = TIMER1_NOW();
     if (pos < HP_OUT_SIZE && ctl->pcm_bps) {
         uint32_t moved = (pos + HP_OUT_SIZE - ctl->pcm_pos) % HP_OUT_SIZE;
         uint64_t played = (uint64_t)(now - ctl->pcm_t) * ctl->pcm_bps / 24000000;
-        if (played > HP_OUT_SIZE / 2 && played > moved)
+        /* not after a pause: the DMA stood meanwhile (core B asleep the whole pause: its time
+         * read as laps made the write position jump, stale sound replayed; 0.100f2) */
+        if (last_bps && played > HP_OUT_SIZE / 2 && played > moved)
             moved += (uint32_t)((played - moved + HP_OUT_SIZE / 2) / HP_OUT_SIZE) * HP_OUT_SIZE;
         ctl->pcm_rd += moved;
         ctl->pcm_pos = pos;
     }
     ctl->pcm_t = now;
+    last_bps = ctl->pcm_bps;
     int32_t fill = (int32_t)(ctl->pcm_wr - ctl->pcm_rd);
     if (fill < 0) {
         if (pcm_started) {

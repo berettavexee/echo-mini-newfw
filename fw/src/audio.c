@@ -13,6 +13,7 @@
 #include "log.h"
 #include "regs.h"
 #include "hifi_proto.h"
+#include "hifi.h"
 
 #define DAC0 0x60
 #define DAC1 0x66
@@ -893,8 +894,11 @@ void audio_pause(int on)
     }
     audio.vol = vol;
     audio_paused = on;
-    if (ext_wr)
+    if (ext_wr) {
         HP_CTL->pcm_bps = audio_bps();          /* core B: no laps counted from the time */
+        hifi_ring();    /* paused, core B stops its SysTick (bps 0); resumed, nothing else may
+                         * wake it with its input ring full: stuck after 500 ms (0.100f1) */
+    }
     log_printf("audio: %s", on ? "paused" : "resumed");
 }
 

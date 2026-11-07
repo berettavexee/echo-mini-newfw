@@ -117,6 +117,16 @@ TESTS = {
                             r"crash: core A: watchdog, exception 24",
                             r"crash: track A\.WAV at \d+ ms"],
                     reboot=dict(ms=5000)),
+    # PLAY on the play screen: a pause, a resume, twice (2 s each: more than half the DAC ring),
+    # then the track to its end. Until 0.100f1 core B slept on after a resume ("core B stuck"
+    # 500 ms later); until 0.100f2 it read the pause's time as laps of the DMA (its write position
+    # jumped: stale sound, a track ended early)
+    "pause-resume": dict(files={"A.WAV": "wav10"},
+                         keys=keys((2000, "PLAY"), (4000, "PLAY"), (6000, "PLAY"),
+                                   (8000, "PLAY"), (10000, "PLAY")), ms=19000,
+                         expect=[r"audio: paused", r"audio: resumed", r"audio: paused",
+                                 r"audio: resumed", r"player: finished after 441000 frames, 94\d\d ms"],
+                         forbid=[r"core B stuck", r"core B underruns [1-9]"]),
     # a track saved paused at position 0 (the state written by the test: the keys cannot pause
     # before anything is heard), then a power on: it comes back paused (PR #9: it was lost, its
     # position 0 read as "nothing to resume")
