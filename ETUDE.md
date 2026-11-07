@@ -4374,3 +4374,7 @@ La refonte (branche `rework`, 0.99r1 à r37, §97 à §110) fusionnée dans `mai
 | `alacorder` 16/44,1, ordres 3 à 30 | 9,0 à 11,4 MHz (ordres 1 et 2, en logiciel : 10,7 et 12,4) |
 
 Le cœur B est **3,7 fois moins chargé** sur l'ALAC 16 bits que dans la 0.99r15, au-delà des 2,3 attendus (le prédicteur pesait plus que les 63 % mesurés sous QEMU au §57).
+
+## 117. Version 0.101 (2026-11-07)
+
+Publiée à la demande de l'utilisateur : `rework` fusionnée dans `main`. Contenu depuis la 0.100 : les langues de l'interface (§112), les bancs des accélérateurs et leurs modèles d'émulateur (§113-§114), la reprise après une pause corrigée (§115, vérifiée sur l'appareil), l'ALAC sur HIFIACC (§116, vérifié sur l'appareil), la page d'autonomie `docs/BATTERY.md`. Le code est celui des images de test 0.100a1 (ALAC) et 0.100f2 (pause) essayées sur l'appareil ; seuls le numéro de version et la date changent. README, MANUAL et ROADMAP mis à jour.

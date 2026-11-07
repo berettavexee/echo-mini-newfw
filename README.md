@@ -38,7 +38,7 @@ with gapless playback and ReplayGain.
 
 ## Getting started
 
-1. Download `NEWFW100.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
+1. Download `NEWFW101.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
 2. Follow [Installing](MANUAL.md#installing) in the manual.
 3. The [manual](MANUAL.md) shows the keys of each screen.
 
@@ -54,7 +54,7 @@ or from RECHO. The full study, in French, is in [`ETUDE.md`](ETUDE.md).
 Our decoders run on the HiFi core (core B), whose clock follows the load in steps of 50, 57, 67,
 80, 100, 133 and 200 MHz (the step that keeps the load near 75 %). Measured on the device from
 the logs (versions 0.73 to 0.93), whole tracks, screen off; since 0.85, parts of the FLAC, MP3,
-Vorbis, AAC and Musepack decoders run on the chip's accelerators (`docs/HIFIACC.md`, `docs/MP3ACC.md`):
+Vorbis, AAC, Musepack and (0.101) ALAC decoders run on the chip's accelerators (`docs/HIFIACC.md`, `docs/MP3ACC.md`):
 
 | Format | Material measured | Core B, mean (clock step) | Decoder |
 |---|---|---|---|
@@ -66,9 +66,9 @@ Vorbis, AAC and Musepack decoders run on the chip's accelerators (`docs/HIFIACC.
 | Ogg Vorbis | 110-200 kb/s, 44.1 kHz | 29-36 MHz (50 MHz) | Tremor (lowmem), IMDCT on HIFIACC's FFT (0.88) |
 | Opus | 130-145 kb/s, 48 kHz | 50-55 MHz (67-80 MHz) | libopus 1.5.2 |
 | AAC-LC (M4A) | ~125 kb/s, 44.1 kHz (iTunes) | 23 MHz (50 MHz) | PacketVideo (AOSP), IMDCT's FFTs on HIFIACC (0.92) |
-| ALAC (M4A) | 16 bits, 44.1 kHz, mono | 11-13 MHz (50 MHz) | ours, derived from Apple's |
-| ALAC (M4A) | 16 bits, 44.1 kHz, stereo | 21-25 MHz (50 MHz) | ours, derived from Apple's |
-| ALAC (M4A) | 24 bits, 96 kHz, stereo | 49-51 MHz (67-80 MHz) | ours, derived from Apple's |
+| ALAC (M4A) | 16 bits, 44.1 kHz, mono | 5 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
+| ALAC (M4A) | 16 bits, 44.1 kHz, stereo | 9-10 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
+| ALAC (M4A) | 24 bits, 96 kHz, stereo | 27 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
 | Musepack | SV7 and SV8, ~180 kb/s, 44.1 kHz | 10-11 MHz (50 MHz) | libmpcdec, synthesis on SYNTH (0.93) |
 
 The load rises for a moment at the start of a track and after a seek (the top step until the
