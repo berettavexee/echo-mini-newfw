@@ -3,8 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-07, version 0.101 (interface languages, the resume after a pause fixed,
-ALAC on the accelerator).
+Last update: 2026-11-07, version 0.102 (pause when the headphones are unplugged, the clock shown
+or hidden, more tags read for the library to come).
 
 ## Done, validated on the device
 
@@ -52,8 +52,9 @@ ALAC on the accelerator).
 | USB sound card as a headset remote (HID): PLAY play/pause, VOL+ or VOL- twice next or previous, MENU the remote on and off (kept); tested with VLC and YouTube on Linux | 0.100 | §95 |
 | USB sound card: the Power key (screen off and on; held 2 s, the card left, then the power off) | 0.100 | §95 |
 | ALAC's adaptive predictor on HIFIACC (orders 3 to 30; checked against our decoder on the device): core B at 9.5 MHz on 16-bit ALAC instead of 35; the end of Imdct36 and SYNTH as pending IRQs | 0.101 | §113-§116 |
-| The clock shown or hidden (Settings, the line Clock) | 0.101c1 | §120 |
-| Pause when the headphones are unplugged (the last plug out; plugging back does not play) | 0.101u1 | §119 |
+| The clock shown or hidden (Settings, the line Clock) | 0.102 | §120 |
+| Pause when the headphones are unplugged (the last plug out; plugging back does not play; checked with a 3.5 mm plug) | 0.102 | §119 |
+| Steady battery percent (the mean of a minute of readings; checked over a 14.6 h session to an empty battery) | 0.97, 0.102 | §82, §115 |
 | Interface languages (gettext PO files, catalogues in the image, the Language setting): English, French, Japanese and Simplified Chinese (partial) | 0.101 | §112 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
@@ -73,11 +74,6 @@ do".
 
 - Pause when the headphones are unplugged, with a 4.4 mm plug (checked with 3.5 mm only, §119;
   the emulator covers both and the two plugged together).
-
-- A steady battery percent (0.97): the mean of a minute of readings, moving freely only down on
-  battery and up on USB, never 100 % while charging (§82); to check: no jump when a track
-  starts or the screen comes on, nothing odd when plugging and unplugging the cable. A first
-  short session (full battery) showed no regression; a long one, half charged, is still needed.
 
 - From pull requests #9 and #1 (CHEYAN): a track saved paused at position 0 now comes back
   paused (it was lost; emulator: `emutest.py resume-paused-zero`), and a track resumed at
@@ -156,6 +152,11 @@ One line per version; the measurements are in `ETUDE.md`.
   pause fixed (core B was not woken since 0.99r28, then read the pause as sound played)
   (§115); ALAC's predictor on HIFIACC, core B 3.7 times lighter on ALAC (§113-§116); the
   accelerator benches and their emulator models (§113-§114); docs/BATTERY.md (§115).
+- 0.102: pause when the headphones are unplugged (§119); the clock shown or hidden (§120); the
+  album artist, genre, year and disc read from the tags, for the library (§121-§122); the
+  library's index format, PC tool and reader, and the creation of its file by the firmware,
+  tested but not used yet (§123-§124); the emulator's tests in parallel (§118); a double press
+  of BACK documented.
 
 ## To do
 
