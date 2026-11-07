@@ -33,7 +33,7 @@ static void draw_frame(void)
     lcd_fill(CH_X, CH_Y, 3, CH_H, FG);
     lcd_fill(CH_X + CH_W - 3, CH_Y, 3, CH_H, FG);
     lcd_fill(CH_X + CH_W, CH_Y + 20, 10, CH_H - 40, FG);       /* the terminal */
-    const char *h = "PLAY or Power held: start";
+    const char *h = T("PLAY or Power held: start");
     lcd_text((LCD_W - lcd_text_width(h)) / 2, 150, h, DIM, BG);
 }
 
@@ -48,9 +48,12 @@ static void draw_level(unsigned pct, int full, int blink)
         int on = i < segs && !(blink && !full && i == segs - 1);
         lcd_fill(x0 + i * sw, CH_Y + 7, sw - 3, CH_H - 14, on ? CH_FG : BG);
     }
-    char b[24], *p = put_str(b, full ? "Charged " : "Charging ");
-    p = put_dec(p, full ? 100 : pct > 99 ? 99 : pct);     /* 100: when the charger says so */
-    p = put_str(p, "%");
+    char b[48], *p;                             /* 100 %: when the charger says so */
+    if (full)
+        p = log_format(b, b + sizeof b - 1, "%s", T("Charged 100%"));
+    else
+        /* TRANSLATORS: the battery's charge, in percent */
+        p = log_format(b, b + sizeof b - 1, T("Charging %u%%"), pct > 99 ? 99 : pct);
     *p = 0;
     lcd_fill(0, 116, LCD_W, 26, BG);
     lcd_text_clip_x((LCD_W - lcd_text_width_x(b, 2)) / 2, 116, b, LCD_W, FG, BG, 2);

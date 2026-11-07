@@ -162,7 +162,7 @@ static void battery_off(uint32_t mv)
     }
     sys_screen_set(1);
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    lcd_text_clip_x(8, 50, "Battery empty", LCD_W, WARN, BG, 2);
+    lcd_text_clip_x(8, 50, T("Battery empty"), LCD_W, WARN, BG, 2);
     lcd_settle();                               /* lit before the wait, not after it */
     mdelay(2000);
     sys_power_off("battery empty");             /* the resume state: paused where it was */
@@ -323,11 +323,11 @@ void ui_main(void)
     sd_yield = storage_yield;                   /* so does a card mounted there */
     depth = 0;
     fat_root(VOL_TOP, &path[0].dir);
-    copy_name(path[0].name, "Storage", sizeof path[0].name);
     path[0].sel = path[0].top = 0;
     if (sd_present())
         sd_open();                              /* the card mounted at once (0.99r26, ETUDE §106): */
-    resume_load();                              /* nothing plays yet */
+    resume_load();                              /* nothing plays yet; the language set */
+    copy_name(path[0].name, T("Storage"), sizeof path[0].name);
     if (!depth && !dir_n) {                     /* nothing saved: the internal volume */
         path_root(FAT_VOL_INT);
         dir_load(&path[1].dir);
@@ -354,8 +354,8 @@ void ui_main(void)
             sys_screen_set(1);
             t_key = ticks();
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text_clip_x(8, 50, "Low battery", LCD_W, WARN, BG, 2);
-            lcd_text(8, 100, "plug the USB cable", DIM, BG);
+            lcd_text_clip_x(8, 50, T("Low battery"), LCD_W, WARN, BG, 2);
+            lcd_text(8, 100, T("plug the USB cable"), DIM, BG);
         }
         if (fail_due) {                         /* nothing could be played: why, 3 s, then the */
             fail_due = 0;                       /* browser */
@@ -365,10 +365,10 @@ void ui_main(void)
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
             const char *what, *hint;
             fail_text(fail_code, fail_why, &what, &hint);
-            lcd_text_clip_x(8, 20, "Cannot play", LCD_W, WARN, BG, 2);
+            lcd_text_clip_x(8, 20, T("Cannot play"), LCD_W, WARN, BG, 2);
             lcd_text_clip(8, 62, fail_name, LCD_W - 8, FG, BG);
-            lcd_text_clip(8, 92, what, LCD_W - 8, FG, BG);
-            lcd_text_clip(8, 118, hint, LCD_W - 8, DIM, BG);
+            lcd_text_clip(8, 92, tr(what), LCD_W - 8, FG, BG);
+            lcd_text_clip(8, 118, tr(hint), LCD_W - 8, DIM, BG);
             scr = SCR_BROWSER;
         }
         if (crash_due) {                        /* the last session ended on a fault (0.99r32): */
@@ -377,11 +377,11 @@ void ui_main(void)
             sys_screen_set(1);
             t_key = ticks();
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text_clip_x(8, 20, "Fault", LCD_W, WARN, BG, 2);
-            lcd_text_clip(8, 62, "The last session ended on a fault", LCD_W - 8, FG, BG);
+            lcd_text_clip_x(8, 20, T("Fault"), LCD_W, WARN, BG, 2);
+            lcd_text_clip(8, 62, T("The last session ended on a fault"), LCD_W - 8, FG, BG);
             lcd_text_clip(8, 88, crash_text[0], LCD_W - 8, DIM, BG);
             lcd_text_clip(8, 108, crash_text[1], LCD_W - 8, DIM, BG);
-            lcd_text_clip(8, 134, "details: NEWFWLOG.TXT", LCD_W - 8, DIM, BG);
+            lcd_text_clip(8, 134, T("details: NEWFWLOG.TXT"), LCD_W - 8, DIM, BG);
         }
         if (banner_ms && millis() - banner_ms > 3000) {
             banner_ms = 0;

@@ -19,34 +19,36 @@ static void usb_screen(void)
 {
     char b[64], *p;
 
-    p = put_str(b, usb.configured ? "configured, " : "waiting for the host, ");
-    p = put_str(p, usb.high_speed ? "high speed" : "full speed");
+    p = log_format(b, b + sizeof b - 1, EN("%s, %s"),
+                   usb.configured ? T("configured") : T("waiting for the host"),
+                   usb.high_speed ? T("high speed") : T("full speed"));
     *p = 0;
+    /* the counters: diagnostics, in English */
     sys_status_line(0, 36, b, usb.configured ? FG : DIM);
-    p = put_str(b, "cmds ");
+    p = put_str(b, EN("cmds "));
     p = put_dec(p, msc.commands);
-    p = put_str(p, "  read ");
+    p = put_str(p, EN("  read "));
     p = put_dec(p, msc.read_sectors / 2048);
-    p = put_str(p, "  written ");
+    p = put_str(p, EN("  written "));
     p = put_dec(p, msc.written_sectors / 2048);
-    p = put_str(p, " MiB");
+    p = put_str(p, EN(" MiB"));
     *p = 0;
     sys_status_line(1, 52, b, FG);
-    p = put_str(b, "op ");
+    p = put_str(b, EN("op "));
     p = put_hex(p, msc.last_op, 2);
-    p = put_str(p, "  errors ");
+    p = put_str(p, EN("  errors "));
     p = put_dec(p, msc.errors);
-    p = put_str(p, "  resets ");
+    p = put_str(p, EN("  resets "));
     p = put_dec(p, usb.resets);
-    p = put_str(p, "  setups ");
+    p = put_str(p, EN("  setups "));
     p = put_dec(p, usb.setups);
     *p = 0;
     sys_status_line(2, 68, b, msc.errors ? WARN : DIM);
-    p = put_str(b, "disk @");
+    p = put_str(b, EN("disk @"));
     p = put_hex(p, msc.base, 6);
     p = put_str(p, " ");
     p = put_dec(p, msc.count / 2048);
-    p = put_str(p, " MiB");
+    p = put_str(p, EN(" MiB"));
     *p = 0;
     sys_status_line(3, 84, b, DIM);
 }
@@ -58,24 +60,24 @@ static void usb_mode(int writable)
 
     sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    sys_line(0, writable ? "USB disk (read/write)" : "USB disk (read only)", writable ? WARN : TITLE);
+    sys_line(0, writable ? T("USB disk (read/write)") : T("USB disk (read only)"), writable ? WARN : TITLE);
     if (storage_err || volume_err || emmc_sectors(&total) || total <= vol.base) {
-        sys_line(36, "No FAT32 volume on the internal memory", WARN);
-        sys_line(54, "nothing to share over USB", FG);
+        sys_line(36, T("No FAT32 volume on the internal memory"), WARN);
+        sys_line(54, T("nothing to share over USB"), FG);
         mdelay(2500);
         return;
     }
     if (!vbus()) {
-        sys_line(36, "plug the USB cable", WARN);
+        sys_line(36, T("plug the USB cable"), WARN);
         mdelay(2000);
         return;
     }
-    sys_line(154, "BACK: exit (eject on the computer first)", DIM);
+    sys_line(154, T("BACK: exit (eject on the computer first)"), DIM);
     if (writable)
-        sys_line(122, "eject on the computer before unplugging", WARN);
+        sys_line(122, T("eject on the computer before unplugging"), WARN);
     if (msc_start(vol.base, total - vol.base, writable)) {
-        sys_line(36, "Cannot share the internal memory", WARN);
-        sys_line(54, "its volume overlaps the firmware area", FG);
+        sys_line(36, T("Cannot share the internal memory"), WARN);
+        sys_line(54, T("its volume overlaps the firmware area"), FG);
         log_printf("usb: write fence refused for %x + %u", vol.base, total - vol.base);
         mdelay(3000);
         return;

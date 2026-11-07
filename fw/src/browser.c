@@ -216,10 +216,10 @@ int dir_load(const struct fat_dir *d)
     if (d->vol == VOL_TOP) {
         dir_l.n = dir_l.full = 0;
         dir_l.used = 0;
-        top_entry("Internal", 0);
-        if (sd_present())
-            top_entry(sd_bad == SD_NOREPLY ? "SD card (not responding)" :
-                      sd_bad == SD_NOFS ? "SD card (needs FAT32 or exFAT)" : "SD card", F_SD);
+        top_entry(T("Internal"), 0);           /* (the names of the volumes: the language of */
+        if (sd_present())                       /* the listing's load) */
+            top_entry(sd_bad == SD_NOREPLY ? T("SD card (not responding)") :
+                      sd_bad == SD_NOFS ? T("SD card (needs FAT32 or exFAT)") : T("SD card"), F_SD);
     } else {
         r = list_load(&dir_l, d);
         if (r < 0 && d->vol == FAT_VOL_SD) {    /* a read error: mounted again at the next */
@@ -286,7 +286,7 @@ static void draw_row(int r, int sel, int mark)
     if (i >= dir_n) {
         lcd_fill(0, y, LCD_W, 16, BG);
         if (!dir_n && !r)
-            lcd_text(8, y, "no folder or playable file here", DIM, BG);
+            lcd_text(8, y, T("no folder or playable file here"), DIM, BG);
         return;
     }
     const struct entry *e = ent(i);
@@ -422,7 +422,7 @@ static void draw_count(int sel)
 {
     char b[24], *p = b;
     if (walk.state == WALK_RUNNING) {
-        text_right(LCD_W - 110, LCD_W - 4, 0, "reading...", DIM, BG);
+        text_right(LCD_W - 110, LCD_W - 4, 0, T("reading..."), DIM, BG);
         return;
     }
     if (dir_n) {
@@ -474,7 +474,7 @@ static void draw_browser_do(void)
     }
     if (b_dirty) {                              /* every band once, nothing cleared first */
         lcd_fill(0, 0, 4, 16, BG);
-        lcd_text_clip(4, 0, depth ? path[depth].name : "Storage", LCD_W - 114, TITLE_FG, BG);
+        lcd_text_clip(4, 0, depth ? path[depth].name : T("Storage"), LCD_W - 114, TITLE_FG, BG);
         draw_clock(LCD_W - 114, LCD_W - 70, 1);
         lcd_fill(LCD_W - 4, 0, 4, 16, BG);
         lcd_fill(0, 16, LCD_W, ROW_Y0 - 16, BG);
@@ -509,6 +509,19 @@ void draw_browser(void)
     perf_end(pp);
 }
 
+/* The language changed (settings.c): the names the listings keep (the top level's entries, the
+ * path's first levels) taken again; the folder shown, redrawn */
+void browser_lang_changed(void)
+{
+    copy_name(path[0].name, T("Storage"), sizeof path[0].name);
+    if (depth >= 1)
+        copy_name(path[1].name, path[1].dir.vol == FAT_VOL_SD ? T("SD card") : T("Internal"),
+                  sizeof path[1].name);
+    if (!depth)
+        dir_load(&path[0].dir);                 /* the top level: no disk read */
+    b_dirty = 1;
+}
+
 /* path[1]: the root of a volume */
 void path_root(int v)
 {
@@ -516,7 +529,7 @@ void path_root(int v)
     path[0].sel = v == FAT_VOL_SD;
     path[0].top = 0;
     fat_root(v, &path[1].dir);
-    copy_name(path[1].name, v == FAT_VOL_SD ? "SD card" : "Internal", sizeof path[1].name);
+    copy_name(path[1].name, v == FAT_VOL_SD ? T("SD card") : T("Internal"), sizeof path[1].name);
     path[1].sel = path[1].top = 0;
 }
 

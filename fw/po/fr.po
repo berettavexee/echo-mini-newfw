@@ -1,0 +1,639 @@
+# French translation of the ECHO MINI new firmware.
+msgid ""
+msgstr ""
+"Project-Id-Version: echo-mini-newfw\n"
+"Report-Msgid-Bugs-To: https://github.com/berettavexee/echo-mini-newfw/issues\n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#: src/browser.c
+msgid "Internal"
+msgstr "Mémoire interne"
+
+#: src/browser.c
+msgid "SD card (not responding)"
+msgstr "Carte SD (ne répond pas)"
+
+#: src/browser.c
+msgid "SD card (needs FAT32 or exFAT)"
+msgstr "Carte SD (FAT32 ou exFAT requis)"
+
+#: src/browser.c
+msgid "SD card"
+msgstr "Carte SD"
+
+#: src/browser.c
+msgid "no folder or playable file here"
+msgstr "aucun dossier ni fichier lisible ici"
+
+#: src/browser.c
+msgid "reading..."
+msgstr "lecture..."
+
+#: src/browser.c src/ui.c
+msgid "Storage"
+msgstr "Stockage"
+
+#: src/charge.c
+msgid "PLAY or Power held: start"
+msgstr "PLAY ou Power maintenu : démarrer"
+
+#: src/charge.c
+msgid "Charged 100%"
+msgstr "Chargée 100%"
+
+#. TRANSLATORS: the battery's charge, in percent
+#: src/charge.c
+#, c-format
+msgid "Charging %u%%"
+msgstr "Charge %u%%"
+
+#: src/install.c
+#, c-format
+msgid "checking CRC %u %%"
+msgstr "vérification CRC %u %%"
+
+#: src/install.c
+#, c-format
+msgid "writing FW2 %u %%"
+msgstr "écriture FW2 %u %%"
+
+#: src/install.c
+#, c-format
+msgid "writing FW1 %u %%"
+msgstr "écriture FW1 %u %%"
+
+#: src/install.c
+msgid "Install firmware (*.IMG, internal root)"
+msgstr "Installer un firmware (*.IMG, racine interne)"
+
+#: src/install.c
+msgid "internal volume not available"
+msgstr "volume interne indisponible"
+
+#: src/install.c
+msgid "no .IMG file in the root folder"
+msgstr "aucun fichier .IMG à la racine"
+
+#: src/install.c
+msgid "VOL+/VOL-: choose  PLAY: check  BACK"
+msgstr "VOL+/VOL- : choisir  PLAY : vérifier  BACK"
+
+#: src/install.c
+msgid "BACK: return"
+msgstr "BACK : retour"
+
+#. TRANSLATORS: its date (2026-11-06), its size in MiB
+#: src/install.c
+#, c-format
+msgid "valid image, %s, %u MiB"
+msgstr "image valide, %s, %u Mio"
+
+#: src/install.c
+msgid "writes FW2, then FW1"
+msgstr "écrit FW2, puis FW1"
+
+#: src/install.c
+msgid "too big for FW2: writes FW1 only"
+msgstr "trop grande pour FW2 : écrit FW1 seul"
+
+#: src/install.c
+#, c-format
+msgid "Battery too low (%u %%)"
+msgstr "Batterie trop faible (%u %%)"
+
+#: src/install.c src/main.c src/uac.c src/ui.c src/usbmode.c
+msgid "plug the USB cable"
+msgstr "branchez le câble USB"
+
+#: src/install.c
+msgid "do not power off during the install"
+msgstr "n'éteignez pas pendant l'installation"
+
+#: src/install.c
+msgid "PLAY: install   BACK: cancel"
+msgstr "PLAY : installer   BACK : annuler"
+
+#: src/install.c
+msgid "installed: restarting"
+msgstr "installé : redémarrage"
+
+#. TRANSLATORS: the name of this language, written in it (Français, 简体中文, 日本語): shown by the Language setting
+#: src/lang.c
+msgid "English"
+msgstr "Français"
+
+#: src/main.c
+msgid "any key: back"
+msgstr "une touche : retour"
+
+#: src/main.c
+msgid "power off"
+msgstr "extinction"
+
+#: src/main.c src/menu.c
+msgid "USB loader mode (exit: RST)"
+msgstr "Mode chargeur USB (sortie : RST)"
+
+#: src/main.c src/ui.c
+msgid "Battery empty"
+msgstr "Batterie vide"
+
+#: src/main.c
+msgid "starting..."
+msgstr "démarrage..."
+
+#: src/menu.c
+msgid "Files"
+msgstr "Fichiers"
+
+#: src/menu.c
+msgid "Now playing"
+msgstr "Lecture en cours"
+
+#: src/menu.c src/settings.c
+msgid "Settings"
+msgstr "Réglages"
+
+#: src/menu.c
+msgid "USB disk, read only"
+msgstr "Disque USB, lecture seule"
+
+#: src/menu.c
+msgid "USB disk, read/write"
+msgstr "Disque USB, lecture/écriture"
+
+#: src/menu.c src/uac.c
+msgid "USB sound card"
+msgstr "Carte son USB"
+
+#: src/menu.c
+msgid "Install a firmware (.IMG)"
+msgstr "Installer un firmware (.IMG)"
+
+#: src/menu.c
+msgid "System screen"
+msgstr "Écran système"
+
+#: src/menu.c
+msgid "Menu"
+msgstr "Menu"
+
+#: src/menu.c
+msgid "no clock found (I2C1, 0xA2)"
+msgstr "aucune horloge trouvée (I2C1, 0xA2)"
+
+#: src/menu.c src/settings.c
+msgid "Date and time"
+msgstr "Date et heure"
+
+#: src/menu.c
+msgid "VOL+/VOL-: change   PLAY: next, save"
+msgstr "VOL+/VOL- : changer   PLAY : suivant, enregistrer"
+
+#: src/menu.c
+msgid "BACK: previous, cancel   MENU: cancel"
+msgstr "BACK : précédent, annuler   MENU : annuler"
+
+#: src/menu.c
+msgid "the clock had stopped: not set"
+msgstr "l'horloge était arrêtée : non réglée"
+
+#: src/menu.c
+msgid "the clock did not answer"
+msgstr "l'horloge ne répond pas"
+
+#: src/menu.c
+msgid "clock set"
+msgstr "heure réglée"
+
+#: src/playback.c
+msgid "album"
+msgstr "album"
+
+#: src/playback.c
+msgid "track"
+msgstr "piste"
+
+#: src/playback.c src/settings.c
+msgid "off"
+msgstr "désactivé"
+
+#: src/playback.c
+msgid "auto"
+msgstr "auto"
+
+#: src/playback.c
+msgid "Not supported: this variant of the format"
+msgstr "Non pris en charge : variante du format"
+
+#: src/playback.c
+msgid "Not supported: more than 2 channels"
+msgstr "Non pris en charge : plus de 2 canaux"
+
+#: src/playback.c
+msgid "Not supported: this bit depth"
+msgstr "Non pris en charge : cette résolution"
+
+#: src/playback.c
+msgid "Not supported: floating-point samples"
+msgstr "Non pris en charge : échantillons flottants"
+
+#: src/playback.c
+msgid "Not supported: compressed WAV or AIFF"
+msgstr "Non pris en charge : WAV ou AIFF compressé"
+
+#: src/playback.c
+msgid "Not supported: HE-AAC (AAC+)"
+msgstr "Non pris en charge : HE-AAC (AAC+)"
+
+#: src/playback.c
+msgid "Not supported: this AAC profile"
+msgstr "Non pris en charge : ce profil AAC"
+
+#: src/playback.c
+msgid "Not supported: neither AAC nor ALAC"
+msgstr "Non pris en charge : ni AAC ni ALAC"
+
+#: src/playback.c
+msgid "Not supported: multichannel Opus"
+msgstr "Non pris en charge : Opus multicanal"
+
+#: src/playback.c
+msgid "Not supported: too large for the memory"
+msgstr "Non pris en charge : trop grand pour la mémoire"
+
+#: src/playback.c
+msgid "Not supported: no sample rate"
+msgstr "Non pris en charge : sans fréquence d'échantillonnage"
+
+#: src/playback.c
+msgid "Check the file on a computer"
+msgstr "Vérifiez le fichier sur un ordinateur"
+
+#: src/playback.c
+msgid "Empty file (0 bytes)"
+msgstr "Fichier vide (0 octet)"
+
+#: src/playback.c
+msgid "Copy it again"
+msgstr "Copiez-le à nouveau"
+
+#: src/playback.c
+msgid "Damaged: no audio found"
+msgstr "Endommagé : aucun son trouvé"
+
+#: src/playback.c
+msgid "Damaged, or not what its name says"
+msgstr "Endommagé, ou pas ce qu'annonce son nom"
+
+#: src/playback.c
+msgid "Damaged: decoding error"
+msgstr "Endommagé : erreur de décodage"
+
+#: src/playback.c
+msgid "Convert it to stereo"
+msgstr "Convertissez-le en stéréo"
+
+#: src/playback.c
+msgid "Convert it to AAC-LC, MP3 or Opus"
+msgstr "Convertissez-le en AAC-LC, MP3 ou Opus"
+
+#: src/playback.c
+msgid "Convert it to FLAC, MP3, AAC-LC or Opus"
+msgstr "Convertissez-le en FLAC, MP3, AAC-LC ou Opus"
+
+#: src/playback.c
+msgid "Read error"
+msgstr "Erreur de lecture"
+
+#: src/playback.c
+msgid "Reinsert the card, or check the disk"
+msgstr "Réinsérez la carte, ou vérifiez le disque"
+
+#: src/playback.c
+msgid "Its codec is missing from the firmware"
+msgstr "Son codec manque au firmware"
+
+#: src/playback.c
+msgid "Install the firmware again"
+msgstr "Réinstallez le firmware"
+
+#: src/playback.c
+msgid "Internal error (core B)"
+msgstr "Erreur interne (cœur B)"
+
+#: src/playback.c
+msgid "Please report it with NEWFWLOG.TXT"
+msgstr "Signalez-la avec NEWFWLOG.TXT"
+
+#: src/playscreen.c
+msgid "nothing plays: PLAY on a file"
+msgstr "rien ne joue : PLAY sur un fichier"
+
+#: src/playscreen.c
+msgid "repeat all"
+msgstr "tout répéter"
+
+#: src/playscreen.c
+msgid "repeat one"
+msgstr "répéter une"
+
+#: src/playscreen.c
+msgid "shuffle"
+msgstr "aléatoire"
+
+#: src/playscreen.c
+msgid "paused"
+msgstr "en pause"
+
+#: src/playscreen.c
+msgid "stopped"
+msgstr "arrêté"
+
+#: src/playscreen.c src/uac.c
+msgid "playing"
+msgstr "lecture"
+
+#: src/playscreen.c
+msgid "go to"
+msgstr "aller à"
+
+#: src/playscreen.c
+msgid "VOL+/- move  PLAY go  BACK cancel"
+msgstr "VOL+/- déplacer  PLAY aller  BACK annuler"
+
+#: src/playscreen.c
+msgid "none"
+msgstr "aucun"
+
+#: src/settings.c
+msgid "Screen off after"
+msgstr "Écran éteint après"
+
+#: src/settings.c
+msgid "Brightness"
+msgstr "Luminosité"
+
+#: src/settings.c
+msgid "Track title"
+msgstr "Titre des pistes"
+
+#: src/settings.c
+msgid "ReplayGain"
+msgstr "ReplayGain"
+
+#: src/settings.c
+msgid "ReplayGain preamp"
+msgstr "Préampli ReplayGain"
+
+#: src/settings.c
+msgid "At power on"
+msgstr "À l'allumage"
+
+#: src/settings.c
+msgid "Sleep timer"
+msgstr "Minuterie de veille"
+
+#: src/settings.c
+msgid "Power off when idle"
+msgstr "Extinction si inactif"
+
+#: src/settings.c
+msgid "Swap VOL+ and VOL-"
+msgstr "Inverser VOL+ et VOL-"
+
+#: src/settings.c
+msgid "Restore the defaults (PLAY)"
+msgstr "Réglages par défaut (PLAY)"
+
+#: src/settings.c
+msgid "resume playing"
+msgstr "reprendre la lecture"
+
+#: src/settings.c
+msgid "resume paused"
+msgstr "reprendre en pause"
+
+#: src/settings.c
+msgid "browser"
+msgstr "navigateur"
+
+#: src/settings.c
+msgid "no clock"
+msgstr "pas d'horloge"
+
+#: src/settings.c
+msgid "not set"
+msgstr "non réglée"
+
+#: src/settings.c
+msgid "never"
+msgstr "jamais"
+
+#. TRANSLATORS: seconds
+#: src/settings.c
+#, c-format
+msgid "%u s"
+msgstr "%u s"
+
+#. TRANSLATORS: minutes
+#: src/settings.c
+#, c-format
+msgid "%u min"
+msgstr "%u min"
+
+#: src/settings.c
+msgid "file name"
+msgstr "nom de fichier"
+
+#: src/settings.c
+msgid "tags"
+msgstr "étiquettes"
+
+#. TRANSLATORS: the minutes left before the sleep timer stops the music
+#: src/settings.c
+#, c-format
+msgid "%u min left"
+msgstr "%u min restantes"
+
+#: src/settings.c
+msgid "yes"
+msgstr "oui"
+
+#: src/settings.c
+msgid "no"
+msgstr "non"
+
+#: src/uac.c src/usbmode.c
+msgid "waiting for the host"
+msgstr "en attente de l'hôte"
+
+#: src/uac.c
+msgid "connected, no stream"
+msgstr "connecté, pas de flux"
+
+#: src/uac.c
+msgid "stream open, no sound"
+msgstr "flux ouvert, pas de son"
+
+#. TRANSLATORS: our attenuation (".5" or nothing after its whole dB), the computer's
+#: src/uac.c
+#, c-format
+msgid "volume -%u%s dB, host -%u dB"
+msgstr "volume -%u%s dB, hôte -%u dB"
+
+#: src/uac.c
+msgid "muted"
+msgstr "muet"
+
+#: src/uac.c
+msgid "MENU: remote on"
+msgstr "MENU : télécommande activée"
+
+#: src/uac.c
+msgid "MENU: remote off"
+msgstr "MENU : télécommande désactivée"
+
+#: src/uac.c
+msgid "VOL+ / VOL-: volume, twice: track"
+msgstr "VOL+ / VOL- : volume, deux fois : piste"
+
+#: src/uac.c
+msgid "PLAY: play/pause, BACK held: exit"
+msgstr "PLAY : lecture/pause, BACK maintenu : sortir"
+
+#: src/uac.c
+msgid "audio output failed"
+msgstr "la sortie audio a échoué"
+
+#: src/ui.c
+msgid "Low battery"
+msgstr "Batterie faible"
+
+#: src/ui.c
+msgid "Cannot play"
+msgstr "Lecture impossible"
+
+#: src/ui.c
+msgid "Fault"
+msgstr "Panne"
+
+#: src/ui.c
+msgid "The last session ended on a fault"
+msgstr "La dernière session s'est terminée sur une panne"
+
+#: src/ui.c
+msgid "details: NEWFWLOG.TXT"
+msgstr "détails : NEWFWLOG.TXT"
+
+#: src/update.c
+msgid "Cannot read the file"
+msgstr "Impossible de lire le fichier"
+
+#: src/update.c
+msgid "copy it to the player again"
+msgstr "copiez-le à nouveau sur le lecteur"
+
+#: src/update.c
+msgid "Not a firmware image"
+msgstr "Pas une image de firmware"
+
+#: src/update.c
+msgid "use an ECHO MINI .IMG file"
+msgstr "utilisez un fichier .IMG d'ECHO MINI"
+
+#: src/update.c
+msgid "Incomplete file"
+msgstr "Fichier incomplet"
+
+#: src/update.c
+msgid "download or copy it again"
+msgstr "téléchargez-le ou copiez-le à nouveau"
+
+#: src/update.c
+msgid "Image too large for this player"
+msgstr "Image trop grande pour ce lecteur"
+
+#: src/update.c
+msgid "8 GB ECHO MINI images only"
+msgstr "images ECHO MINI 8 Go seulement"
+
+#: src/update.c
+msgid "Unknown image layout"
+msgstr "Organisation d'image inconnue"
+
+#: src/update.c
+msgid "not an image for this player"
+msgstr "pas une image pour ce lecteur"
+
+#: src/update.c
+msgid "Damaged image"
+msgstr "Image endommagée"
+
+#: src/update.c
+msgid "download it again"
+msgstr "téléchargez-la à nouveau"
+
+#: src/update.c
+msgid "Flash write failed"
+msgstr "Échec de l'écriture en flash"
+
+#: src/update.c
+msgid "restart, then install again"
+msgstr "redémarrez, puis réinstallez"
+
+#: src/update.c
+msgid "Install failed"
+msgstr "Échec de l'installation"
+
+#: src/update.c
+msgid "restart, then try again"
+msgstr "redémarrez, puis réessayez"
+
+#: src/usbmode.c
+msgid "configured"
+msgstr "configuré"
+
+#: src/usbmode.c
+msgid "high speed"
+msgstr "haute vitesse"
+
+#: src/usbmode.c
+msgid "full speed"
+msgstr "pleine vitesse"
+
+#: src/usbmode.c
+msgid "USB disk (read/write)"
+msgstr "Disque USB (lecture/écriture)"
+
+#: src/usbmode.c
+msgid "USB disk (read only)"
+msgstr "Disque USB (lecture seule)"
+
+#: src/usbmode.c
+msgid "No FAT32 volume on the internal memory"
+msgstr "Aucun volume FAT32 sur la mémoire interne"
+
+#: src/usbmode.c
+msgid "nothing to share over USB"
+msgstr "rien à partager en USB"
+
+#: src/usbmode.c
+msgid "BACK: exit (eject on the computer first)"
+msgstr "BACK : sortir (éjectez d'abord sur l'ordinateur)"
+
+#: src/usbmode.c
+msgid "eject on the computer before unplugging"
+msgstr "éjectez sur l'ordinateur avant de débrancher"
+
+#: src/usbmode.c
+msgid "Cannot share the internal memory"
+msgstr "Impossible de partager la mémoire interne"
+
+#: src/usbmode.c
+msgid "its volume overlaps the firmware area"
+msgstr "son volume chevauche la zone du firmware"

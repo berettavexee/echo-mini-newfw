@@ -103,6 +103,9 @@ struct hp_ctl {
     uint32_t hacc_sub, hacc_soft;       /* FLAC: LPC subframes on HIFIACC, in software after a
                                            timeout (ETUDE §67) */
     uint32_t synth_gran, synth_soft;    /* MP3: granules on SYNTH, in software (ETUDE §71) */
+    uint32_t alac_hw, alac_low, alac_quant, alac_long, alac_soft;   /* ALAC predictions (§116):
+                                           on HIFIACC; in software: order 1 or 2, lpc_quant >= 12,
+                                           over 8191 samples, after a timeout */
     uint32_t why;                       /* B: enum hp_why, with an HP_ERR_* of the open */
     /* The PCM ring read by the DMA (version 2, rework step 4, ETUDE §103): core B writes its
      * frames straight into the ring DMAC1 channel 5 plays (the output ring above), and follows
@@ -188,9 +191,26 @@ struct hp_ctl {
         int64_t im_dot;
         uint32_t im_hw_ticks, im_sw_ticks;      /* IMDCT36 against pvmp3_mdct_18 */
         int32_t im_x[3], im_ref[3], im_hw[3];   /* the first transform */
+        /* ETUDE §113: the end of IMDCT36 as IRQ 7 pending (NVIC_ISPR0 bit 7, polled, never
+         * enabled), its delay from the last input written; SYNTH's IRQ 1 seen when +0x80c says
+         * done */
+        uint32_t im_lat_min, im_lat_max, im_lat_sum;    /* TIMER1 ticks */
+        uint32_t syn_irq;
         /* ECHO_HWSYN (ETUDE §71): SYNTH plays; the first granules compared with the software */
         uint32_t p_gran, p_cmp, p_exact, p_within1, p_max, p_hw_ticks, p_polled, p_timeouts;
     } hws;
+    /* Test build only (ETUDE §113): HIFIACC's ALAC filter against our predictor (alacdec.c) */
+    struct {
+        uint32_t magic;
+        uint32_t subframes, exact;      /* the coefficients reversed (FFmpeg's order) */
+        uint32_t differ, skipped, timeouts;
+        uint32_t s_exact, s_differ;     /* the same predictions, coefficients in stream order */
+        uint32_t hw_ticks, sw_ticks;    /* TIMER1 ticks, DMA included / our predictor */
+        uint16_t ok_o[31], diff_o[31];  /* per order (index = order, 1 to 30) */
+        uint16_t ok_q[16], diff_q[16];  /* per lpc_quant */
+        uint32_t f_order, f_quant, f_bps, f_n, f_idx;   /* the first difference */
+        int32_t f_sw, f_hw;
+    } hwa;
     /* Vorbis IMDCT on HIFIACC's FFT against Tremor (ETUDE §74), AAC FFT against pvaacdec's
      * (§76): blocks, output samples on the 16-bit scale, TIMER1 ticks of each */
     struct {

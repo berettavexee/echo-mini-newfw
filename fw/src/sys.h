@@ -4,6 +4,7 @@
 #define SYS_H
 
 #include <stdint.h>
+#include "i18n.h"
 #include "lcd.h"
 
 #define FG    RGB(230, 230, 230)

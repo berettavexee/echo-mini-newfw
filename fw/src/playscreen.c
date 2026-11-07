@@ -24,14 +24,15 @@ static char *battery_text(char *p)
     battery_low = !vbus() && battery_avg_mv() < 3425;    /* = BAT_WARN_MV (ui.c) */
     uint32_t v = battery_shown();
     if (vbus())
-        p = put_str(p, charging() ? "CHG " : "USB ");
+        p = put_str(p, charging() ? EN("CHG ") : EN("USB "));
     p = put_dec(p, v);
-    return put_str(p, "%");
+    return put_str(p, EN("%"));
 }
 
 static const char *codec_name(uint32_t c)
 {
-    static const char *const n[] = { "", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF", "AAC", "ALAC", "MPC" };
+    static const char *const n[] = { "", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF", "AAC", "ALAC",
+                                       "MPC" };          /* names: the same in every language */
     return c < sizeof n / sizeof *n ? n[c] : "";
 }
 
@@ -86,7 +87,7 @@ static void draw_playing_do(int full)
     if (!q_playing && !q_n) {
         if (full) {
             lcd_fill(0, 0, LCD_W, LCD_H, BG);
-            lcd_text(8, 60, "nothing plays: PLAY on a file", DIM, BG);
+            lcd_text(8, 60, T("nothing plays: PLAY on a file"), DIM, BG);
         }
         return;
     }
@@ -111,13 +112,12 @@ static void draw_playing_do(int full)
         lcd_fill(0, 145, LCD_W, 5, BG);
     }
     /* status: playing / paused, position in the queue */
-    static const char *const modes[MODE_COUNT] = { "", "  repeat all", "  repeat one", "  shuffle" };
-    p = put_str(b, !q_playing ? (parked ? "paused" : "stopped") : audio_paused ? "paused" : "playing");
-    p = put_str(p, "  ");
-    p = put_dec(p, (uint32_t)q_cur + 1);
-    p = put_str(p, "/");
-    p = put_dec(p, (uint32_t)q_n);
-    p = put_str(p, modes[play_mode]);
+    static const char *const modes[MODE_COUNT] = { "", N_("repeat all"), N_("repeat one"),
+                                                   N_("shuffle") };
+    p = log_format(b, b + sizeof b - 1, EN("%s  %u/%u%s%s"),
+                   !q_playing ? (parked ? T("paused") : T("stopped")) :
+                   audio_paused ? T("paused") : T("playing"),
+                   (uint32_t)q_cur + 1, (uint32_t)q_n, play_mode ? "  " : "", tr(modes[play_mode]));
     *p = 0;
     lcd_text_clip(4, 0, b, LCD_W - 104, TITLE_FG, BG);
     draw_clock(LCD_W - 104, LCD_W - 68, full);
@@ -160,7 +160,8 @@ static void draw_playing_do(int full)
         marquee_set(&mq[2], 102, tg.album[0] && !cfg.names ? tg.album : q_folder, DIR_FG, 1);
     }
     if (sk_on) {                                /* the target, how far, what the keys do */
-        p = put_str(b, "go to ");
+        p = put_str(b, T("go to"));
+        *p++ = ' ';
         p = fmt_time(p, sk_ms);
         p = put_str(p, " / ");
         p = fmt_time(p, len_ms());
@@ -168,7 +169,7 @@ static void draw_playing_do(int full)
         p = fmt_time(p, sk_ms >= sk_from ? sk_ms - sk_from : sk_from - sk_ms);
         lcd_text_clip(4, 122, b, LCD_W, SK_FG, BG);
         seek_bar(140, 5, now_ms(), sk_ms, len_ms());
-        lcd_text_clip(4, 150, "VOL+/- move  PLAY go  BACK cancel", LCD_W, DIM, BG);
+        lcd_text_clip(4, 150, T("VOL+/- move  PLAY go  BACK cancel"), LCD_W, DIM, BG);
         return;
     }
     p = fmt_time(b, now_ms());
@@ -184,19 +185,19 @@ static void draw_playing_do(int full)
         *p++ = '.';
         p = put_dec(p, player_heard.rate % 1000 / 100);
     }
-    p = put_str(p, " kHz  ");
+    p = put_str(p, EN(" kHz  "));
     p = put_dec(p, player_heard.bps);
-    p = put_str(p, " bit   -");
+    p = put_str(p, EN(" bit   -"));
     p = put_dec(p, (uint32_t)play_level / 2);
-    p = put_str(p, " dB  ");
+    p = put_str(p, EN(" dB  "));
     *p = 0;
     /* left to right, each pixel once: the text, the ReplayGain box (on yellow when the gain is
      * the track's), then the rest of the line */
     int x = lcd_text(4, 150, b, FG, BG);
     if (rg_mode != RG_MODE_OFF) {
-        p = put_str(b, " RG ");
+        p = put_str(b, EN(" RG "));
         if (rg_tag == RG_NONE)
-            p = put_str(p, "none");
+            p = put_str(p, T("none"));
         else {
             unsigned a = (unsigned)(rg_steps < 0 ? -rg_steps : rg_steps);
             *p++ = rg_steps < 0 ? '-' : '+';

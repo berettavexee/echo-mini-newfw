@@ -4,43 +4,12 @@
  * dr_flac for orders 3 to 32 (orders 1 and 2 are wrong on the hardware: the stock FLAC module
  * keeps them in software too). Blocks over 8191 samples (13-bit length field) in passes, each
  * later one with the last outputs of the one before as its warm-up. Included by codec_flac.c. */
-#include "accel.h"
+#include "haccdma.h"
 
 #define HACC_SEG    8191u                       /* the length field: 13 bits */
-#define HACC_CHUNK  2048u                       /* words per DMA block (LLI chain) */
 
-struct lli { uint32_t sar, dar, llp, ctl_lo, ctl_hi, sstat, dstat; };
 static struct lli lli_in[5], lli_out[5];
 static int hacc_ready;
-
-static void dma_chain(struct lli *l, uint32_t src, uint32_t dst, int src_inc, uint32_t n,
-                      uint32_t ctl_chain, uint32_t ctl_last)
-{
-    uint32_t k = 0;
-    for (int i = 0; k < n; i++) {
-        uint32_t m = n - k < HACC_CHUNK ? n - k : HACC_CHUNK;
-        l[i].sar = src_inc ? src + 4 * k : src;
-        l[i].dar = src_inc ? dst : dst + 4 * k;
-        l[i].ctl_hi = m;
-        k += m;
-        l[i].llp = k < n ? (uint32_t)&l[i + 1] : 0;
-        l[i].ctl_lo = k < n ? ctl_chain : ctl_last;
-        l[i].sstat = l[i].dstat = 0;
-    }
-}
-
-static void dma_channel(int ch, const struct lli *l, uint32_t cfg, uint32_t cfg_h)
-{
-    /* the first block in the registers too: without a chain the controller does not read the
-     * LLI; a chain starts from its first LLI (ETUDE §66, HW1 and HW2) */
-    REG(DMA_CH(ch) + 0x00) = l[0].sar;
-    REG(DMA_CH(ch) + 0x08) = l[0].dar;
-    REG(DMA_CH(ch) + 0x10) = l[0].llp ? (uint32_t)l : 0;
-    REG(DMA_CH(ch) + 0x18) = l[0].ctl_lo;
-    REG(DMA_CH(ch) + 0x1c) = l[0].ctl_hi;
-    REG(DMA_CH(ch) + 0x40) = cfg;
-    REG(DMA_CH(ch) + 0x44) = cfg_h;
-}
 
 /* One pass, in[0..n) -> out[0..n), n <= HACC_SEG (in == out allowed: the output follows the
  * input through the FIFO): 1 done, 0 timeout */
@@ -57,10 +26,7 @@ static int hacc_pass(const int32_t *in, int32_t *out, uint32_t n, uint32_t order
     REG(HACC + 0x04) |= 0x8000;                 /* LPC mode */
     REG(HACC + 0x2c) = order << 16 | shift << 8;
     REG(HACC + 0x0c) = 0xa0000000u | n << 15;
-    dma_chain(lli_in, (uint32_t)in, HACC_FIN, 1, n, 0x1a109125, 0x02109125);
-    dma_chain(lli_out, HACC_FOUT, (uint32_t)out, 0, n, 0x18a09425, 0x00a09425);
-    dma_channel(1, lli_in, 0x800, 0x807);
-    dma_channel(0, lli_out, 0x400, 7);
+    hacc_dma_block(lli_in, lli_out, in, out, n);
     REG(HACC + 0x0c) = 0xa0000000u | n << 15 | 3;   /* start */
     REG(DMA + 0x3a0) = 0x202;                   /* ChEnReg: channel 1, then 0 */
     REG(DMA + 0x3a0) = 0x101;

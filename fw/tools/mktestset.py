@@ -17,6 +17,9 @@ Groups (one folder each in OUTDIR):
                noise of 1 MB, 8 MB and 17 MB (past the 16 MiB tags.c reads at most; Ogg: 64 MiB), each
                put before the text tags, in FLAC (not 17 MB: a FLAC block holds less than
                16 MiB), MP3, Ogg Vorbis, Opus, M4A and Musepack (APEv2 "Cover Art (Front)")
+  alacorder/   ALAC with the prediction order forced (FFmpeg's encoder: 1 to 30), 16 and 24 bits,
+               stereo and mono, for the bench of HIFIACC's ALAC filter (ETUDE §113; not in the
+               default groups)
 
 OUTDIR/manifest.json lists each file with its format and the tags it holds ("expect": "tags"
 when tags.c should show them, "empty" when, by design, it should not, "any" when only the
@@ -335,6 +338,8 @@ FORMATS = [("wav", 44100, 16), ("wav", 96000, 24), ("wav", 192000, 24), ("aiff",
 TAGGED = [("flac", 96000, 24), ("mp3", 44100, 16), ("vorbis", 44100, 16), ("opus", 48000, 16),
           ("aac", 44100, 16), ("wav", 44100, 16), ("aiff", 44100, 16), ("mpc", 44100, 16)]
 COVERED = [k for k in TAGGED if k[0] not in ("wav", "aiff")]   # the formats with cover art
+ALACORDER = [(16, 44100, 2, o) for o in (1, 2, 3, 4, 8, 16, 30)] + \
+    [(24, 96000, 2, 8), (24, 96000, 2, 30), (16, 44100, 1, 4)]   # bits, rate, channels, order
 
 
 def apev2(t, pic=None):
@@ -448,6 +453,22 @@ def main():
                     continue
                 add("formats", f"{kind}-{bits}-{rate}.{EXT[kind]}", kind, rate, bits,
                     carried(kind, ASCII))
+        if "alacorder" in groups:
+            d = os.path.join(a.out, "alacorder")
+            os.makedirs(d, exist_ok=True)
+            for bits, rate, ch, order in ALACORDER:
+                w = os.path.join(tmp, f"in_{rate}_{bits}.wav")
+                if not os.path.exists(w):
+                    pcm(a.src, w, rate, bits, a.seconds)
+                name = f"alac-{bits}-{rate}-{'mono' if ch == 1 else 'stereo'}-o{order}.m4a"
+                path = os.path.join(d, name)
+                run("ffmpeg", "-nostdin", "-y", "-i", w, "-map_metadata", "-1", "-fflags",
+                    "+bitexact", "-ac", str(ch), "-c:a", "alac", "-sample_fmt",
+                    "s16p" if bits == 16 else "s32p", "-min_prediction_order", str(order),
+                    "-max_prediction_order", str(order), path)
+                man.append(dict(file=f"alacorder/{name}", codec="alac", rate=rate, bits=bits,
+                                channels=ch, tags={}, rg={}, expect="empty",
+                                size=os.path.getsize(path)))
         if "tags" in groups:
             for kind, rate, bits in TAGGED:
                 if kind == "mpc" and not have("mpcenc"):

@@ -18,7 +18,7 @@ CFLAGS = -mcpu=cortex-m3 -mthumb -Os -g -ffreestanding -fno-builtin -nostdlib \
 WARN   = -Wshadow -Wmissing-prototypes -Wcast-qual -Wundef
 LDFLAGS = -T link.ld -Wl,--gc-sections -Wl,-Map=$(BUILD)/fw.map -nostdlib -lgcc
 
-SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/settings.c src/resume.c src/uidraw.c src/main.c src/install.c src/usbmode.c src/uac.c src/remote.c src/perf.c src/storage.c src/charge.c src/mp4.c src/font.c src/rtc.c src/probe.c src/crash.c $(BUILD)/font_ascii.c
+SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/settings.c src/resume.c src/uidraw.c src/main.c src/install.c src/usbmode.c src/uac.c src/remote.c src/perf.c src/storage.c src/charge.c src/mp4.c src/font.c src/rtc.c src/probe.c src/crash.c src/lang.c $(BUILD)/font_ascii.c
 OBJS = $(patsubst %.c,$(BUILD)/%.o,$(notdir $(SRCS)))
 
 all: $(OUT)
@@ -194,8 +194,14 @@ $(BUILD)/codecs.bin: $(BUILD)/hifi_pcm.elf $(BUILD)/hifi_flac.elf $(BUILD)/hifi_
 	python3 tools/mkpack.py $@ 1:$(BUILD)/hifi_pcm.elf 2:$(BUILD)/hifi_flac.elf 3:$(BUILD)/hifi_mp3.elf \
 	  4:$(BUILD)/hifi_vorbis.elf 5:$(BUILD)/hifi_opus.elf 7:$(BUILD)/hifi_aac.elf 8:$(BUILD)/hifi_alac.elf 9:$(BUILD)/hifi_mpc.elf
 
-$(OUT): $(BUILD)/fw.elf $(BUILD)/codecs.bin $(BUILD)/font.bin tools/mkimg.py
+# The languages' catalogues (ETUDE §112): po/*.po
+$(BUILD)/lang.bin: tools/mklang.py po/newfw.pot $(wildcard po/*.po) $(FONT_BDF)
+	@mkdir -p $(BUILD)
+	python3 tools/mklang.py $(FONT_BDF) $@
+
+$(OUT): $(BUILD)/fw.elf $(BUILD)/codecs.bin $(BUILD)/font.bin $(BUILD)/lang.bin tools/mkimg.py
 	python3 tools/mkimg.py $(BUILD)/fw.elf $@ --pack $(BUILD)/codecs.bin --font $(BUILD)/font.bin \
+	  --lang $(BUILD)/lang.bin \
 	  $(if $(IMG_DATE),--date $(IMG_DATE))
 
 # Automatic checks (tools/check.sh): check before a commit, check-full before a release
@@ -205,7 +211,11 @@ check:
 check-full:
 	sh tools/check.sh --full
 
+# The template of the translations (ETUDE §112): after a string shown is added or changed
+pot:
+	python3 tools/mkpot.py
+
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all clean check check-full FORCE
+.PHONY: all clean check check-full pot FORCE

@@ -25,6 +25,8 @@ EMU, MKDISK, READLOG, MKBAD = (os.path.join(TOOLS, n) for n in
 VOL_SECTOR = 0x81000
 GOLDBERG = os.path.join(TOOLS, "..", "..", "testdata", "goldberg", "variatio4-5s.flac")
 ALWAYS_FORBID = [r"EXCEPTION", r"!! WRITE OUTSIDE", r"(?i)hard ?fault"]
+LOW_ORDER = r"!! HIFIACC order"                 # orders 1 and 2, wrong on the device (ETUDE §66,
+                                                # §116): never sent, but by the benches (hwtest)
 
 
 def keys(*seq):
@@ -117,6 +119,16 @@ TESTS = {
                             r"crash: core A: watchdog, exception 24",
                             r"crash: track A\.WAV at \d+ ms"],
                     reboot=dict(ms=5000)),
+    # PLAY on the play screen: a pause, a resume, twice (2 s each: more than half the DAC ring),
+    # then the track to its end. Until 0.100f1 core B slept on after a resume ("core B stuck"
+    # 500 ms later); until 0.100f2 it read the pause's time as laps of the DMA (its write position
+    # jumped: stale sound, a track ended early)
+    "pause-resume": dict(files={"A.WAV": "wav10"},
+                         keys=keys((2000, "PLAY"), (4000, "PLAY"), (6000, "PLAY"),
+                                   (8000, "PLAY"), (10000, "PLAY")), ms=19000,
+                         expect=[r"audio: paused", r"audio: resumed", r"audio: paused",
+                                 r"audio: resumed", r"player: finished after 441000 frames, 94\d\d ms"],
+                         forbid=[r"core B stuck", r"core B underruns [1-9]"]),
     # a track saved paused at position 0 (the state written by the test: the keys cannot pause
     # before anything is heard), then a power on: it comes back paused (PR #9: it was lost, its
     # position 0 read as "nothing to resume")
@@ -155,6 +167,15 @@ TESTS = {
                                    r"ui: resume: tree queue under ALBUM, track \1/5\n" + _SKIP +
                                    r"ui: queue \3/5: \4 \(0\)"],
                            reboot=dict(ms=20000)),
+    # the interface's language (ETUDE §112): Settings, Language (its first line) set to the
+    # first catalogue (Français), back; after the reboot the setting read, the catalogue loaded
+    "lang": dict(files={"A.WAV": "wav"}, ms=8000,
+                 keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "PLAY"),
+                           (5200, "PLAY"), (5800, "BACK")),
+                 expect=[r"lang: 3 catalogue\(s\) in FW1", r"lang: fr \(Français\), 153 strings",
+                         r"ui: language fr", r"ui: settings 3: .*language fr",
+                         r"lang: fr \(Français\)"],
+                 reboot=dict(ms=12000)),
     "install-ok": dict(files={"NEWDATE.IMG": "@NEWDATE.IMG"}, fw2=True,
                        keys=keys(*_INST, (14000, "PLAY")), ms=60000,
                        emu_args=["--expect-fw", "@NEWDATE.IMG"],
@@ -185,6 +206,53 @@ for _g in SET_GROUPS:                           # the test set (mktestset.py), o
 SET_SECONDS = 3                                 # the files of a set made here (mktestset.py)
 # the CI's share of the set: each format once (with Unicode tags in each container, Musepack's
 # APEv2 included), the high rates, and the cover skip past the 512 KiB window (M4A: a small one)
+
+
+def check_hwa(text):
+    """The ALAC bench (ETUDE §113), against the emulator's model of the filter: on every track
+    the coefficients reversed exact, without a timeout; in stream order, caught out on some
+    track (beyond order 1, where both orders are the same)"""
+    fails, tracks, caught = [], 0, 0
+    for m in re.finditer(r"hwa: (\S+): (\d+) predictions, coefficients reversed: (\d+) exact, "
+                         r"(\d+) differ; in stream order: \d+ exact, (\d+) differ; \d+ skipped, "
+                         r"(\d+) timeouts", text):
+        name, n, differ, s_differ, tmo = m.group(1), *(int(m.group(k)) for k in (2, 4, 5, 6))
+        tracks += 1
+        caught += s_differ > 0
+        if differ or tmo or not n:
+            fails.append(f"hwa: {name}: {n} predictions, {differ} differ, {tmo} timeouts")
+    if tracks < 2:
+        fails.append(f"hwa: {tracks} track(s) logged")
+    if not caught:
+        fails.append("hwa: the stream order never differed (the bench sees nothing?)")
+    return fails
+
+
+def check_hwi(text):
+    """The Imdct36 bench: the end seen as IRQ 7 on each transform, SYNTH's as IRQ 1"""
+    fails = []
+    m = re.search(r"\((\d+) IRQ 7, (\d+) timeouts\)", text)
+    if not m or m.group(1) == "0" or m.group(2) != "0":
+        fails.append(f"hwi: {m.group(0) if m else 'no IRQ 7 line'}")
+    m = re.search(r"IRQ 1 pending at (\d+) of (\d+) ends", text)
+    if not m or m.group(1) != m.group(2) or m.group(1) == "0":
+        fails.append(f"hws: {m.group(0) if m else 'no IRQ 1 line'}")
+    return fails
+
+
+# The benches of the accelerators (ETUDE §113): the test image only (make EXTRA=-DECHO_HWTEST),
+# not in the default list
+# ALAC on HIFIACC (ETUDE §116): orders 8 and 30 (16-bit stereo, 24/96) on it, 2 in software
+# (wrong on the device: LOW_ORDER forbidden), each bit-exact against ffmpeg in what the DAC played
+TESTS["alac-exact"] = dict(set="alacorder", seconds=2, exact=True, pick=[
+    "alacorder/alac-16-44100-stereo-o8.m4a", "alacorder/alac-24-96000-stereo-o30.m4a",
+    "alacorder/alac-16-44100-stereo-o2.m4a"],
+    check=lambda text: [] if re.search(r"alacacc: \S+: [1-9]\d* predictions on HIFIACC", text)
+    else ["no prediction on HIFIACC"])
+TESTS["hwt-alac"] = dict(set="alacorder", seconds=1, hwtest=True, check=check_hwa)
+TESTS["hwt-imdct"] = dict(set="formats", pick=["formats/mp3-16-44100.mp3"], hwtest=True,
+                          check=check_hwi)
+
 TESTS["set-ci"] = dict(set="tags,formats,covers", pick=[
     "tags/wav-unicode.wav", "tags/aiff-unicode.aiff", "tags/flac-unicode.flac",
     "tags/mp3-unicode.mp3", "tags/vorbis-unicode.ogg", "tags/opus-unicode.opus",
@@ -248,9 +316,14 @@ def run_set(group, t, img, elf, tmp):
         at += open_ms(m)
         ks.append((at, "PLAY", 800))
     ms = at + open_ms(man[-1]) + 6000           # the log is written every 5 s
+    if t.get("exact"):                          # each file whole: the folder plays on by itself
+        ks = [(2000, "PLAY", 200)]
+        ms = 2000 + 1000 * len(man) * (t.get("seconds", SET_SECONDS) + 1) + 6000
+    dac = os.path.join(tmp, "dac.raw")
     out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--keys",
                           keys(*ks), "--ms", str(ms), "--steps", "300000000000", "--dump-disk",
-                          dump], capture_output=True, text=True)
+                          dump] + (["--dac", dac] if t.get("exact") else []),
+                         capture_output=True, text=True)
     text = read_log(dump) if os.path.exists(dump) else ""
     fails = [] if text else [f"no log (emulator: {out.stderr.strip()[-300:]!r})"]
     seen, tags, fmt = set(), None, None
@@ -295,11 +368,39 @@ def run_set(group, t, img, elf, tmp):
     for n, m in names.items():
         if n not in seen:
             fails.append(f"{m['file']}: never played")
-    for pat in ALWAYS_FORBID:
+    for pat in ALWAYS_FORBID + ([] if t.get("hwtest") else [LOW_ORDER]):
         mm = re.search(pat, text + "\n" + out.stdout, re.M)
         if mm:
             fails.append(f"forbidden: {pat}")
+    if t.get("exact"):
+        fails += check_exact(man, src, dac)
+    if "check" in t:
+        fails += t["check"](text)
     return fails, text + "\n" + out.stdout
+
+
+def check_exact(man, src, dac):
+    """Each file decoded by ffmpeg, in the ring's format (16-bit: packed stereo; 20 and 24-bit:
+    32-bit words, the data in the high bits; mono duplicated), found whole in what the DMA read
+    (--dac): bit-exact, from the first sample to the last"""
+    heard = open(dac, "rb").read() if os.path.exists(dac) else b""
+    fails = []
+    for m in man:
+        ref = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i",
+                              os.path.join(src, m["file"]), "-ac", "2", "-f",
+                              "s16le" if m["bits"] == 16 else "s32le", "-"],
+                             capture_output=True, check=True).stdout
+        if not ref or heard.find(ref) < 0:
+            fb = 4 if m["bits"] == 16 else 8    # where its start is, and how far it agrees
+            at = heard.find(ref[fb * 2048:fb * 2048 + 1024]) - fb * 2048
+            same = 0
+            if at >= 0:
+                while same < len(ref) and at + same < len(heard) and \
+                        heard[at + same] == ref[same]:
+                    same += 1
+            fails.append(f"{m['file']}: not bit-exact in what the DAC played ({len(ref)} bytes "
+                         f"expected; found from {at}, the same for {same} bytes)")
+    return fails
 
 
 def read_log(dump):
@@ -393,7 +494,8 @@ def run(name, t, img, elf, tmp):
             pos = m.end()
         else:
             fails.append(f"missing: {pat}")
-    for pat in ([] if t.get("fault") else ALWAYS_FORBID) + t.get("forbid", []):
+    for pat in ([] if t.get("fault") else ALWAYS_FORBID) + t.get("forbid", []) + \
+            ([] if t.get("hwtest") else [LOW_ORDER]):
         m = re.search(pat, whole, re.M)
         if m:
             fails.append(f"forbidden: {pat}: {whole[max(0, m.start() - 60):m.end() + 60]!r}")
@@ -403,8 +505,8 @@ def run(name, t, img, elf, tmp):
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
-    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or [n for n in TESTS
-                                                                if not TESTS[n].get("fault")]
+    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or [
+        n for n in TESTS if not TESTS[n].get("fault") and not TESTS[n].get("hwtest")]
     failed = 0
     for name in names:
         with tempfile.TemporaryDirectory(prefix=f"emutest_{name}_") as tmp:

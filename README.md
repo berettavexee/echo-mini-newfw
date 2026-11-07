@@ -16,6 +16,8 @@ with gapless playback and ReplayGain.
 - **Folder browser** with long names, on the internal memory and the microSD card (FAT32 or
   exFAT). Play a whole folder tree, in order or shuffled.
 - **Settings**: brightness, screen timeout, sleep timer, power off when idle, start-up behaviour.
+- **Languages**: English, French, Japanese, Simplified Chinese (partial); translations are gettext
+  PO files, see [docs/TRANSLATING.md](docs/TRANSLATING.md).
 - Resume where you stopped, seek, clock, USB disk mode, low-battery warning, charging screen.
 - **USB sound card** for a computer or a phone: 16, 24 or 32 bits, 44.1 to 192 kHz,
   asynchronous (bit-perfect with Linux; Android and iPhone play, see `docs/USB_AUDIO.md`), with
@@ -36,7 +38,7 @@ with gapless playback and ReplayGain.
 
 ## Getting started
 
-1. Download `NEWFW100.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
+1. Download `NEWFW101.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
 2. Follow [Installing](MANUAL.md#installing) in the manual.
 3. The [manual](MANUAL.md) shows the keys of each screen.
 
@@ -52,7 +54,7 @@ or from RECHO. The full study, in French, is in [`ETUDE.md`](ETUDE.md).
 Our decoders run on the HiFi core (core B), whose clock follows the load in steps of 50, 57, 67,
 80, 100, 133 and 200 MHz (the step that keeps the load near 75 %). Measured on the device from
 the logs (versions 0.73 to 0.93), whole tracks, screen off; since 0.85, parts of the FLAC, MP3,
-Vorbis, AAC and Musepack decoders run on the chip's accelerators (`docs/HIFIACC.md`, `docs/MP3ACC.md`):
+Vorbis, AAC, Musepack and (0.101) ALAC decoders run on the chip's accelerators (`docs/HIFIACC.md`, `docs/MP3ACC.md`):
 
 | Format | Material measured | Core B, mean (clock step) | Decoder |
 |---|---|---|---|
@@ -64,9 +66,9 @@ Vorbis, AAC and Musepack decoders run on the chip's accelerators (`docs/HIFIACC.
 | Ogg Vorbis | 110-200 kb/s, 44.1 kHz | 29-36 MHz (50 MHz) | Tremor (lowmem), IMDCT on HIFIACC's FFT (0.88) |
 | Opus | 130-145 kb/s, 48 kHz | 50-55 MHz (67-80 MHz) | libopus 1.5.2 |
 | AAC-LC (M4A) | ~125 kb/s, 44.1 kHz (iTunes) | 23 MHz (50 MHz) | PacketVideo (AOSP), IMDCT's FFTs on HIFIACC (0.92) |
-| ALAC (M4A) | 16 bits, 44.1 kHz, mono | 11-13 MHz (50 MHz) | ours, derived from Apple's |
-| ALAC (M4A) | 16 bits, 44.1 kHz, stereo | 21-25 MHz (50 MHz) | ours, derived from Apple's |
-| ALAC (M4A) | 24 bits, 96 kHz, stereo | 49-51 MHz (67-80 MHz) | ours, derived from Apple's |
+| ALAC (M4A) | 16 bits, 44.1 kHz, mono | 5 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
+| ALAC (M4A) | 16 bits, 44.1 kHz, stereo | 9-10 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
+| ALAC (M4A) | 24 bits, 96 kHz, stereo | 27 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
 | Musepack | SV7 and SV8, ~180 kb/s, 44.1 kHz | 10-11 MHz (50 MHz) | libmpcdec, synthesis on SYNTH (0.93) |
 
 The load rises for a moment at the start of a track and after a seek (the top step until the
@@ -84,7 +86,7 @@ DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §61, ac
 | `fw/hifi/` | HiFi-core runtime and codec glue |
 | `fw/tools/` | image builder, emulator (`emu_fw.py`, Unicorn) and its tests (`emutest.py`), test set builder (`mktestset.py`), test disk and exFAT image builders, log reader, latency report (`perfreport.py`) |
 | `fw/tools/fuzz/` | fuzzing bench for the decoders and file readers (ASan, UBSan, coverage-guided): see `docs/FUZZING.md` |
-| `docs/` | `FUZZING.md` (the fuzzing bench and its findings), `HIFIACC.md` (the RKNanoD audio accelerator: registers, sequence, pitfalls), `MP3ACC.md` (the SYNTH and Imdct36 MP3 accelerators), `CS43131.md` (the DACs: wiring, start-up sequence, the firmwares compared), `USB_AUDIO.md` (the USB sound card: profiles, feedback, limits, pitfalls, hosts tested), screenshots of the manual |
+| `docs/` | `FUZZING.md` (the fuzzing bench and its findings), `HIFIACC.md` (the RKNanoD audio accelerator: registers, sequence, pitfalls), `MP3ACC.md` (the SYNTH and Imdct36 MP3 accelerators), `CS43131.md` (the DACs: wiring, start-up sequence, the firmwares compared), `USB_AUDIO.md` (the USB sound card: profiles, feedback, limits, pitfalls, hosts tested), `BATTERY.md` (battery life version after version: voltage curves and runs), screenshots of the manual |
 | `fw/font/` | Fusion Pixel 12 px (SIL OFL 1.1) |
 | `third_party/` | libopus 1.5.2 (decoder-only variant), Tremor lowmem (patched), AOSP pvmp3dec and pvaacdec, Apple ALAC decoder, libmpcdec |
 | `tools/` | reverse-engineering helpers used for the study (they expect the stock image and `re/rknanofw.py` next to this tree) |

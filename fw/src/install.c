@@ -64,11 +64,10 @@ static void mq_tick(void)
 
 static void progress(int stage, uint32_t done, uint32_t total)
 {
-    static const char *const what[] = { "checking CRC", "writing FW2", "writing FW1" };
-    char b[48], *p = put_str(b, what[stage]);
-    p = put_str(p, " ");
-    p = put_dec(p, (uint32_t)((uint64_t)done * 100 / total));
-    p = put_str(p, " %");
+    static const char *const what[] = { N_("checking CRC %u %%"), N_("writing FW2 %u %%"),
+                                        N_("writing FW1 %u %%") };
+    char b[64], *p = log_format(b, b + sizeof b - 1, tr(what[stage]),
+                                (uint32_t)((uint64_t)done * 100 / total));
     *p = 0;
     sys_line(112, b, FG);
     int w = (int)((uint64_t)done * (LCD_W - 8) / total);
@@ -97,11 +96,11 @@ static void firmware_menu(void)
         fat_list_dir(0, collect, &l);
     for (;;) {
         lcd_fill(0, 0, LCD_W, LCD_H, BG);
-        sys_line(0, "Install firmware (*.IMG, internal root)", TITLE);
+        sys_line(0, T("Install firmware (*.IMG, internal root)"), TITLE);
         if (storage_err || volume_err)
-            sys_line(32, "internal volume not available", WARN);
+            sys_line(32, T("internal volume not available"), WARN);
         else if (!l.n)
-            sys_line(32, "no .IMG file in the root folder", WARN);
+            sys_line(32, T("no .IMG file in the root folder"), WARN);
         if (l.n) {                              /* "selected/count" right-aligned */
             p = put_dec(b, (uint32_t)sel + 1);
             *p++ = '/';
@@ -116,7 +115,7 @@ static void firmware_menu(void)
             p = put_str(b, l.name[i]);
             p = put_str(p, "  ");
             p = put_dec(p, l.f[i].size >> 10);
-            p = put_str(p, " KiB");
+            p = put_str(p, EN(" KiB"));
             *p = 0;
             lcd_fill(0, y, 4, 16, bg);
             lcd_text_clip(4, y, b, xmax, FG, bg);
@@ -132,7 +131,7 @@ static void firmware_menu(void)
             }
         }
         list_scrollbar(18, IMG_ROWS, top, l.n);
-        sys_line(154, "VOL+/VOL-: choose  PLAY: check  BACK", DIM);
+        sys_line(154, T("VOL+/VOL-: choose  PLAY: check  BACK"), DIM);
 
         int k;
         while (!(k = key_edge())) {
@@ -159,35 +158,32 @@ static void firmware_menu(void)
         if (r) {
             sys_line(112, upd_title(r), WARN);
             sys_line(130, upd_hint(r), FG);
-            sys_line(154, "BACK: return", DIM);
+            sys_line(154, T("BACK: return"), DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();
             continue;
         }
-        p = put_str(b, "valid image, ");
-        p = put_date(p, &info);
-        p = put_str(p, ", ");
-        p = put_dec(p, info.fw_size >> 20);
-        p = put_str(p, " MiB");
+        char date[12];
+        *put_date(date, &info) = 0;
+        /* TRANSLATORS: its date (2026-11-06), its size in MiB */
+        p = log_format(b, b + sizeof b - 1, T("valid image, %s, %u MiB"), date, info.fw_size >> 20);
         *p = 0;
         sys_line(36, b, FG);
-        sys_line(54, info.two_copies ? "writes FW2, then FW1" : "too big for FW2: writes FW1 only", FG);
+        sys_line(54, info.two_copies ? T("writes FW2, then FW1") : T("too big for FW2: writes FW1 only"), FG);
         unsigned mv = battery_mv();
         if (!vbus() && mv < 3600) {
-            p = put_str(b, "Battery too low (");
-            p = put_dec(p, battery_pct(mv));
-            p = put_str(p, " %)");
+            p = log_format(b, b + sizeof b - 1, T("Battery too low (%u %%)"), battery_pct(mv));
             *p = 0;
             sys_line(80, b, WARN);
-            sys_line(98, "plug the USB cable", FG);
+            sys_line(98, T("plug the USB cable"), FG);
             log_printf("install: battery %u mV: refused", mv);
-            sys_line(154, "BACK: return", DIM);
+            sys_line(154, T("BACK: return"), DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();
             continue;
         }
-        sys_line(80, "do not power off during the install", WARN);
-        sys_line(154, "PLAY: install   BACK: cancel", DIM);
+        sys_line(80, T("do not power off during the install"), WARN);
+        sys_line(154, T("PLAY: install   BACK: cancel"), DIM);
         while ((k = key_edge()) != KEY_PLAY && k != KEY_BACK)
             wdt_kick();
         if (k == KEY_BACK)
@@ -203,12 +199,12 @@ static void firmware_menu(void)
         if (r) {
             sys_line(112, upd_title(r), WARN);
             sys_line(130, upd_hint(r), WARN);
-            sys_line(154, "BACK: return", DIM);
+            sys_line(154, T("BACK: return"), DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();
             continue;
         }
-        sys_line(112, "installed: restarting", TITLE);
+        sys_line(112, T("installed: restarting"), TITLE);
         mdelay(1500);
         clock_fast_ok();                        /* this loop skips sys_idle(): a restart on */
         reboot();                               /* purpose is not a failed 200 MHz attempt */

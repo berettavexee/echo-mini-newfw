@@ -670,8 +670,8 @@ static void screen(int line, uint32_t max_gap)
     char b[64], *p;
     switch (line) {
     case 0:
-    p = put_str(b, !usb.configured ? "waiting for the host" : !alt ? "connected, no stream" :
-                   st.flowing ? "playing" : "stream open, no sound");
+    p = put_str(b, !usb.configured ? T("waiting for the host") : !alt ? T("connected, no stream") :
+                   st.flowing ? T("playing") : T("stream open, no sound"));
     *p = 0;
     sys_status_line(0, 36, b, usb.configured ? FG : DIM);
     break;
@@ -683,9 +683,9 @@ static void screen(int line, uint32_t max_gap)
             *p++ = '.';
             *p++ = (char)('0' + rate % 1000 / 100);
         }
-        p = put_str(p, " kHz, ");
+        p = put_str(p, EN(" kHz, "));
         p = put_dec(p, alt == 1 ? 16 : alt == 2 ? 24 : 32);
-        p = put_str(p, " bits, feedback ");
+        p = put_str(p, EN(" bits, feedback "));
         uint32_t d = (uint32_t)((uint64_t)fb.sent * 10000 >> 14);
         p = put_dec(p, d / 10);
         *p++ = '.';
@@ -695,35 +695,33 @@ static void screen(int line, uint32_t max_gap)
     sys_status_line(1, 52, b, FG);
     break;
     case 2:
-    p = put_str(b, "volume -");
-    p = put_dec(p, (uint32_t)level / 2);
-    p = put_str(p, level & 1 ? ".5 dB, host -" : " dB, host -");
-    p = put_dec(p, (uint32_t)(-host_vol) / 256);
-    p = put_str(p, " dB");
+    /* TRANSLATORS: our attenuation (".5" or nothing after its whole dB), the computer's */
+    p = log_format(b, b + sizeof b - 1, T("volume -%u%s dB, host -%u dB"), (uint32_t)level / 2,
+                   level & 1 ? ".5" : "", (uint32_t)(-host_vol) / 256);
     if (host_mute)
-        p = put_str(p, ", muted");
+        p = log_format(p, b + sizeof b - 1, ", %s", T("muted"));
     *p = 0;
     sys_status_line(2, 68, b, FG);
     break;
     case 3:
-    p = put_str(b, "fill ");
+    p = put_str(b, EN("fill "));
     p = put_dec(p, st.frame && rate ? (uint32_t)(audio_fill() > 0 ? audio_fill() : 0) * 1000 /
                                           (rate * st.frame) : 0);
-    p = put_str(p, " ms, dropped ");
+    p = put_str(p, EN(" ms, dropped "));
     p = put_dec(p, st.dropped);
-    p = put_str(p, ", repeated ");
+    p = put_str(p, EN(", repeated "));
     p = put_dec(p, st.repeated);
     *p = 0;
     sys_status_line(3, 84, b, DIM);
     break;
     default:
-    p = put_str(b, "realigned ");
+    p = put_str(b, EN("realigned "));
     p = put_dec(p, st.realigned);
-    p = put_str(p, ", missed ");
+    p = put_str(p, EN(", missed "));
     p = put_dec(p, usb.iso_incomplete);
-    p = put_str(p, ", gap ");
+    p = put_str(p, EN(", gap "));
     p = put_dec(p, max_gap / 1000);
-    p = put_str(p, " ms");
+    p = put_str(p, EN(" ms"));
     *p = 0;
     sys_status_line(4, 100, b, st.realigned || usb.iso_incomplete ? WARN : DIM);
     }
@@ -815,7 +813,7 @@ static struct {
 
 static void remote_line(void)
 {
-    sys_line(116, cfg.uac_remote ? "MENU: remote on" : "MENU: remote off",
+    sys_line(116, cfg.uac_remote ? T("MENU: remote on") : T("MENU: remote off"),
              cfg.uac_remote ? FG : DIM);
 }
 
@@ -860,15 +858,15 @@ void uac_mode(void)
 {
     sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    sys_line(0, "USB sound card", TITLE);
+    sys_line(0, T("USB sound card"), TITLE);
     if (!vbus()) {
-        sys_line(36, "plug the USB cable", WARN);
+        sys_line(36, T("plug the USB cable"), WARN);
         mdelay(2000);
         return;
     }
     remote_line();
-    sys_line(138, "VOL+ / VOL-: volume, twice: track", DIM);
-    sys_line(154, "PLAY: play/pause, BACK held: exit", DIM);
+    sys_line(138, T("VOL+ / VOL-: volume, twice: track"), DIM);
+    sys_line(154, T("PLAY: play/pause, BACK held: exit"), DIM);
     hid = (typeof(hid)){ 0 };
     uint8_t remote_was = cfg.uac_remote;
     level = cfg.uac_vol ? cfg.uac_vol - 1 : play_level;     /* its own, once set */
@@ -884,7 +882,7 @@ void uac_mode(void)
     audio_stop();                                       /* from scratch: not parked, not paused */
     audio_ring_direct(0);                               /* the SYSRAM ring (ETUDE §103) */
     if (audio_start(rate, 1)) {
-        sys_line(36, "audio output failed", WARN);
+        sys_line(36, T("audio output failed"), WARN);
         mdelay(2000);
         return;
     }

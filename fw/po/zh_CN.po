@@ -1,0 +1,707 @@
+# Simplified Chinese translation of the ECHO MINI new firmware.
+# From pull request #1 by iamcheyan; the entries flagged fuzzy are proposals still to review.
+msgid ""
+msgstr ""
+"Project-Id-Version: echo-mini-newfw\n"
+"Report-Msgid-Bugs-To: https://github.com/berettavexee/echo-mini-newfw/issues\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: src/browser.c
+msgid "Internal"
+msgstr "内部存储"
+
+#: src/browser.c
+#, fuzzy
+msgid "SD card (not responding)"
+msgstr "SD 卡（无响应）"
+
+#: src/browser.c
+#, fuzzy
+msgid "SD card (needs FAT32 or exFAT)"
+msgstr "SD 卡（需要 FAT32 或 exFAT）"
+
+#: src/browser.c
+msgid "SD card"
+msgstr "SD 卡"
+
+#: src/browser.c
+msgid "no folder or playable file here"
+msgstr "此处没有文件夹或可播放文件"
+
+#: src/browser.c
+#, fuzzy
+msgid "reading..."
+msgstr "正在读取……"
+
+#: src/browser.c src/ui.c
+msgid "Storage"
+msgstr "存储设备"
+
+#: src/charge.c
+msgid "PLAY or Power held: start"
+msgstr "长按播放键或电源键启动"
+
+#: src/charge.c
+msgid "Charged 100%"
+msgstr "已充满 100%"
+
+#. TRANSLATORS: the battery's charge, in percent
+#: src/charge.c
+#, c-format
+msgid "Charging %u%%"
+msgstr "正在充电 %u%%"
+
+#: src/install.c
+#, c-format
+msgid "checking CRC %u %%"
+msgstr "正在检查 CRC %u %%"
+
+#: src/install.c
+#, c-format
+msgid "writing FW2 %u %%"
+msgstr "正在写入 FW2 %u %%"
+
+#: src/install.c
+#, c-format
+msgid "writing FW1 %u %%"
+msgstr "正在写入 FW1 %u %%"
+
+#: src/install.c
+msgid "Install firmware (*.IMG, internal root)"
+msgstr "安装固件（*.IMG，内部存储根目录）"
+
+#: src/install.c
+msgid "internal volume not available"
+msgstr "内部存储不可用"
+
+#: src/install.c
+msgid "no .IMG file in the root folder"
+msgstr "根目录中没有 .IMG 文件"
+
+#: src/install.c
+msgid "VOL+/VOL-: choose  PLAY: check  BACK"
+msgstr "音量键选择  播放键检查  返回键退出"
+
+#: src/install.c
+msgid "BACK: return"
+msgstr "返回键：返回"
+
+#. TRANSLATORS: its date (2026-11-06), its size in MiB
+#: src/install.c
+#, c-format, fuzzy
+msgid "valid image, %s, %u MiB"
+msgstr "有效镜像，%s，%u MiB"
+
+#: src/install.c
+msgid "writes FW2, then FW1"
+msgstr "依次写入 FW2 和 FW1"
+
+#: src/install.c
+msgid "too big for FW2: writes FW1 only"
+msgstr "镜像过大：只写入 FW1"
+
+#: src/install.c
+#, c-format, fuzzy
+msgid "Battery too low (%u %%)"
+msgstr "电量过低（%u %%）"
+
+#: src/install.c src/main.c src/uac.c src/ui.c src/usbmode.c
+msgid "plug the USB cable"
+msgstr "请连接 USB 线"
+
+#: src/install.c
+msgid "do not power off during the install"
+msgstr "安装期间请勿关机"
+
+#: src/install.c
+msgid "PLAY: install   BACK: cancel"
+msgstr "播放键安装  返回键取消"
+
+#: src/install.c
+msgid "installed: restarting"
+msgstr "安装完成：正在重启"
+
+#. TRANSLATORS: the name of this language, written in it (Français, 简体中文, 日本語): shown by the Language setting
+#: src/lang.c
+msgid "English"
+msgstr "简体中文"
+
+#: src/main.c
+msgid "any key: back"
+msgstr "按任意键返回"
+
+#: src/main.c
+msgid "power off"
+msgstr "正在关机"
+
+#: src/main.c src/menu.c
+msgid "USB loader mode (exit: RST)"
+msgstr "USB 引导模式（RST 退出）"
+
+#: src/main.c src/ui.c
+msgid "Battery empty"
+msgstr "电池耗尽"
+
+#: src/main.c
+msgid "starting..."
+msgstr "正在启动……"
+
+#: src/menu.c
+msgid "Files"
+msgstr "文件"
+
+#: src/menu.c
+msgid "Now playing"
+msgstr "正在播放"
+
+#: src/menu.c src/settings.c
+msgid "Settings"
+msgstr "设置"
+
+#: src/menu.c
+msgid "USB disk, read only"
+msgstr "USB 磁盘（只读）"
+
+#: src/menu.c
+msgid "USB disk, read/write"
+msgstr "USB 磁盘（读写）"
+
+#: src/menu.c src/uac.c
+msgid "USB sound card"
+msgstr "USB 声卡"
+
+#: src/menu.c
+msgid "Install a firmware (.IMG)"
+msgstr "安装固件（.IMG）"
+
+#: src/menu.c
+msgid "System screen"
+msgstr "系统信息"
+
+#: src/menu.c
+msgid "Menu"
+msgstr "菜单"
+
+#: src/menu.c
+msgid "no clock found (I2C1, 0xA2)"
+msgstr "未检测到时钟（I2C1, 0xA2）"
+
+#: src/menu.c src/settings.c
+msgid "Date and time"
+msgstr "日期和时间"
+
+#: src/menu.c
+msgid "VOL+/VOL-: change   PLAY: next, save"
+msgstr "音量键调整  播放键下一项/保存"
+
+#: src/menu.c
+msgid "BACK: previous, cancel   MENU: cancel"
+msgstr "返回键上一项/取消  菜单键取消"
+
+#: src/menu.c
+msgid "the clock had stopped: not set"
+msgstr "时钟已停止：尚未设置"
+
+#: src/menu.c
+msgid "the clock did not answer"
+msgstr "时钟无响应"
+
+#: src/menu.c
+msgid "clock set"
+msgstr "时间已设置"
+
+#: src/playback.c
+msgid "album"
+msgstr "专辑"
+
+#: src/playback.c
+msgid "track"
+msgstr "曲目"
+
+#: src/playback.c src/settings.c
+msgid "off"
+msgstr "关闭"
+
+#: src/playback.c
+msgid "auto"
+msgstr "自动"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: this variant of the format"
+msgstr "不支持：此格式变体"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: more than 2 channels"
+msgstr "不支持：超过 2 个声道"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: this bit depth"
+msgstr "不支持：此位深"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: floating-point samples"
+msgstr "不支持：浮点采样"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: compressed WAV or AIFF"
+msgstr "不支持：压缩的 WAV 或 AIFF"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: HE-AAC (AAC+)"
+msgstr "不支持：HE-AAC（AAC+）"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: this AAC profile"
+msgstr "不支持：此 AAC 配置"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: neither AAC nor ALAC"
+msgstr "不支持：既非 AAC 也非 ALAC"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: multichannel Opus"
+msgstr "不支持：多声道 Opus"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: too large for the memory"
+msgstr "不支持：超出内存容量"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: no sample rate"
+msgstr "不支持：无采样率"
+
+#: src/playback.c
+#, fuzzy
+msgid "Check the file on a computer"
+msgstr "请在电脑上检查该文件"
+
+#: src/playback.c
+#, fuzzy
+msgid "Empty file (0 bytes)"
+msgstr "空文件（0 字节）"
+
+#: src/playback.c
+#, fuzzy
+msgid "Copy it again"
+msgstr "请重新复制"
+
+#: src/playback.c
+#, fuzzy
+msgid "Damaged: no audio found"
+msgstr "已损坏：未找到音频"
+
+#: src/playback.c
+#, fuzzy
+msgid "Damaged, or not what its name says"
+msgstr "已损坏，或与扩展名不符"
+
+#: src/playback.c
+#, fuzzy
+msgid "Damaged: decoding error"
+msgstr "已损坏：解码错误"
+
+#: src/playback.c
+#, fuzzy
+msgid "Convert it to stereo"
+msgstr "请转换为立体声"
+
+#: src/playback.c
+#, fuzzy
+msgid "Convert it to AAC-LC, MP3 or Opus"
+msgstr "请转换为 AAC-LC、MP3 或 Opus"
+
+#: src/playback.c
+#, fuzzy
+msgid "Convert it to FLAC, MP3, AAC-LC or Opus"
+msgstr "请转换为 FLAC、MP3、AAC-LC 或 Opus"
+
+#: src/playback.c
+#, fuzzy
+msgid "Read error"
+msgstr "读取错误"
+
+#: src/playback.c
+#, fuzzy
+msgid "Reinsert the card, or check the disk"
+msgstr "请重新插入存储卡，或检查磁盘"
+
+#: src/playback.c
+#, fuzzy
+msgid "Its codec is missing from the firmware"
+msgstr "固件中缺少此编解码器"
+
+#: src/playback.c
+#, fuzzy
+msgid "Install the firmware again"
+msgstr "请重新安装固件"
+
+#: src/playback.c
+#, fuzzy
+msgid "Internal error (core B)"
+msgstr "内部错误（核心 B）"
+
+#: src/playback.c
+#, fuzzy
+msgid "Please report it with NEWFWLOG.TXT"
+msgstr "请附上 NEWFWLOG.TXT 报告此问题"
+
+#: src/playscreen.c
+msgid "nothing plays: PLAY on a file"
+msgstr "未在播放：选中文件后按播放键"
+
+#: src/playscreen.c
+msgid "repeat all"
+msgstr "全部循环"
+
+#: src/playscreen.c
+msgid "repeat one"
+msgstr "单曲循环"
+
+#: src/playscreen.c
+msgid "shuffle"
+msgstr "随机播放"
+
+#: src/playscreen.c
+#, fuzzy
+msgid "paused"
+msgstr "已暂停"
+
+#: src/playscreen.c
+#, fuzzy
+msgid "stopped"
+msgstr "已停止"
+
+#: src/playscreen.c src/uac.c
+#, fuzzy
+msgid "playing"
+msgstr "正在播放"
+
+#: src/playscreen.c
+msgid "go to"
+msgstr "跳转至"
+
+#: src/playscreen.c
+msgid "VOL+/- move  PLAY go  BACK cancel"
+msgstr "音量键移动  播放键跳转  返回键取消"
+
+#: src/playscreen.c
+msgid "none"
+msgstr "无"
+
+#: src/settings.c
+msgid "Screen off after"
+msgstr "屏幕关闭时间"
+
+#: src/settings.c
+msgid "Brightness"
+msgstr "亮度"
+
+#: src/settings.c
+msgid "Track title"
+msgstr "曲目信息显示"
+
+#: src/settings.c
+msgid "ReplayGain"
+msgstr "回放增益"
+
+#: src/settings.c
+msgid "ReplayGain preamp"
+msgstr "回放增益前置放大"
+
+#: src/settings.c
+msgid "At power on"
+msgstr "开机时"
+
+#: src/settings.c
+msgid "Sleep timer"
+msgstr "睡眠定时器"
+
+#: src/settings.c
+msgid "Power off when idle"
+msgstr "闲置后关机"
+
+#: src/settings.c
+msgid "Swap VOL+ and VOL-"
+msgstr "交换音量键"
+
+#: src/settings.c
+msgid "Restore the defaults (PLAY)"
+msgstr "恢复默认设置（按播放键）"
+
+#: src/settings.c
+msgid "resume playing"
+msgstr "继续播放"
+
+#: src/settings.c
+msgid "resume paused"
+msgstr "从暂停处继续"
+
+#: src/settings.c
+msgid "browser"
+msgstr "文件浏览"
+
+#: src/settings.c
+#, fuzzy
+msgid "no clock"
+msgstr "无时钟"
+
+#: src/settings.c
+#, fuzzy
+msgid "not set"
+msgstr "未设置"
+
+#: src/settings.c
+msgid "never"
+msgstr "永不"
+
+#. TRANSLATORS: seconds
+#: src/settings.c
+#, c-format
+msgid "%u s"
+msgstr "%u 秒"
+
+#. TRANSLATORS: minutes
+#: src/settings.c
+#, c-format, fuzzy
+msgid "%u min"
+msgstr "%u 分钟"
+
+#: src/settings.c
+msgid "file name"
+msgstr "文件名"
+
+#: src/settings.c
+msgid "tags"
+msgstr "标签"
+
+#. TRANSLATORS: the minutes left before the sleep timer stops the music
+#: src/settings.c
+#, c-format, fuzzy
+msgid "%u min left"
+msgstr "剩余 %u 分钟"
+
+#: src/settings.c
+msgid "yes"
+msgstr "是"
+
+#: src/settings.c
+msgid "no"
+msgstr "否"
+
+#: src/uac.c src/usbmode.c
+#, fuzzy
+msgid "waiting for the host"
+msgstr "等待主机"
+
+#: src/uac.c
+#, fuzzy
+msgid "connected, no stream"
+msgstr "已连接，无音频流"
+
+#: src/uac.c
+#, fuzzy
+msgid "stream open, no sound"
+msgstr "音频流已打开，无声音"
+
+#. TRANSLATORS: our attenuation (".5" or nothing after its whole dB), the computer's
+#: src/uac.c
+#, c-format, fuzzy
+msgid "volume -%u%s dB, host -%u dB"
+msgstr "音量 -%u%s dB，主机 -%u dB"
+
+#: src/uac.c
+#, fuzzy
+msgid "muted"
+msgstr "已静音"
+
+#: src/uac.c
+#, fuzzy
+msgid "MENU: remote on"
+msgstr "菜单键：遥控开启"
+
+#: src/uac.c
+#, fuzzy
+msgid "MENU: remote off"
+msgstr "菜单键：遥控关闭"
+
+#: src/uac.c
+#, fuzzy
+msgid "VOL+ / VOL-: volume, twice: track"
+msgstr "音量键：音量，按两次：切歌"
+
+#: src/uac.c
+#, fuzzy
+msgid "PLAY: play/pause, BACK held: exit"
+msgstr "播放键：播放/暂停，长按返回键退出"
+
+#: src/uac.c
+msgid "audio output failed"
+msgstr "音频输出失败"
+
+#: src/ui.c
+msgid "Low battery"
+msgstr "电量低"
+
+#: src/ui.c
+msgid "Cannot play"
+msgstr "无法播放"
+
+#: src/ui.c
+#, fuzzy
+msgid "Fault"
+msgstr "故障"
+
+#: src/ui.c
+#, fuzzy
+msgid "The last session ended on a fault"
+msgstr "上次运行因故障而结束"
+
+#: src/ui.c
+#, fuzzy
+msgid "details: NEWFWLOG.TXT"
+msgstr "详情：NEWFWLOG.TXT"
+
+#: src/update.c
+#, fuzzy
+msgid "Cannot read the file"
+msgstr "无法读取文件"
+
+#: src/update.c
+#, fuzzy
+msgid "copy it to the player again"
+msgstr "请重新复制到播放器"
+
+#: src/update.c
+#, fuzzy
+msgid "Not a firmware image"
+msgstr "不是固件镜像"
+
+#: src/update.c
+#, fuzzy
+msgid "use an ECHO MINI .IMG file"
+msgstr "请使用 ECHO MINI 的 .IMG 文件"
+
+#: src/update.c
+#, fuzzy
+msgid "Incomplete file"
+msgstr "文件不完整"
+
+#: src/update.c
+#, fuzzy
+msgid "download or copy it again"
+msgstr "请重新下载或复制"
+
+#: src/update.c
+#, fuzzy
+msgid "Image too large for this player"
+msgstr "镜像过大，不适用于本机"
+
+#: src/update.c
+#, fuzzy
+msgid "8 GB ECHO MINI images only"
+msgstr "仅限 8 GB ECHO MINI 镜像"
+
+#: src/update.c
+#, fuzzy
+msgid "Unknown image layout"
+msgstr "未知的镜像结构"
+
+#: src/update.c
+#, fuzzy
+msgid "not an image for this player"
+msgstr "不是本机的镜像"
+
+#: src/update.c
+#, fuzzy
+msgid "Damaged image"
+msgstr "镜像已损坏"
+
+#: src/update.c
+#, fuzzy
+msgid "download it again"
+msgstr "请重新下载"
+
+#: src/update.c
+#, fuzzy
+msgid "Flash write failed"
+msgstr "闪存写入失败"
+
+#: src/update.c
+msgid "restart, then install again"
+msgstr "请重启后重新安装"
+
+#: src/update.c
+#, fuzzy
+msgid "Install failed"
+msgstr "安装失败"
+
+#: src/update.c
+#, fuzzy
+msgid "restart, then try again"
+msgstr "请重启后重试"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "configured"
+msgstr "已配置"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "high speed"
+msgstr "高速"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "full speed"
+msgstr "全速"
+
+#: src/usbmode.c
+msgid "USB disk (read/write)"
+msgstr "USB 磁盘（读写）"
+
+#: src/usbmode.c
+msgid "USB disk (read only)"
+msgstr "USB 磁盘（只读）"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "No FAT32 volume on the internal memory"
+msgstr "内部存储上没有 FAT32 卷"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "nothing to share over USB"
+msgstr "没有可通过 USB 共享的内容"
+
+#: src/usbmode.c
+msgid "BACK: exit (eject on the computer first)"
+msgstr "先在电脑上弹出，再按返回键退出"
+
+#: src/usbmode.c
+msgid "eject on the computer before unplugging"
+msgstr "拔线前请先在电脑上弹出"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "Cannot share the internal memory"
+msgstr "无法共享内部存储"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "its volume overlaps the firmware area"
+msgstr "其卷与固件区域重叠"

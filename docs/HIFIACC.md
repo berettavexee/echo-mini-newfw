@@ -8,7 +8,9 @@ map), §66 (on-device comparison) and §67 (use in the FLAC decoder).
 Status: the **LPC filter used by FLAC** is understood, verified bit-exact on the device and used
 by this firmware since version 0.85. The **FFT** is mapped, measured on the device and used since
 version 0.88 for the IMDCT of the Vorbis decoder, and since 0.92 for the FFTs inside the IMDCT
-of the AAC decoder. The MAC, ALAC and APE functions are not mapped yet.
+of the AAC decoder. The **ALAC filter** and the **APE filters** are mapped from the stock
+firmware's ALAC and APE modules (below; not yet verified on the device). The MAC is not mapped:
+no stock module uses it.
 
 ## What it is
 
@@ -54,7 +56,7 @@ then verified on the device.
 | `0x01060040` | input FIFO: warm-up samples then residuals (32-bit words) |
 | `0x010600a0` | output FIFO: decoded samples |
 | `0x0106b000` | coefficient memory, 32-bit words, **in reverse order**: `COEF[k] = qlp[order-1-k]` (the TRM's `H(i) = h(N-1-i)`) |
-| `0x01069000` | another memory, used by the stock ALAC module (not mapped yet) |
+| `0x01069000` | the ALAC filter's coefficients (below) |
 
 ### DMAC2 set-up
 
@@ -120,7 +122,7 @@ Measured on the device with the USB probe (`ETUDE.md` §72-73; uses: §74 Vorbis
 
 | Address | Use |
 |---|---|
-| `0x0106000c` | bits 31-29: the function (2 = FFT, 4 = MAC, 5 = FLAC); `0x40000000`, then `0x40000003` to start, then **0 before reading the result** |
+| `0x0106000c` | bits 31-29: the function (0 = APE channel X, 1 = APE channel Y, 2 = FFT, 3 = ALAC, 4 = MAC, 5 = FLAC); `0x40000000`, then `0x40000003` to start, then **0 before reading the result** |
 | `0x01060024` | `size << 29` (64: 0, 128: 1, 256: 2, 512: 3, 1,024: 4); bit 27: no scaling (0: the result is divided by N); bit 20: real input (the imaginary part is ignored) |
 | `0x01061000` | imaginary parts, 1,024 32-bit words; the result in place |
 | `0x01062000` | real parts, 1,024 32-bit words; the result in place |
@@ -166,6 +168,59 @@ bits); an AAC album (13 tracks) at 22.8-23.1 MHz of core B instead of 25 (-9 %),
 Test builds: `-DECHO_HWTEST` (both computed, pvaacdec's sound, `hwf:` log line) and
 `-DECHO_FFTCMP` (HIFIACC's sound, compared with pvaacdec on a copy).
 
+## The ALAC filter (verified on the device, used by our ALAC decoder)
+
+Found in the stock ALAC module (overlay 79 of V3.9.0, `ETUDE.md` §113). Its decoder is FFmpeg's,
+and the hardware replaces its `lpc_prediction`: the whole adaptive predictor, the coefficient
+update after each sample included.
+
+- The stock module uses it only when `lpc_quant` is below 12, for orders 1 to 30 (order 0 is a
+  copy, order 31 the first-order case, both in software).
+- The input buffer holds the first `order + 1` decoded samples (`out[0] = e[0]`, then
+  `out[i] = sign_extend(out[i-1] + e[i], bps)`, computed in software), then the residuals.
+- Sequence:
+  1. `+0x0c` = `0x60000000 | n << 15`; `+0x04` |= `0x8000`;
+  2. `+0x28` = `order << 16 | lpc_quant << 8 | bps << 24`;
+  3. the coefficients, as 32-bit words, at `0x01069000`, in FFmpeg's array order;
+  4. `+0x0c` = `0x60000000 | n << 15 | 3`;
+  5. the same DMAC2 transfer as the FLAC filter (input to `+0x40`, output from `+0xa0`, in
+     place);
+  6. wait for bit 15 of `+0x08`, then `+0x04` &= ~`0x8000`.
+- **On the device** (the bench below, `ETUDE.md` §116): exact against our software predictor
+  for orders 3, 4, 8, 16 and 30, in 16-bit stereo (17 bits in the side channel), 24-bit 96 kHz
+  and mono, with the coefficients in FFmpeg's order (reversed from the stream; in stream order
+  every prediction differs). **Orders 1 and 2 are wrong**, from the first predicted sample on,
+  as for the FLAC filter; the stock ALAC module does not avoid them (Apple's encoder only
+  writes orders 4 and 8). 10 to 14 times faster than our predictor, DMA included (a 4,096-sample
+  frame at order 8: about 0.4 ms against 4.4 ms on the bench).
+- Not covered: `lpc_quant` of 12 and more (FFmpeg's encoder writes 5 to 9; kept in software, as
+  the stock module does), blocks over 8,191 samples (the length field; the coefficients adapt
+  along a block, so it cannot be split: kept in software).
+- Our driver: `fw/hifi/alacacc.c`, for orders 3 to 30 and `lpc_quant` below 12.
+
+## The APE filters (from the stock firmware, not verified yet)
+
+Found in the stock APE module (overlay 80, `ETUDE.md` §113). The hardware runs the NN filters of
+Monkey's Audio, one channel at a time; prediction and entropy decoding stay in software. Used
+for compression levels above 1000.
+
+- At the start of a stream: `+0x0c` = `0x1000 << 15`; `+0x20` = the configuration, then
+  `+0x20` |= `0x200000` (probably clears the filter memories); `+0x10` = 3;
+  `+0x00` = `0x01080108`; `+0x04` = `0x830083`; then `+0x0c` |= 3.
+- Each block: `+0x0c` = `n << 15` (channel X) or `0x20000000 | n << 15` (channel Y); `+0x20` =
+  the configuration; `+0x0c` |= 3; then the same in-place DMA transfer.
+- `+0x20`: bit 31 for files of version 3980 and later, then per level: 2000 `0x040b0000`, 3000
+  `0x100b0000`, 4000 `0x280ad000`, 5000 `0x440bdf00`. The nibbles at bits 16, 12 and 8 match
+  the filters' shifts (11; 11; 10 and 13; 11, 13 and 15), and bits 26 to 30 the orders (16, 32,
+  64, 256, 1,024); level 5000 lacks the bit expected for its 256-tap filter.
+- The unstable memories at `+0x3000`-`+0x8fff` are probably the filters' state.
+
+## The FIFOs without DMA
+
+A routine left in the stock APE module (not called) feeds the FIFOs from the CPU: bit 0 of
+`+0x08` means the input FIFO takes 8 more words; bit 16 means 8 output words are ready. Not
+tried yet.
+
 ## How to test it yourself
 
 This repository has a comparison bench, built only on request: `make EXTRA=-DECHO_HWTEST` in
@@ -174,9 +229,17 @@ HIFIACC, compared, and timed; the results go to the device log (`hwt:` lines) at
 track, per order. The sound stays the software's. See `fw/hifi/hwtest_lpc.c`. The production
 driver is `fw/hifi/hifiacc.c`.
 
+The same image tests the ALAC filter (`fw/hifi/hwtest_alac.c`, `hwa:` lines): every prediction
+of order 1 to 30 our ALAC decoder computes runs again on HIFIACC, with the coefficients
+reversed (FFmpeg's order) and in stream order, and is compared. `fw/tools/mktestset.py --only
+alacorder` makes ALAC files with the prediction order forced from 1 to 30.
+
 The emulator `fw/tools/emu_fw.py` models the LPC filter and DMAC2 (`tools/emu_host.py`, class
-`Accel`); the model is exact for orders 3 to 32 but, unlike the hardware, also for orders 1
-and 2.
+`Accel`) and the ALAC filter (FFmpeg's adaptive predictor, exact on the device for orders 3 to
+30). Orders 1 and 2, wrong on the hardware, make the model print `!! HIFIACC order` (a failure
+in every emulator test). The two filters run in C (`tools/emu_accel.c`, built on first use into
+`tools/__pycache__` and loaded through ctypes; in Python when there is no C compiler, or with
+`EMU_NATIVE=0`), and the DMA moves a whole block per memory access.
 
 It also models the FFT: the exact transform rounded to integers (the device's twiddles have about
 14 bits, so results are close, not bit-exact), and the busy memory: while `+0x0c` still selects
@@ -186,9 +249,9 @@ the FFT, the data memory reads as `0x0badf00d`.
 
 - The meaning of the configuration word `0x01080108`.
 - The MAC (function 4, term count at bit 18 of `+0x30`, result at `+0x34`/`+0x38`): the FFT's
-  sequence gives 0. The ALAC filter (memory at `0x01069000`) and the APE decoder.
-- Driving the FIFOs directly from the CPU (the TRM allows it), which may suit small blocks.
-- The MP3 accelerators **SYNTH** and **Imdct36** are separate blocks (TRM chapters 27 and 28,
-  with memory maps); not studied yet.
+  sequence gives 0, and no stock module uses it.
+- The ALAC and APE filters: mapped from the stock firmware (above), to verify on the device.
+- Driving the FIFOs directly from the CPU (above), which may suit small blocks.
+- The MP3 accelerators SYNTH and Imdct36 are separate blocks: see `MP3ACC.md`.
 
 Contributions and corrections are welcome.

@@ -606,7 +606,8 @@ def main():
                 d = state["dma"]                                 # [base, total, t, us x bytes]
                 dbase, total = d[0], d[1]
                 now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
-                d[3] += ((now - d[2]) & 0xffffffff) * dac_bps()  # at the rate the firmware set
+                if regs.get(0x4003001c, 1) & 1:                  # I2S1 XFER off (a pause): it
+                    d[3] += ((now - d[2]) & 0xffffffff) * dac_bps()  # stands; else at the rate
                 d[2] = now
                 pos = d[3] // 1000000 // 32 * 32
                 if dac_out:

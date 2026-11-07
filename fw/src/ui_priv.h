@@ -112,6 +112,7 @@ void draw_browser(void);
 #define MQ_PAUSE 1500000u
 #define MQ_STEP  33000u
 void browser_marquee_tick(void);
+void browser_lang_changed(void);                /* the volumes' names again, in the new language */
 int browser_walking(void);                      /* a tree walk runs in the storage task */
 int browser_walk_poll(void);                    /* its end: UI_* (playing from its first track) */
 struct q_state;
@@ -211,7 +212,9 @@ struct settings {
     int8_t rg_pre;                              /* ReplayGain preamp, dB */
     uint8_t uac_vol;                            /* USB sound card's volume + 1, 0: the playback's */
     uint8_t uac_remote;                         /* USB sound card: the keys sent to the host (HID) */
-};
+    char lang[8];                               /* the interface's language: its code (lang.h), */
+};                                              /* "" English (0.101) */
+#define SET_V2_BYTES 9                          /* the values up to uac_remote (version 2) */
 extern struct settings cfg;
 extern uint32_t sleep_at;                       /* the sleep timer ends (millis), 0: off */
 uint32_t screen_timeout_us(void);               /* 0xffffffff: never */

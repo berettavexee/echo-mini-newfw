@@ -3,7 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-06, version 0.100 (the rework merged into `main`).
+Last update: 2026-11-07, version 0.101 (interface languages, the resume after a pause fixed,
+ALAC on the accelerator).
 
 ## Done, validated on the device
 
@@ -49,6 +50,8 @@ Last update: 2026-11-06, version 0.100 (the rework merged into `main`).
 | Musepack SV7 and SV8, APEv2 tags, exact seek | 0.80 | §61 |
 | Decoders hardened against damaged files; a fuzzing bench (Ogg, Vorbis, Opus, MP3, AAC, MP4, tags, FAT) | 0.81-0.83, 0.91 | §62-§64 |
 | The chip's accelerators: FLAC LPC (HIFIACC), MP3 synthesis (SYNTH), Vorbis IMDCT (HIFIACC FFT), AAC IMDCT FFTs (HIFIACC), Musepack synthesis (SYNTH): 28 to 65 % less core B load | 0.85-0.93 | §66-§77 |
+| ALAC's adaptive predictor on HIFIACC (orders 3 to 30; checked against our decoder on the device): core B at 9.5 MHz on 16-bit ALAC instead of 35; the end of Imdct36 and SYNTH as pending IRQs | 0.101 | §113-§116 |
+| Interface languages (gettext PO files, catalogues in the image, the Language setting): English, French, Japanese and Simplified Chinese (partial) | 0.101 | §112 |
 | Automatic checks (`make check`, pre-commit hook, GitHub Actions); images reproducible byte for byte; emulator tests in the CI on a shareable test set (CC0 recording) | 0.91, 0.92, 0.99 | §94 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
@@ -172,6 +175,11 @@ One line per version; the measurements are in `ETUDE.md`.
   from `main` since 0.99: the sound card's remote and Power key, plain error messages, the
   resume of a tree queue, tags after big covers, pull requests #2 #7 #8 #9 #10 (§95, §96); the
   installer with long names (§110).
+- 0.101: interface languages (gettext PO files, catalogues in the image, the Language setting:
+  French, Japanese and Simplified Chinese, from pull request #1) (§112); the resume after a
+  pause fixed (core B was not woken since 0.99r28, then read the pause as sound played)
+  (§115); ALAC's predictor on HIFIACC, core B 3.7 times lighter on ALAC (§113-§116); the
+  accelerator benches and their emulator models (§113-§114); docs/BATTERY.md (§115).
 
 ## To do
 
@@ -182,10 +190,11 @@ One line per version; the measurements are in `ETUDE.md`.
 
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64); more varied seeds for the FAT
   target (its coverage stops growing after 20 minutes).
-- The accelerators still to map (`docs/HIFIACC.md`, `docs/MP3ACC.md`): HIFIACC's ALAC filter
-  (memory at `0x01069000`, stock module 79), its APE decoder (module 80) and its 64-bit MAC (TRM
-  chapter 26); Imdct36 for MP3 (mapped, no end flag found, §70). Each checked on the device with
-  a comparison bench, with an emulator model. Done: LPC, FFT, SYNTH.
+- The accelerators (`docs/HIFIACC.md`, `docs/MP3ACC.md`): mapped from the stock modules but not
+  yet checked on the device (§113): HIFIACC's APE filters (module 80), the FIFOs without DMA,
+  Imdct36's mode 1 (saturates). Still unknown: the 64-bit MAC (no stock module uses it), the
+  interrupt line of HIFIACC or DMAC2 (core B could sleep through long LPC blocks, §116). Done:
+  LPC, FFT, SYNTH, the ALAC filter, Imdct36's end (IRQ 7, §116).
 - Actions on the plug events (to be proposed and agreed first):
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.
@@ -261,7 +270,11 @@ One line per version; the measurements are in `ETUDE.md`.
   - delete a file from the browser (needs writing to FAT32 and exFAT: read only today);
   - format the internal memory or the card, reset the settings;
   - interface languages besides English (the font already covers Latin, Greek, Cyrillic and
-    CJK);
+    CJK): gettext PO files, open to Weblate (docs/TRANSLATING.md, ETUDE §112). Done in the
+    emulator and on the device (0.101): the strings marked, the catalogues in the image, the
+    Language setting, French (complete), Japanese and Simplified Chinese (81 of 153 strings from
+    pull request #1, the rest proposed, fuzzy); to do: a review of the Japanese and Chinese, the
+    Weblate project;
   - colour themes (minor);
   - daylight saving time: the change between summer and winter time (the real-time clock keeps
     local time today, set by hand on its screen, §28).

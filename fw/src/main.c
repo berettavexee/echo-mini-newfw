@@ -10,6 +10,7 @@
 #include "lcd.h"
 #include "hifi_proto.h"
 #include "crash.h"
+#include "lang.h"
 #include "log.h"
 #include "regs.h"
 #include "rtc.h"
@@ -127,6 +128,7 @@ static void storage_init(void)
 #endif
 }
 
+/* The system screen: diagnostics, in English (EN), but for the key hint */
 static void draw_static(void)
 {
     char b[64], *p;
@@ -134,47 +136,47 @@ static void draw_static(void)
     sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
     sys_line(0, FW_NAME " " FW_VERSION " (" FW_DATE ")", TITLE);
-    p = put_str(b, "CPU ");
+    p = put_str(b, EN("CPU "));
     p = put_dec(p, cpu_hz / 1000000);
-    p = put_str(p, fast ? " MHz" : " MHz (fallback)");
+    p = put_str(p, fast ? EN(" MHz") : EN(" MHz (fallback)"));
     if (fast) {
-        p = put_str(p, " adc ");
+        p = put_str(p, EN(" adc "));
         p = put_dec(p, adc_cycles_24m);
         p = put_str(p, "/");
         p = put_dec(p, adc_cycles);
-        p = put_str(p, " pll ");
+        p = put_str(p, EN(" pll "));
         p = put_hex(p, pll_con1 & 0xffff, 4);
     }
     *p = 0;
     sys_line(16, b, fast && cpu_hz == 200000000 ? FG : WARN);
     if (storage_err) {
-        p = put_str(b, "eMMC/IDB error ");
+        p = put_str(b, EN("eMMC/IDB error "));
         p = put_dec(p, -storage_err);
     } else {
-        p = put_str(b, "IDB P ");
+        p = put_str(b, EN("IDB P "));
         p = put_hex(p, emmc.p, 5);
-        p = put_str(p, " R ");
+        p = put_str(p, EN(" R "));
         p = put_hex(p, emmc.r, 5);
         if (volume_err)
-            p = put_str(p, "  no FAT32 volume");
+            p = put_str(p, EN("  no FAT32 volume"));
         else {
-            p = put_str(p, "  vol @");
+            p = put_str(p, EN("  vol @"));
             p = put_hex(p, vol.part, 6);
             p = put_str(p, " ");
             p = put_dec(p, vol.spc / 2);
-            p = put_str(p, "K");
+            p = put_str(p, EN("K"));
             if (volume_dirty < 0)
                 p = put_str(p, " ?");
             else if (volume_dirty) {
-                p = put_str(p, " dirty ");     /* 1: boot sector (Linux), 2: FAT[1], 4: error */
+                p = put_str(p, EN(" dirty "));     /* 1: boot sector (Linux), 2: FAT[1], 4: error */
                 p = put_dec(p, (uint32_t)volume_dirty);
             } else
-                p = put_str(p, " clean");
+                p = put_str(p, EN(" clean"));
         }
     }
     *p = 0;
     sys_line(32, b, storage_err || volume_err || volume_dirty ? WARN : FG);
-    sys_line(154, "any key: back", DIM);
+    sys_line(154, T("any key: back"), DIM);
 }
 
 static uint32_t draw_us;                        /* last status refresh that drew something */
@@ -184,45 +186,45 @@ static void draw_status(void)
     char b[64], *p;
     unsigned k = adc_read(1), mv = battery_mv();
 
-    p = put_str(b, "key ");
+    p = put_str(b, EN("key "));
     p = put_str(p, key_name(key_ladder(k)));
-    p = put_str(p, " (adc ");
+    p = put_str(p, EN(" (adc "));
     p = put_dec(p, k);
-    p = put_str(p, ")  power ");
-    p = put_str(p, power_key() ? "ON" : "-");
+    p = put_str(p, EN(")  power "));
+    p = put_str(p, power_key() ? EN("ON") : "-");
     *p = 0;
     sys_status_line(0, 48, b, FG);
-    p = put_str(b, "battery ");
+    p = put_str(b, EN("battery "));
     p = put_dec(p, mv);
-    p = put_str(p, " mV  usb ");
-    p = put_str(p, vbus() ? "yes" : "no");
-    p = put_str(p, "  chg ");
+    p = put_str(p, EN(" mV  usb "));
+    p = put_str(p, vbus() ? EN("yes") : EN("no"));
+    p = put_str(p, EN("  chg "));
     p = put_dec(p, gpio_get(PIN_CHARGING));
     *p = 0;
     sys_status_line(1, 64, b, mv && mv < 3400 ? WARN : FG);
-    p = put_str(b, "jack 3.5 ");
-    p = put_str(p, gpio_get(PIN_JACK35) ? "in" : "-");
+    p = put_str(b, EN("jack 3.5 "));
+    p = put_str(p, gpio_get(PIN_JACK35) ? EN("in") : "-");
     p = put_str(p, "  4.4 ");
-    p = put_str(p, gpio_get(PIN_JACK44) ? "-" : "in");
-    p = put_str(p, "  adc2 ");
+    p = put_str(p, gpio_get(PIN_JACK44) ? "-" : EN("in"));
+    p = put_str(p, EN("  adc2 "));
     p = put_dec(p, adc_read(2));
-    p = put_str(p, " adc3 ");
+    p = put_str(p, EN(" adc3 "));
     p = put_dec(p, adc_read(3));
     *p = 0;
     sys_status_line(2, 80, b, FG);
     uint32_t s = ticks() / 1000000;
-    p = put_str(b, "up ");
+    p = put_str(b, EN("up "));
     p = put_dec(p, s / 60);
     *p++ = ':';
     *p++ = '0' + s % 60 / 10;
     *p++ = '0' + s % 10;
-    p = put_str(p, "   draw ");
+    p = put_str(p, EN("   draw "));
     p = put_dec(p, draw_us / 1000);
-    p = put_str(p, " ms   log ");
+    p = put_str(p, EN(" ms   log "));
     if (logs.attached)
-        p = put_str(p, "on");
+        p = put_str(p, EN("on"));
     else {
-        p = put_str(p, "off ");
+        p = put_str(p, EN("off "));
         p = put_dec(p, (uint32_t)-logs.error);
     }
     *p = 0;
@@ -341,7 +343,7 @@ int sys_power_poll(uint32_t now, int mine)
 void sys_power_key_off(void)
 {
     sys_screen_set(1);
-    sys_line(122, "power off", WARN);
+    sys_line(122, T("power off"), WARN);
     sys_power_off("Power 2 s");
     charge_screen(0);                           /* still powered: the USB cable is in */
 }
@@ -411,7 +413,7 @@ void sys_screen(void)
 
 void sys_loader_usb(void)
 {
-    sys_line(122, "USB loader mode (exit: RST)", WARN);
+    sys_line(122, T("USB loader mode (exit: RST)"), WARN);
     log_printf("reboot to the loader USB mode (main menu)");
     log_flush();
     mdelay(1000);
@@ -432,8 +434,8 @@ static void battery_check_boot(void)
     if (sum / 8 >= 3350)
         return;
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    lcd_text_clip_x(8, 50, "Battery empty", LCD_W, WARN, BG, 2);
-    lcd_text(8, 100, "plug the USB cable", DIM, BG);
+    lcd_text_clip_x(8, 50, T("Battery empty"), LCD_W, WARN, BG, 2);
+    lcd_text(8, 100, T("plug the USB cable"), DIM, BG);
     mdelay(2000);
     log_printf("power off (battery empty at start), battery %u mV", sum / 8);
     log_flush();                                /* not sys_power_off(): nothing loaded yet, */
@@ -468,10 +470,11 @@ int main(void)
                pll_con1_after & 0xffff, mode_tries, adc_cycles_24m, adc_cycles);
     log_printf("clock: core %u Hz against the crystal (%u expected)", clock_measure(50), cpu_hz);
     lcd_init();
-    lcd_text(4, 0, "starting...", DIM, BG);
+    lcd_text(4, 0, T("starting..."), DIM, BG);
     lcd_backlight(1);
     storage_init();
     font_init();
+    lang_init();                                /* (the language: with the settings, ui_main) */
     rtc_init();
     log_printf("battery %u mV, usb %d, charge pin %d, jack 3.5 %d 4.4 %d, power key %d",
                battery_mv(), vbus(), gpio_get(PIN_CHARGING), gpio_get(PIN_JACK35),
@@ -532,25 +535,25 @@ void fault_screen(const uint32_t *frame, uint32_t exc)
         reboot();
     }
     lcd_fill(0, 0, LCD_W, LCD_H, RGB(128, 0, 0));
-    p = put_str(b, "FAULT exc ");
+    p = put_str(b, EN("FAULT exc "));
     p = put_dec(p, exc);
-    p = put_str(p, " cfsr ");
+    p = put_str(p, EN(" cfsr "));
     p = put_hex(p, REG(0xe000ed28), 8);
     *p = 0;
     lcd_text(4, 4, b, FG, RGB(128, 0, 0));
     if (frame) {
-        p = put_str(b, "pc ");
+        p = put_str(b, EN("pc "));
         p = put_hex(p, frame[6], 8);
-        p = put_str(p, " lr ");
+        p = put_str(p, EN(" lr "));
         p = put_hex(p, frame[5], 8);
         *p = 0;
         lcd_text(4, 24, b, FG, RGB(128, 0, 0));
     }
-    p = put_str(b, "bfar ");
+    p = put_str(b, EN("bfar "));
     p = put_hex(p, REG(0xe000ed38), 8);
     *p = 0;
     lcd_text(4, 44, b, FG, RGB(128, 0, 0));
-    lcd_text(4, 84, "any key: restart   Power 2 s: off", FG, RGB(128, 0, 0));
+    lcd_text(4, 84, EN("any key: restart   Power 2 s: off"), FG, RGB(128, 0, 0));   /* the fault screen: English */
     lcd_backlight(1);
     /* no SysTick here: busy-wait on the ADC (about 20 us per read) */
     for (unsigned n = 0;;) {

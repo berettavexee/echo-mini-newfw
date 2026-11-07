@@ -3,8 +3,9 @@
 
 /* ---- main menu ---- */
 static const char *const m_names[M_COUNT] = {
-    "Files", "Now playing", "Settings", "USB disk, read only", "USB disk, read/write",
-    "USB sound card", "Install a firmware (.IMG)", "System screen", "USB loader mode (exit: RST)",
+    N_("Files"), N_("Now playing"), N_("Settings"), N_("USB disk, read only"),
+    N_("USB disk, read/write"), N_("USB sound card"), N_("Install a firmware (.IMG)"),
+    N_("System screen"), N_("USB loader mode (exit: RST)"),
 };
 
 /* A screen of the stack (ui.c, ETUDE §99): VOL+/VOL- move, PLAY chooses, BACK or MENU closes; the
@@ -30,12 +31,12 @@ static int menu_draw(void)
         return SCR_STAY;
     const char *pp = perf_begin("menu draw");
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    lcd_text(4, 0, "Menu", TITLE_FG, BG);
+    lcd_text(4, 0, T("Menu"), TITLE_FG, BG);
     for (int i = m_top; i < M_COUNT && i < m_top + ROWS; i++) {
         uint16_t bg = i == m_sel ? SEL_BG : BG;
         int y = ROW_Y0 + 16 * (i - m_top);
         lcd_fill(0, y, LCD_W, 16, bg);
-        lcd_text_clip(12, y, m_names[i], list_text_end(M_COUNT, ROWS), FG, bg);
+        lcd_text_clip(12, y, tr(m_names[i]), list_text_end(M_COUNT, ROWS), FG, bg);
     }
     list_scrollbar(ROW_Y0, ROWS, m_top, M_COUNT);
     m_dirty = 0;
@@ -88,7 +89,7 @@ static void clock_enter(void)
     c_dirty = 1;
     c_msg_at = 0;
     if (c_ok < 0) {
-        clock_msg("no clock found (I2C1, 0xA2)", WARN, 1500);
+        clock_msg(T("no clock found (I2C1, 0xA2)"), WARN, 1500);
         return;
     }
     if (!c_ok)
@@ -120,7 +121,7 @@ static int clock_draw(void)
     if (t.day > dmax)
         t.day = c_t.day = (uint8_t)dmax;
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    lcd_text(4, 0, "Date and time", TITLE_FG, BG);
+    lcd_text(4, 0, T("Date and time"), TITLE_FG, BG);
     unsigned v[5] = { t.year, t.mon, t.day, t.hour, t.min };
     static const uint8_t wd[5] = { 4, 2, 2, 2, 2 };
     static const char *const sep[5] = { "-", "-", "  ", ":", "" };
@@ -139,10 +140,10 @@ static int clock_draw(void)
             x += w;
         }
     }
-    lcd_text(4, 118, "VOL+/VOL-: change   PLAY: next, save", DIM, BG);
-    lcd_text(4, 136, "BACK: previous, cancel   MENU: cancel", DIM, BG);
+    lcd_text(4, 118, T("VOL+/VOL-: change   PLAY: next, save"), DIM, BG);
+    lcd_text(4, 136, T("BACK: previous, cancel   MENU: cancel"), DIM, BG);
     if (!ok)
-        lcd_text(4, 154, "the clock had stopped: not set", WARN, BG);
+        lcd_text(4, 154, T("the clock had stopped: not set"), WARN, BG);
     c_dirty = 0;
     return SCR_STAY;
 }
@@ -169,7 +170,7 @@ static int clock_key(const struct key_ev *e)
     } else if (k == KEY_PLAY && ev == EV_PRESS) {
         if (++c_f == 5) {
             int r = rtc_set(t);
-            clock_msg(r ? "the clock did not answer" : "clock set", r ? WARN : FG, 800);
+            clock_msg(r ? T("the clock did not answer") : T("clock set"), r ? WARN : FG, 800);
             clock_min = -1;
             return SCR_STAY;
         }

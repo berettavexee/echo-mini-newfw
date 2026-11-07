@@ -70,12 +70,18 @@ core goes from 37-39 MHz to 21-23 MHz (44.1 kHz, *Discovery*), SYNTH busy about 
   4,096 (the TRM's "pre-right-shift" mode, which suits libmad's Q28 format).
 - Accuracy: 20-bit coefficients; only about 27 % of the outputs within 1 LSB of an exact
   transform.
-- **No end flag found**: `+0x80c` never changes when polled; the stock module relies on the
-  interrupt. Results were right after 200 µs.
+- **The end is an interrupt, not a register**: `+0x80c` never changes when polled. The stock
+  module takes **IRQ 7** of core B (exception 23): its handler writes 0 to `+0x80c` and reads the
+  36 outputs (`ETUDE.md` §113). SYNTH has **IRQ 1** (exception 17), whose handler writes 0 to
+  `+0x810`. **Checked on the device** (`ETUDE.md` §116): with the interrupt masked, bit 7 of
+  `NVIC_ISPR0` (`0xe000e200`) is set at the end of every transform, 0.4 to 1.5 µs after the
+  last input (cleared through `NVIC_ICPR0` after the acknowledge); bit 1 at the end of every
+  SYNTH slot. In mode 3 the output is the exact transform scaled by 2^-8 (99.99 % within 1);
+  in mode 1 about 16 times larger, but only 6 to 9 % exact (it probably saturates).
 
 Not used by this firmware: pvmp3dec's 18-point MDCT with window and overlap takes 16 µs per
 subband, and its history format would force a rewrite of the whole IMDCT stage for a small
-expected gain. Finding the end flag (or using the interrupt) is the open question.
+expected gain.
 
 ## Use by Musepack (0.93)
 
@@ -95,7 +101,11 @@ about 29 MHz. `make EXTRA=-DECHO_HWTEST` computes both and compares them (`hwm:`
 `tools/emu_host.py`, class `Synth`: the standard synthesis in floating point (matrixing
 `cos((16 + i)(2k + 1) pi / 64)`, then the window of libmpcdec's `synth_filter.c`), output
 `round(sum / 2^13)` saturated to 16 bits, one history per channel; within 1 LSB of libmpcdec,
-not bit-exact against the device.
+not bit-exact against the device. Its end sets IRQ 1 pending in core B's NVIC.
+
+Class `Imdct36`: the exact 36-point IMDCT, rounded, divided by 4,096 when bit 1 of `+0x800` is
+set; its end sets IRQ 7 pending. The NVIC model is small: `ICER` clears `ISER`'s bits, `ICPR`
+clears `ISPR`'s; the rest of the system space is plain memory.
 
 ## Test bench
 

@@ -1,0 +1,707 @@
+# Japanese translation of the ECHO MINI new firmware.
+# From pull request #1 by iamcheyan; the entries flagged fuzzy are proposals still to review.
+msgid ""
+msgstr ""
+"Project-Id-Version: echo-mini-newfw\n"
+"Report-Msgid-Bugs-To: https://github.com/berettavexee/echo-mini-newfw/issues\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: src/browser.c
+msgid "Internal"
+msgstr "内蔵ストレージ"
+
+#: src/browser.c
+#, fuzzy
+msgid "SD card (not responding)"
+msgstr "SDカード（応答なし）"
+
+#: src/browser.c
+#, fuzzy
+msgid "SD card (needs FAT32 or exFAT)"
+msgstr "SDカード（FAT32またはexFATが必要）"
+
+#: src/browser.c
+msgid "SD card"
+msgstr "SDカード"
+
+#: src/browser.c
+msgid "no folder or playable file here"
+msgstr "フォルダーまたは再生可能なファイルがありません"
+
+#: src/browser.c
+#, fuzzy
+msgid "reading..."
+msgstr "読み込み中..."
+
+#: src/browser.c src/ui.c
+msgid "Storage"
+msgstr "ストレージ"
+
+#: src/charge.c
+msgid "PLAY or Power held: start"
+msgstr "PLAYまたは電源キー長押しで起動"
+
+#: src/charge.c
+msgid "Charged 100%"
+msgstr "充電完了 100%"
+
+#. TRANSLATORS: the battery's charge, in percent
+#: src/charge.c
+#, c-format
+msgid "Charging %u%%"
+msgstr "充電中 %u%%"
+
+#: src/install.c
+#, c-format
+msgid "checking CRC %u %%"
+msgstr "CRCを確認中 %u %%"
+
+#: src/install.c
+#, c-format
+msgid "writing FW2 %u %%"
+msgstr "FW2を書き込み中 %u %%"
+
+#: src/install.c
+#, c-format
+msgid "writing FW1 %u %%"
+msgstr "FW1を書き込み中 %u %%"
+
+#: src/install.c
+msgid "Install firmware (*.IMG, internal root)"
+msgstr "ファームウェアをインストール（*.IMG、内蔵ストレージのルート）"
+
+#: src/install.c
+msgid "internal volume not available"
+msgstr "内蔵ストレージを利用できません"
+
+#: src/install.c
+msgid "no .IMG file in the root folder"
+msgstr "ルートに.IMGファイルがありません"
+
+#: src/install.c
+msgid "VOL+/VOL-: choose  PLAY: check  BACK"
+msgstr "VOL+/-選択  PLAY確認  BACK戻る"
+
+#: src/install.c
+msgid "BACK: return"
+msgstr "BACK：戻る"
+
+#. TRANSLATORS: its date (2026-11-06), its size in MiB
+#: src/install.c
+#, c-format, fuzzy
+msgid "valid image, %s, %u MiB"
+msgstr "有効なイメージ、%s、%u MiB"
+
+#: src/install.c
+msgid "writes FW2, then FW1"
+msgstr "FW2、続いてFW1に書き込み"
+
+#: src/install.c
+msgid "too big for FW2: writes FW1 only"
+msgstr "FW2には大きすぎるためFW1のみ書き込み"
+
+#: src/install.c
+#, c-format, fuzzy
+msgid "Battery too low (%u %%)"
+msgstr "電池残量不足（%u %%）"
+
+#: src/install.c src/main.c src/uac.c src/ui.c src/usbmode.c
+msgid "plug the USB cable"
+msgstr "USBケーブルを接続してください"
+
+#: src/install.c
+msgid "do not power off during the install"
+msgstr "インストール中は電源を切らないでください"
+
+#: src/install.c
+msgid "PLAY: install   BACK: cancel"
+msgstr "PLAYでインストール  BACKで取消"
+
+#: src/install.c
+msgid "installed: restarting"
+msgstr "インストール完了：再起動中"
+
+#. TRANSLATORS: the name of this language, written in it (Français, 简体中文, 日本語): shown by the Language setting
+#: src/lang.c
+msgid "English"
+msgstr "日本語"
+
+#: src/main.c
+msgid "any key: back"
+msgstr "任意のキーで戻る"
+
+#: src/main.c
+msgid "power off"
+msgstr "電源オフ"
+
+#: src/main.c src/menu.c
+msgid "USB loader mode (exit: RST)"
+msgstr "USBローダーモード（RSTで終了）"
+
+#: src/main.c src/ui.c
+msgid "Battery empty"
+msgstr "バッテリー切れ"
+
+#: src/main.c
+msgid "starting..."
+msgstr "起動中..."
+
+#: src/menu.c
+msgid "Files"
+msgstr "ファイル"
+
+#: src/menu.c
+msgid "Now playing"
+msgstr "再生中"
+
+#: src/menu.c src/settings.c
+msgid "Settings"
+msgstr "設定"
+
+#: src/menu.c
+msgid "USB disk, read only"
+msgstr "USBディスク（読み取り専用）"
+
+#: src/menu.c
+msgid "USB disk, read/write"
+msgstr "USBディスク（読み書き）"
+
+#: src/menu.c src/uac.c
+msgid "USB sound card"
+msgstr "USB DAC"
+
+#: src/menu.c
+msgid "Install a firmware (.IMG)"
+msgstr "ファームウェアをインストール（.IMG）"
+
+#: src/menu.c
+msgid "System screen"
+msgstr "システム情報"
+
+#: src/menu.c
+msgid "Menu"
+msgstr "メニュー"
+
+#: src/menu.c
+msgid "no clock found (I2C1, 0xA2)"
+msgstr "時計が見つかりません（I2C1, 0xA2）"
+
+#: src/menu.c src/settings.c
+msgid "Date and time"
+msgstr "日時"
+
+#: src/menu.c
+msgid "VOL+/VOL-: change   PLAY: next, save"
+msgstr "VOL+/-変更  PLAY次へ/保存"
+
+#: src/menu.c
+msgid "BACK: previous, cancel   MENU: cancel"
+msgstr "BACK前へ/取消  MENU取消"
+
+#: src/menu.c
+msgid "the clock had stopped: not set"
+msgstr "時計が停止していました：未設定"
+
+#: src/menu.c
+msgid "the clock did not answer"
+msgstr "時計が応答しません"
+
+#: src/menu.c
+msgid "clock set"
+msgstr "時刻を設定しました"
+
+#: src/playback.c
+msgid "album"
+msgstr "アルバム"
+
+#: src/playback.c
+msgid "track"
+msgstr "トラック"
+
+#: src/playback.c src/settings.c
+msgid "off"
+msgstr "オフ"
+
+#: src/playback.c
+msgid "auto"
+msgstr "自動"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: this variant of the format"
+msgstr "非対応：この形式のバリエーション"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: more than 2 channels"
+msgstr "非対応：2チャンネルを超える音声"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: this bit depth"
+msgstr "非対応：このビット深度"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: floating-point samples"
+msgstr "非対応：浮動小数点サンプル"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: compressed WAV or AIFF"
+msgstr "非対応：圧縮WAV／AIFF"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: HE-AAC (AAC+)"
+msgstr "非対応：HE-AAC（AAC+）"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: this AAC profile"
+msgstr "非対応：このAACプロファイル"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: neither AAC nor ALAC"
+msgstr "非対応：AACでもALACでもありません"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: multichannel Opus"
+msgstr "非対応：マルチチャンネルOpus"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: too large for the memory"
+msgstr "非対応：メモリに対して大きすぎます"
+
+#: src/playback.c
+#, fuzzy
+msgid "Not supported: no sample rate"
+msgstr "非対応：サンプルレートがありません"
+
+#: src/playback.c
+#, fuzzy
+msgid "Check the file on a computer"
+msgstr "パソコンでファイルを確認してください"
+
+#: src/playback.c
+#, fuzzy
+msgid "Empty file (0 bytes)"
+msgstr "空のファイル（0バイト）"
+
+#: src/playback.c
+#, fuzzy
+msgid "Copy it again"
+msgstr "もう一度コピーしてください"
+
+#: src/playback.c
+#, fuzzy
+msgid "Damaged: no audio found"
+msgstr "破損：音声が見つかりません"
+
+#: src/playback.c
+#, fuzzy
+msgid "Damaged, or not what its name says"
+msgstr "破損、または拡張子と内容が不一致"
+
+#: src/playback.c
+#, fuzzy
+msgid "Damaged: decoding error"
+msgstr "破損：デコードエラー"
+
+#: src/playback.c
+#, fuzzy
+msgid "Convert it to stereo"
+msgstr "ステレオに変換してください"
+
+#: src/playback.c
+#, fuzzy
+msgid "Convert it to AAC-LC, MP3 or Opus"
+msgstr "AAC-LC、MP3、Opusに変換してください"
+
+#: src/playback.c
+#, fuzzy
+msgid "Convert it to FLAC, MP3, AAC-LC or Opus"
+msgstr "FLAC、MP3、AAC-LC、Opusに変換してください"
+
+#: src/playback.c
+#, fuzzy
+msgid "Read error"
+msgstr "読み込みエラー"
+
+#: src/playback.c
+#, fuzzy
+msgid "Reinsert the card, or check the disk"
+msgstr "カードを挿し直すか、ディスクを確認してください"
+
+#: src/playback.c
+#, fuzzy
+msgid "Its codec is missing from the firmware"
+msgstr "このコーデックがファームウェアにありません"
+
+#: src/playback.c
+#, fuzzy
+msgid "Install the firmware again"
+msgstr "ファームウェアを再インストールしてください"
+
+#: src/playback.c
+#, fuzzy
+msgid "Internal error (core B)"
+msgstr "内部エラー（コアB）"
+
+#: src/playback.c
+#, fuzzy
+msgid "Please report it with NEWFWLOG.TXT"
+msgstr "NEWFWLOG.TXTを添えて報告してください"
+
+#: src/playscreen.c
+msgid "nothing plays: PLAY on a file"
+msgstr "再生中の曲がありません：ファイルを選んでPLAY"
+
+#: src/playscreen.c
+msgid "repeat all"
+msgstr "全曲リピート"
+
+#: src/playscreen.c
+msgid "repeat one"
+msgstr "1曲リピート"
+
+#: src/playscreen.c
+msgid "shuffle"
+msgstr "シャッフル"
+
+#: src/playscreen.c
+#, fuzzy
+msgid "paused"
+msgstr "一時停止"
+
+#: src/playscreen.c
+#, fuzzy
+msgid "stopped"
+msgstr "停止"
+
+#: src/playscreen.c src/uac.c
+#, fuzzy
+msgid "playing"
+msgstr "再生中"
+
+#: src/playscreen.c
+msgid "go to"
+msgstr "移動"
+
+#: src/playscreen.c
+msgid "VOL+/- move  PLAY go  BACK cancel"
+msgstr "VOL+/-移動  PLAY決定  BACK取消"
+
+#: src/playscreen.c
+msgid "none"
+msgstr "なし"
+
+#: src/settings.c
+msgid "Screen off after"
+msgstr "画面消灯時間"
+
+#: src/settings.c
+msgid "Brightness"
+msgstr "明るさ"
+
+#: src/settings.c
+msgid "Track title"
+msgstr "曲名表示"
+
+#: src/settings.c
+msgid "ReplayGain"
+msgstr "ReplayGain"
+
+#: src/settings.c
+msgid "ReplayGain preamp"
+msgstr "ReplayGainプリアンプ"
+
+#: src/settings.c
+msgid "At power on"
+msgstr "起動時"
+
+#: src/settings.c
+msgid "Sleep timer"
+msgstr "スリープタイマー"
+
+#: src/settings.c
+msgid "Power off when idle"
+msgstr "無操作時に電源オフ"
+
+#: src/settings.c
+msgid "Swap VOL+ and VOL-"
+msgstr "音量キーを入れ替え"
+
+#: src/settings.c
+msgid "Restore the defaults (PLAY)"
+msgstr "設定を初期化（PLAY）"
+
+#: src/settings.c
+msgid "resume playing"
+msgstr "再生を再開"
+
+#: src/settings.c
+msgid "resume paused"
+msgstr "一時停止状態で再開"
+
+#: src/settings.c
+msgid "browser"
+msgstr "ブラウザー"
+
+#: src/settings.c
+#, fuzzy
+msgid "no clock"
+msgstr "時計なし"
+
+#: src/settings.c
+#, fuzzy
+msgid "not set"
+msgstr "未設定"
+
+#: src/settings.c
+msgid "never"
+msgstr "なし"
+
+#. TRANSLATORS: seconds
+#: src/settings.c
+#, c-format
+msgid "%u s"
+msgstr "%u 秒"
+
+#. TRANSLATORS: minutes
+#: src/settings.c
+#, c-format, fuzzy
+msgid "%u min"
+msgstr "%u 分"
+
+#: src/settings.c
+msgid "file name"
+msgstr "ファイル名"
+
+#: src/settings.c
+msgid "tags"
+msgstr "タグ"
+
+#. TRANSLATORS: the minutes left before the sleep timer stops the music
+#: src/settings.c
+#, c-format, fuzzy
+msgid "%u min left"
+msgstr "残り %u 分"
+
+#: src/settings.c
+msgid "yes"
+msgstr "はい"
+
+#: src/settings.c
+msgid "no"
+msgstr "いいえ"
+
+#: src/uac.c src/usbmode.c
+#, fuzzy
+msgid "waiting for the host"
+msgstr "ホスト待機中"
+
+#: src/uac.c
+#, fuzzy
+msgid "connected, no stream"
+msgstr "接続済み、ストリームなし"
+
+#: src/uac.c
+#, fuzzy
+msgid "stream open, no sound"
+msgstr "ストリーム開始、無音"
+
+#. TRANSLATORS: our attenuation (".5" or nothing after its whole dB), the computer's
+#: src/uac.c
+#, c-format, fuzzy
+msgid "volume -%u%s dB, host -%u dB"
+msgstr "音量 -%u%s dB、ホスト -%u dB"
+
+#: src/uac.c
+#, fuzzy
+msgid "muted"
+msgstr "ミュート"
+
+#: src/uac.c
+#, fuzzy
+msgid "MENU: remote on"
+msgstr "MENU：リモコン オン"
+
+#: src/uac.c
+#, fuzzy
+msgid "MENU: remote off"
+msgstr "MENU：リモコン オフ"
+
+#: src/uac.c
+#, fuzzy
+msgid "VOL+ / VOL-: volume, twice: track"
+msgstr "VOL+ / VOL-：音量、2回押し：曲送り"
+
+#: src/uac.c
+#, fuzzy
+msgid "PLAY: play/pause, BACK held: exit"
+msgstr "PLAY：再生/一時停止、BACK長押し：終了"
+
+#: src/uac.c
+msgid "audio output failed"
+msgstr "音声出力に失敗しました"
+
+#: src/ui.c
+msgid "Low battery"
+msgstr "バッテリー残量低下"
+
+#: src/ui.c
+msgid "Cannot play"
+msgstr "再生できません"
+
+#: src/ui.c
+#, fuzzy
+msgid "Fault"
+msgstr "障害"
+
+#: src/ui.c
+#, fuzzy
+msgid "The last session ended on a fault"
+msgstr "前回のセッションは障害で終了しました"
+
+#: src/ui.c
+#, fuzzy
+msgid "details: NEWFWLOG.TXT"
+msgstr "詳細：NEWFWLOG.TXT"
+
+#: src/update.c
+#, fuzzy
+msgid "Cannot read the file"
+msgstr "ファイルを読み込めません"
+
+#: src/update.c
+#, fuzzy
+msgid "copy it to the player again"
+msgstr "プレーヤーにもう一度コピーしてください"
+
+#: src/update.c
+#, fuzzy
+msgid "Not a firmware image"
+msgstr "ファームウェアイメージではありません"
+
+#: src/update.c
+#, fuzzy
+msgid "use an ECHO MINI .IMG file"
+msgstr "ECHO MINIの.IMGファイルを使用してください"
+
+#: src/update.c
+#, fuzzy
+msgid "Incomplete file"
+msgstr "不完全なファイル"
+
+#: src/update.c
+#, fuzzy
+msgid "download or copy it again"
+msgstr "もう一度ダウンロードまたはコピーしてください"
+
+#: src/update.c
+#, fuzzy
+msgid "Image too large for this player"
+msgstr "このプレーヤーには大きすぎるイメージ"
+
+#: src/update.c
+#, fuzzy
+msgid "8 GB ECHO MINI images only"
+msgstr "8 GB版ECHO MINIのイメージのみ"
+
+#: src/update.c
+#, fuzzy
+msgid "Unknown image layout"
+msgstr "不明なイメージ構成"
+
+#: src/update.c
+#, fuzzy
+msgid "not an image for this player"
+msgstr "このプレーヤー用のイメージではありません"
+
+#: src/update.c
+#, fuzzy
+msgid "Damaged image"
+msgstr "破損したイメージ"
+
+#: src/update.c
+#, fuzzy
+msgid "download it again"
+msgstr "もう一度ダウンロードしてください"
+
+#: src/update.c
+#, fuzzy
+msgid "Flash write failed"
+msgstr "フラッシュ書き込みに失敗しました"
+
+#: src/update.c
+msgid "restart, then install again"
+msgstr "再起動してから再インストールしてください"
+
+#: src/update.c
+#, fuzzy
+msgid "Install failed"
+msgstr "インストールに失敗しました"
+
+#: src/update.c
+#, fuzzy
+msgid "restart, then try again"
+msgstr "再起動してからもう一度お試しください"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "configured"
+msgstr "設定済み"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "high speed"
+msgstr "ハイスピード"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "full speed"
+msgstr "フルスピード"
+
+#: src/usbmode.c
+msgid "USB disk (read/write)"
+msgstr "USBディスク（読み書き）"
+
+#: src/usbmode.c
+msgid "USB disk (read only)"
+msgstr "USBディスク（読み取り専用）"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "No FAT32 volume on the internal memory"
+msgstr "内蔵ストレージにFAT32ボリュームがありません"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "nothing to share over USB"
+msgstr "USBで共有するものがありません"
+
+#: src/usbmode.c
+msgid "BACK: exit (eject on the computer first)"
+msgstr "PCで取り出してからBACKで終了"
+
+#: src/usbmode.c
+msgid "eject on the computer before unplugging"
+msgstr "ケーブルを抜く前にPCで取り出してください"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "Cannot share the internal memory"
+msgstr "内蔵ストレージを共有できません"
+
+#: src/usbmode.c
+#, fuzzy
+msgid "its volume overlaps the firmware area"
+msgstr "ボリュームがファームウェア領域と重なっています"
