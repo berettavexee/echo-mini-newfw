@@ -4,8 +4,8 @@
 #include "ui_priv.h"
 #include "lang.h"
 
-static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "" };
-struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "" };
+static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "", 0 };
+struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "", 0 };
 uint32_t sleep_at;
 
 static const uint16_t screen_s[] = { 10, 30, 60, 120, 300, 0 };     /* 0: never */
@@ -44,6 +44,9 @@ struct set_block {
 #define SET_V1_WORDS 5
 #define SET_V2_WORDS 6
 _Static_assert(sizeof(struct set_block) <= 40 * 4, "settings reach the resume's track (resume.c)");
+/* hide_clock (§120) took the padding byte after lang: the sum stays in word 8, so that a block
+ * of 0.101 reads as it is (the clock shown) and 0.101 reads ours */
+_Static_assert(__builtin_offsetof(struct set_block, sum) == 32, "version 3's sum in word 8");
 
 static uint32_t set_sum(const uint32_t *w, unsigned n)
 {
@@ -89,10 +92,12 @@ void settings_get(const uint32_t *w)
         if (cfg.rg_pre < -6 || cfg.rg_pre > 6)
             cfg.rg_pre = 0;
         cfg.uac_remote = cfg.uac_remote != 0;
+        cfg.hide_clock = cfg.hide_clock != 0;
         log_printf("ui: settings %u: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
-                   "off %u, swap %u, remote %u, language %s", v3 ? 3 : v2 ? 2 : 1, cfg.screen,
+                   "off %u, swap %u, remote %u, language %s, clock %s", v3 ? 3 : v2 ? 2 : 1, cfg.screen,
                    bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags", cfg.rg_pre, cfg.start,
-                   cfg.auto_off, cfg.swap_vol, cfg.uac_remote, cfg.lang[0] ? cfg.lang : "en");
+                   cfg.auto_off, cfg.swap_vol, cfg.uac_remote, cfg.lang[0] ? cfg.lang : "en",
+                   cfg.hide_clock ? "hidden" : "shown");
     }                                           /* (RG mode: resume.c) */
     lang_set_code(cfg.lang);                    /* unknown to this image: English */
     lcd_brightness(bright_pct[cfg.bright - 1]); /* (ReplayGain: when a track is heard) */
@@ -100,11 +105,13 @@ void settings_get(const uint32_t *w)
 
 /* ---- the screen: VOL+/VOL- the line, PLAY the next value, PLAY held the one before,
  * BACK or MENU back (saved). Each change takes effect at once. ---- */
-enum { S_LANG, S_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START, S_SLEEP, S_AUTO_OFF, S_SWAP,
+enum { S_LANG, S_CLOCK, S_SHOW_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START, S_SLEEP, S_AUTO_OFF, S_SWAP,
        S_DEFAULTS, S_COUNT };
 static const char *const s_names[S_COUNT] = {
     EN("Language"),                             /* in English: found again in any language */
-    N_("Date and time"), N_("Screen off after"), N_("Brightness"), N_("Track title"),
+    N_("Date and time"),
+    /* TRANSLATORS: the time shown at the top of the play screen and the browser */
+    N_("Clock"), N_("Screen off after"), N_("Brightness"), N_("Track title"),
     N_("ReplayGain"), N_("ReplayGain preamp"), N_("At power on"), N_("Sleep timer"),
     N_("Power off when idle"), N_("Swap VOL+ and VOL-"), N_("Restore the defaults (PLAY)"),
 };
@@ -152,6 +159,10 @@ static void value_text(int i, char *b)
             p = log_format(p, end, "%s", ok < 0 ? T("no clock") : T("not set"));
         break;
     }
+    case S_SHOW_CLOCK:
+        /* TRANSLATORS: the value of the line "Clock": the time shown or not */
+        p = log_format(p, end, "%s", cfg.hide_clock ? T("hidden") : T("shown"));
+        break;
     case S_SCREEN:
         if (!screen_s[cfg.screen])
             p = log_format(p, end, "%s", T("never"));
@@ -218,6 +229,11 @@ static void change(int i, int d)
         log_printf("ui: language %s", l ? lang_code(l) : "en");
         break;
     }
+    case S_SHOW_CLOCK:
+        cfg.hide_clock ^= 1;
+        clock_min = -1;                         /* drawn again (or cleared) at once */
+        log_printf("ui: clock %s", cfg.hide_clock ? "hidden" : "shown");
+        break;
     case S_SCREEN:
         cfg.screen = (uint8_t)step(cfg.screen, N(screen_s), d);
         break;
@@ -270,6 +286,7 @@ static void change(int i, int d)
         sleep_cancel();
         lcd_brightness(bright_pct[cfg.bright - 1]);
         rg_apply();
+        clock_min = -1;                         /* the clock shown again */
         log_printf("ui: settings: the defaults");
         break;
     }

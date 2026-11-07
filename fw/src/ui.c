@@ -411,8 +411,19 @@ void ui_main(void)
             lvl_key = play_level;
         struct key_ev e;
         int ev = key_poll(&e), k = e.key;
+        /* the last headphones out while playing: a pause, as PLAY (§119); no play again when
+         * they come back (PLAY does it), the screen left as it is; the USB cable: nothing */
+        if (ev == EV_UNPLUG && (k == SRC_JACK35 || k == SRC_JACK44) && !fading &&
+            !plug_present(SRC_JACK35) && !plug_present(SRC_JACK44) && q_playing &&
+            !audio_paused) {
+            audio_pause(1);
+            resume_save_later();
+            log_printf("ui: headphones out: paused");
+            if (scr == SCR_PLAYING && !sys_screen_is_off())
+                full = 1;
+        }
         if (ev == EV_PLUG || ev == EV_UNPLUG || fading)
-            ev = EV_NONE;                       /* logged (keys.c); no action yet; the fade */
+            ev = EV_NONE;                       /* logged (keys.c); the fade: no key either */
         int wr = browser_walk_poll();           /* a tree walk ended: its queue plays */
         if (wr) {
             full = b_dirty = 1;

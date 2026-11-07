@@ -22,6 +22,7 @@ int key_poll(struct key_ev *e); /* the next event (e->type, also returned), EV_N
 int key_held(void);             /* a key is down, as key_poll() sees it */
 uint32_t key_held_us(void);     /* since the key held (or the last change) */
 int key_is_vol(int k);          /* VOL+ or VOL- */
+int plug_present(int src);      /* SRC_*: plugged in, as the last event said */
 const char *key_name(int k);
 
 /* Simple screens (system, installer): the key newly down, once, else KEY_NONE */

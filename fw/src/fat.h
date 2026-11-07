@@ -42,7 +42,8 @@ void fat_open(struct fat_file *f);
 int fat_read(struct fat_file *f, void *buf, uint32_t n);
 
 enum { FAT_DIRTY_BS = 1, FAT_DIRTY_FAT = 2, FAT_DIRTY_ERR = 4 };
-int fat_dirty(void);            /* mask of the marks above, <0 on a read error */
+int fat_dirty(void);
+void fat_forget(void);          /* the FAT sectors cached: dropped (after a write, fatwrite.c) */            /* mask of the marks above, <0 on a read error */
 int fat_find_root(const char *name, struct fat_file *f);    /* 8.3 name in the root, 0 = found */
 
 /* Reads n bytes at any position (pos + n within the file); a cursor caches the last cluster

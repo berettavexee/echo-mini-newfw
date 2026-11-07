@@ -140,6 +140,11 @@ int fat_mount_sd(void)
     return -1;
 }
 
+void fat_forget(void)
+{
+    fat_cached[FAT_VOL_INT] = fat_cached[FAT_VOL_SD] = 0xffffffff;
+}
+
 /* The cluster after c; anything that is not a cluster (end of chain, bad) is above the range */
 static uint32_t next_cluster(const struct fat_vol *v, uint32_t c)
 {

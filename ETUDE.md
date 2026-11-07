@@ -4378,3 +4378,96 @@ Le cœur B est **3,7 fois moins chargé** sur l'ALAC 16 bits que dans la 0.99r15
 ## 117. Version 0.101 (2026-11-07)
 
 Publiée à la demande de l'utilisateur : `rework` fusionnée dans `main`. Contenu depuis la 0.100 : les langues de l'interface (§112), les bancs des accélérateurs et leurs modèles d'émulateur (§113-§114), la reprise après une pause corrigée (§115, vérifiée sur l'appareil), l'ALAC sur HIFIACC (§116, vérifié sur l'appareil), la page d'autonomie `docs/BATTERY.md`. Le code est celui des images de test 0.100a1 (ALAC) et 0.100f2 (pause) essayées sur l'appareil ; seuls le numéro de version et la date changent. README, MANUAL et ROADMAP mis à jour.
+
+## 118. Les tests de l'émulateur en parallèle (2026-11-07)
+
+`emutest.py` lançait ses tests l'un après l'autre : un seul cœur occupé, 649 s pour les 22 tests par défaut. Option `-j N` (par défaut le nombre de cœurs, au plus 8) : les tests tournent N à la fois (chacun son dossier temporaire, son disque et son processus d'émulateur ; un fil par test, le travail étant dans les processus), les résultats affichés dans l'ordre de la liste. Les jeux de fichiers de test (`mktestset.py`) sont faits une fois au départ, un par durée de fichier avec les groupes de tous les tests de cette durée, au lieu d'une fois par test (`EMUTEST_SET` reste prioritaire). La bibliothèque C des modèles se compilait déjà de façon atomique (fichier temporaire par processus, puis renommage). Mesure sur la machine de développement (12 cœurs) : **207 s au lieu de 649 s**, les 22 tests réussis ; `-j 1` retrouve l'ancien déroulement. La CI (4 cœurs) en profite sans changement de son workflow.
+
+## 119. Pause au débranchement du casque (0.101u1, 2026-11-07)
+
+Idée de la PR #1 (CHEYAN), sur la feuille de route ; reprise de zéro, comportement validé par l'utilisateur. `keys.c` produisait déjà `EV_UNPLUG` pour les prises 3,5 mm (GPIO0_13) et 4,4 mm (GPIO2_8), après 100 ms stables ; la boucle principale les ignorait. Fiabilité vérifiée dans tous les journaux de l'appareil : 17 changements d'état distincts, tous espacés d'au moins une seconde (de vrais gestes), aucun pendant une lecture sans geste.
+
+**Comportement** : quand la **dernière** prise casque sort pendant la lecture (`q_playing` et pas en pause), la pause comme PLAY (`audio_pause(1)`, l'état de reprise écrit après la trame), journal `ui: headphones out: paused` ; un casque resté sur l'autre sortie : rien. Au rebranchement : rien (PLAY relance : pas de musique soudaine dans un casque remis ou dans une poche). L'écran n'est pas rallumé (l'événement n'est pas une touche). Sans effet en pause, à l'arrêt, pendant le fondu de la minuterie, et dans les écrans à boucle propre (carte son USB : l'hôte pilote ; mode disque ; installeur). Pas de réglage. `plug_present(src)` (`keys.c`) donne l'état des prises.
+
+**Test** `unplug-pause` (suite par défaut) : les deux sorties branchées au démarrage ; la 3,5 mm sort (pas de pause), puis la 4,4 mm (pause) ; rebranchée (pas de lecture avant PLAY) ; PLAY, PLAY (pause à la main), ressortie : rien de plus. `emutest.py` accepte maintenant un `check` pour tous les tests, plus seulement ceux des jeux de fichiers.
+
+**Sur l'appareil** (`work/hwlog/2026-11-07_0.101u1/`) : trois débranchements de la prise 3,5 mm pendant la lecture, chacun suivi de `audio: paused` 3 ms plus tard ; rebranchée, rien ; PLAY relance. Conforme pour l'utilisateur. La prise 4,4 mm n'est pas essayée (pas de câble) : seul l'émulateur la couvre.
+
+## 120. L'horloge affichée ou masquée (0.101c1, 2026-11-07)
+
+Idée de la PR #5 (CHEYAN), reprise de zéro sur proposition validée. Une ligne **Clock** des réglages, sous « Date and time » : **shown** (par défaut, comme avant) ou **hidden** ; PLAY bascule, effet immédiat (`clock_min = -1` : l'heure redessinée ou effacée), « Restore the defaults » la remet. Masquée, l'emplacement de l'heure reste vide sur l'écran de lecture et le navigateur (`draw_clock()` y dessine une chaîne vide) ; la largeur du titre ne change pas ; l'horloge tourne toujours.
+
+**Stockage sans migration** : le champ `hide_clock` (0 = affichée) prend l'octet de remplissage qui suivait `lang[8]` dans `struct settings` ; la somme du bloc reste au mot 8 (vérifié à la compilation), et cet octet, couvert par la somme, valait toujours 0 (le bloc est mis à zéro avant d'être rempli). Un bloc écrit par la 0.101 se lit donc tel quel (horloge affichée), et la 0.101 lit le nôtre (elle ignore l'octet) : format toujours « NEWFWSET 3 ». Journal : `ui: clock hidden|shown` au changement, `clock …` dans la ligne `ui: settings` au démarrage.
+
+**Traductions** : « Clock », « shown », « hidden » ajoutées au modèle (156 chaînes), traduites en français (« Horloge », « affichée », « masquée ») ; en japonais et en chinois, vides (affichées en anglais). Ajoutées à la main aux fichiers PO : `msgmerge` dupliquait des commentaires et réordonnait les drapeaux.
+
+**Tests** : `clock-hide` (les réglages ouverts au menu, la ligne basculée, retour ; au redémarrage la ligne `ui: settings` dit `clock hidden`) ; `lang` attend maintenant un nombre quelconque de chaînes. L'émulateur n'a pas d'horloge réglée : le dessin se vérifie sur l'appareil.
+
+**Sur l'appareil** (`work/hwlog/2026-11-07_0.101c1/`) : le bloc de réglages écrit par l'image précédente (0.101u1, sans le champ) relu `clock shown` au premier démarrage, ce qui confirme la compatibilité ; masquée et réaffichée plusieurs fois, en anglais, français, japonais et chinois ; masquée avant l'arrêt, relue `clock hidden` au démarrage suivant. Conforme pour l'utilisateur.
+
+## 121. Bibliothèque par métadonnées : le plan (2026-11-07)
+
+**Constat** : le navigateur est un navigateur de fichiers ; l'utilisateur préfère une navigation par métadonnées **séparée**. Les autres firmwares font tous ainsi : le firmware d'origine (« Media Library » : All Songs, Artists, Albums, Genres, d'après un index en zone cachée de la NAND bâti par « Media Library Refresh », REPORT §22 ; la navigation par dossiers lit la FAT en direct), EchoPod et Podium (`/.echo/library.db` réservé d'un seul tenant, reconstruit à la demande ou après une session USB qui a écrit ; idées seulement, GPL), Rockbox (navigateur de fichiers et « Database » séparés). Point commun : un index construit d'avance, jamais de lecture de tags à la navigation.
+
+**Décisions de l'utilisateur** : (1) un seul index, sur la mémoire interne (eMMC), les morceaux de la carte repérés par son numéro de série ; (2) le fichier créé **par le firmware** (sa première création de fichier : un fichier d'un seul tenant en FAT32, sur la mémoire interne seulement ; jusqu'ici il ne réécrivait que `NEWFWLOG.TXT`, créé sur le PC) ; (3) la mise à jour proposée automatiquement après une session USB en lecture/écriture, et à la demande.
+
+**Étapes** : 1. genre, artiste de l'album, année, disque dans les lecteurs de tags ; 2. format de l'index (`docs/LIBRARY.md` : enregistrements, table de chaînes sans doublons, tables triées par vue, deux moitiés A/B contre les coupures), outil PC `mklib.py`, tests sur le PC ; puis la création du fichier par le firmware (testée avec coupures de courant dans l'émulateur) ; 3. construction sur l'appareil dans la tâche de stockage (tri par morceaux via le fichier, mise à jour incrémentale par cluster et taille) ; 4. les vues (Library → Artists → albums → morceaux, Albums, Genres, All songs ; regroupement par artiste de l'album) ; 5. lecture et reprise depuis une vue (`queue.c` indépendant de la source) ; 6. la carte. Les favoris viendraient ensuite. Une étape à la fois, chacune proposée en détail avant le code.
+
+## 122. Bibliothèque, étape 1 : artiste de l'album, genre, année, disque (0.101t1, 2026-11-07)
+
+**Lecteurs de tags** (`tags.c`) : `struct tags` gagne `albumartist[96]`, `genre[48]`, `year`, `disc` (0 quand absents ; environ 150 octets de plus par structure : `tg`, `tg_next`, et une copie sur la pile de la tâche de stockage ; il reste 3 140 octets de BSS avant l'anneau du DAC).
+
+| Format | Artiste de l'album | Genre | Année | Disque |
+|---|---|---|---|---|
+| Commentaires Vorbis (FLAC, Vorbis, Opus) | ALBUMARTIST, « ALBUM ARTIST » | GENRE | DATE, YEAR | DISCNUMBER |
+| ID3v2.3/2.4 | TPE2 | TCON | TDRC, TYER | TPOS |
+| ID3v2.2 | TP2 | TCO | TYE | TPA |
+| ID3v1 (repli) | — | octet de genre | champ année | — |
+| MP4 | aART | ©gen, gnre | ©day | disk |
+| APEv2 | Album Artist | Genre | Year | Disc |
+| RIFF INFO | — | IGNR | ICRD | — |
+
+Un genre « (17) », « 17 » (ID3v2) ou un numéro (ID3v1, `gnre` de MP4 : numéro + 1) se lit comme son nom dans la table standard des 80 genres d'ID3v1 (« Psychedelic » corrigé : la table d'origine l'écrit « Psychadelic ») ; au-delà de 79, le texte reste tel quel. Année : les quatre premiers chiffres (« 2012-05-28 » donne 2012), entre 1000 et 9999 ; disque : « 1/2 » donne 1. Rien de nouveau ne s'affiche ; le journal ajoute `ui: tags+: '<artiste de l'album>' / '<genre>' / <année> / <disque>` quand l'un des champs est présent.
+
+**Tests** : `mktestset.py` écrit ces champs dans chaque format (les jeux `ascii`, `unicode` et `rg`, le jeu Latin-1 avec genre et année, un cas ID3v2.3 « (32) » lu « Classical », l'octet de genre ID3v1) ; les tests de jeux comparent la ligne `ui: tags+:` au manifeste (contre-épreuve : un numéro de genre faux est signalé). Banc de fuzzing `tags` : 3 minutes, 23 108 exécutions avec des graines portant les nouveaux champs, aucun plantage ni blocage.
+
+**Sur l'appareil** (`work/hwlog/2026-11-07_0.101t1/`) : une quinzaine de pistes de la bibliothèque de l'utilisateur (Vorbis, FLAC, MP3, Opus, WAV ; mémoire interne et carte). Les trois fichiers de la mémoire interne relus sur le PC avec mutagen donnent les mêmes valeurs : Vorbis `'Beast In Black' / 'Metal' / 2021 / 1` (DATE « 2021-10-29 ») ; FLAC `'FiiO' / 'FiiO' / 2017 / 0` (la clé « ALBUM ARTIST », avec une espace) ; MP3 `'Daft Punk' / '' / 2001 / 1` (TPOS « 1/1 », pas de genre). Sur la carte (non lisible en USB), des valeurs cohérentes : une compilation Opus en `'Various Artists'`, des genres ID3 texte (Rock, Stoner Rock, Soundtrack…). Le WAV sans tags : pas de ligne `tags+`. Lecture des tags inchangée en durée (40 µs pour une piste lue d'avance).
+
+## 123. Bibliothèque, étape 2 : le format de l'index, l'outil PC, le lecteur (2026-11-07)
+
+**Choix de l'utilisateur** : « The » en tête des noms d'artiste ignoré dans le tri ; un fichier de 8 Mio ; ni ReplayGain ni empreinte de pochette dans l'index (le ReplayGain sort gratuitement de la lecture des tags faite au lancement d'un morceau ; une empreinte demanderait de lire chaque pochette entière) ; le format extensible : un lecteur ignore les sections qu'il ne connaît pas.
+
+**Format** (`docs/LIBRARY.md`) : `NEWFWLIB.DAT`, un en-tête de 512 octets (moitié en service, génération, longueur et CRC-32 de chaque moitié, CRC de l'en-tête) et deux moitiés de 4 Mio (environ 35 000 morceaux) ; on écrit la moitié libre, puis l'en-tête : une coupure laisse l'index d'avant. Une moitié : une table des sections, puis `VOLS`, `STRS` (chaînes sans doublons), `TRKS` (36 octets par morceau, rangés par album, disque, piste : un album est une plage), `ARTS`, `ALBS`, `GENS`, `GALB` (albums de chaque genre), `SONG` (morceaux par titre). Un morceau porte ce qu'il faut pour l'ouvrir (`struct fat_file` : volume, drapeau contigu, premier cluster, taille) et pour savoir s'il a changé (date, taille). **Déterministe** : les mêmes fichiers donnent les mêmes octets, quel que soit le constructeur (référence de l'étape 3).
+
+**Tri** : clé des caractères repliés (A-Z, les latins U+00C0-U+017F vers leur lettre de base par une table de deux caractères, ß en ss ; grec et cyrillique en minuscules sans accents ; le reste, CJK compris, par point de code), puis les octets ; la chaîne vide en dernier ; « The » sauté pour les artistes. Regroupement : l'artiste d'un album est l'artiste de l'album, sinon celui du morceau ; un album est (artiste, nom) exacts.
+
+**Outils** : `fw/tools/fatimg.py` (lecteur FAT32 et exFAT d'images, avec les règles de `fat.c` : noms longs coupés à 127 octets, cachés, système et noms en point ignorés, exFAT de 4 Gio et plus ignoré), `fw/tools/mklib.py` (l'index d'une image, tags lus par mutagen avec les règles de `tags.c` ; ou d'une liste JSON, avec les réponses attendues). **Lecteur** `fw/src/library.c` (pas encore relié au firmware) : ouverture avec vérification des CRC et des sections, comptes, entrées, chaînes coupées sur un caractère entier, `lib_cmp()` pour le tri, cache de quatre secteurs ; toute référence hors de sa section est une erreur. Environ 3 Ko de code ; ses 2 Ko de cache iront en `.screenram` quand il sera relié.
+
+**Tests** : `library_test` dans `make check` : l'index de `tools/library_fixture.json` (20 morceaux : accents, « The », grec, cyrillique, japonais, tags absents, compilation par artiste de l'album, disques, même album sur deux volumes, titre trop long) lu par `library.c` et comparé ligne à ligne aux réponses de `mklib.py` ; le tri de `lib_cmp()` contre celui de Python ; un en-tête et une moitié abîmés refusés ; les coupes de chaînes. Essais à la main : une image d'émulateur FAT32 de 77 fichiers du jeu de test et une carte exFAT de 12 fichiers (contigus et fragmentés, un caché et un en point ignorés) : index construit, lecteur d'accord sur les 89 morceaux.
+
+**Corrigé en chemin** : la coupe UTF-8 retirait aussi un caractère entier en fin de chaîne (« Βαγγέλη ») ; la règle est maintenant celle de `tags.c` partout (Python et C) : on garde les caractères entiers qui tiennent.
+
+## 124. Bibliothèque : le firmware crée NEWFWLIB.DAT (0.101lc, 2026-11-07)
+
+Première création de fichier par le firmware, validée par l'utilisateur. `fw/src/fatwrite.c`, `fat_create_contig()` : un fichier d'un seul tenant à la racine du volume interne (FAT32 seulement ; jamais pendant une session USB, l'hôte y écrit). Rien n'est jamais supprimé ni déplacé. `lib_file()` (`library.c`) crée `NEWFWLIB.DAT` (512 octets + 8 Mio, 2 049 clusters de 4 Kio) quand il manque, son en-tête ne désignant aucune moitié ; un fichier de ce nom d'une autre taille, ou fragmenté, est laissé tel quel (à effacer depuis l'ordinateur).
+
+**Ordre des écritures** : recherche (lecture seule) d'une suite de clusters libres à partir de l'indication de FSInfo, et d'une entrée libre de la racine ; puis 1. le premier secteur du fichier (dans des clusters encore libres), 2. la chaîne dans la FAT, secteur par secteur, première copie puis seconde (17 + 17 secteurs ici ; les 4 bits hauts des entrées gardés), 3. l'entrée de répertoire, un secteur écrit d'un coup (8.3 sans nom long, archive, date de l'horloge, 2026-01-01 si elle n'est pas réglée), 4. FSInfo : le compte des libres « inconnu » (0xFFFFFFFF, les hôtes recomptent), le prochain libre après le fichier. Une racine sans entrée libre reçoit d'abord un cluster de plus (mis à zéro, puis chaîné), hors de la suite du fichier.
+
+**Garde-fous** : toute écriture passe par `w_write()`, qui n'accepte que les secteurs prévus par cette création (secteurs de FAT de ses entrées, secteur de répertoire, FSInfo, ses clusters) ; puis par `emmc_write_user()`, dont la barrière est ouverte sur le volume le temps de la création et refermée ensuite. Les secteurs de FAT gardés en cache sont oubliés (`fat_forget()`). Les tampons (2,5 Ko) et le cache du lecteur d'index (2 Ko) sont en `.screenram` : la BSS est inchangée (3 140 octets libres). L'image de production n'appelle pas encore la création (étape 3) : elle reste identique.
+
+**Tests dans l'émulateur** (image `ECHO_LIBCREATE`, `emutest.py lib-*`, hors de la liste par défaut ; nouvelle option `--cut-user-after N` : coupure de courant après N secteurs écrits dans le volume, ceux de `NEWFWLOG.TXT` exclus) :
+- `lib-create` : `fsck.fat -n` propre, le fichier à sa taille, d'un seul tenant, avec l'en-tête vide ; trouvé au démarrage suivant ;
+- `lib-nospace` : l'espace libre en trous de 7 Mio seulement : rien d'écrit (« not created (-3) »), volume propre ;
+- `lib-holes` : des trous de 7 Mio en tête, FSInfo ramené à 2 : la suite trouvée après eux ;
+- `lib-rootfull` : la racine pleine : un cluster de plus, puis le fichier (ce test a montré que la table des plages permises, de 6, était trop petite : la barrière a refusé l'écriture, le volume est resté cohérent ; portée à 12) ;
+- `lib-cut0` à `lib-cut36` : coupure après 0, 1, 2, 17, 18, 34, 35, 36 secteurs ; `fsck` admet seulement des clusters réservés sans fichier (et, coupure entre les deux copies de la FAT, des copies qui diffèrent : « Using first FAT ») ; au démarrage suivant, le fichier créé (ou trouvé : coupure après l'entrée de répertoire, seul FSInfo resté ancien). Reste de ces coupures : jusqu'à 8 Mio réservés que rien n'utilise, rendus par un `fsck` ou une vérification du disque sur l'ordinateur.
+
+Non-régression : les 24 tests par défaut, `make check`.
+
+**Sur l'appareil** (`work/hwlog/2026-11-07_0.101lc/`, mémoire interne seule) : `fatwrite: NEWFWLIB.DAT: 2049 clusters at 1146516, entry 4 of sector 89043`, créé en 27 ms (`library: … sectors 9484d0 + 16392`). Sur le PC : le fichier à la racine, 8 389 120 octets, lisible ; son premier secteur est l'en-tête vide attendu (version 1, aucune moitié, CRC juste). Le noyau Linux affiche au montage « Volume was not properly unmounted », comme à chacun des montages de la journée, avant la création : le volume était déjà marqué sale (« state dirty (1) » au démarrage, avant l'écriture). `fsck` ne peut pas tourner sur l'appareil sans droits d'administrateur : c'est l'émulateur qui le remplace, avec le même code. Un seul démarrage sur cette image : la relecture au démarrage suivant (« found ») n'est vérifiée que dans l'émulateur.
+
+**Suite de l'essai** : aux démarrages suivants (et au remontage du volume après une session USB), `library: NEWFWLIB.DAT found, sectors 9484d0 + 16392` : le même fichier, pas recréé, un seul sur le volume. `fsck.fat -n /dev/sde1` lancé par l'utilisateur : seul le bit « sale » (déjà là avant la création), « Leaving filesystem unchanged », 389 fichiers, 535 999 clusters sur 1 838 584 : ni cluster perdu, ni FAT divergente.
+
+## 125. Version 0.102 (2026-11-07)
+
+Publiée à la demande de l'utilisateur : `rework` fusionnée dans `main`. Contenu depuis la 0.101 : la pause au débranchement du casque (§119, vérifiée sur l'appareil avec une prise 3,5 mm ; la 4,4 mm attend un câble), l'horloge affichée ou masquée (§120), l'artiste de l'album, le genre, l'année et le disque lus (§122), le format de l'index de la bibliothèque, son outil PC et son lecteur (§123), la création de `NEWFWLIB.DAT` par le firmware (§124 : dans l'image de production, ce code n'est pas encore appelé), les tests de l'émulateur en parallèle (§118), le double appui sur BACK documenté. Le pourcentage de batterie stable (0.97, §82) est validé par l'utilisateur sur l'essai d'endurance de 14,6 h (§115). Le code est celui des images de test essayées sur l'appareil (0.101u1, c1, t1, lc) ; seuls le numéro de version et la date changent.

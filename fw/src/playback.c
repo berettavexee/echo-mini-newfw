@@ -240,6 +240,9 @@ static int q_open(int i, int chain)
     perf_end(pp);
     log_printf("ui: tags in %u us: '%s' / '%s' / '%s' / %u", ticks() - t0, tg_next.title,
                tg_next.artist, tg_next.album, tg_next.track);
+    if (tg_next.albumartist[0] || tg_next.genre[0] || tg_next.year || tg_next.disc)
+        log_printf("ui: tags+: '%s' / '%s' / %u / %u", tg_next.albumartist, tg_next.genre,
+                   tg_next.year, tg_next.disc);     /* (the library, §122) */
     if (same && !ahead)
         log_printf("ui: tags kept (the same track again)");
     if (ahead)

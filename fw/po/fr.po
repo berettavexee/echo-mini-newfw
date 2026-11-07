@@ -637,3 +637,18 @@ msgstr "Impossible de partager la mémoire interne"
 #: src/usbmode.c
 msgid "its volume overlaps the firmware area"
 msgstr "son volume chevauche la zone du firmware"
+
+#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#: src/settings.c
+msgid "Clock"
+msgstr "Horloge"
+
+#. TRANSLATORS: the value of the line "Clock": the time shown or not
+#: src/settings.c
+msgid "shown"
+msgstr "affichée"
+
+#. TRANSLATORS: the value of the line "Clock": the time shown or not
+#: src/settings.c
+msgid "hidden"
+msgstr "masquée"

@@ -705,3 +705,18 @@ msgstr "内蔵ストレージを共有できません"
 #, fuzzy
 msgid "its volume overlaps the firmware area"
 msgstr "ボリュームがファームウェア領域と重なっています"
+
+#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#: src/settings.c
+msgid "Clock"
+msgstr ""
+
+#. TRANSLATORS: the value of the line "Clock": the time shown or not
+#: src/settings.c
+msgid "shown"
+msgstr ""
+
+#. TRANSLATORS: the value of the line "Clock": the time shown or not
+#: src/settings.c
+msgid "hidden"
+msgstr ""

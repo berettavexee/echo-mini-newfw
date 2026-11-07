@@ -5,7 +5,7 @@
 #   - the log formats match their arguments (log.h, LOG_FORMAT_CHECK);
 #   - the strings shown are marked for translation, po/newfw.pot is up to date (tools/mkpot.py),
 #     the translations keep the printf conversions and fit in a catalogue (tools/mklang.py);
-#   - the host tests of log.c, msc.c, remote.c and perf.c pass;
+#   - the host tests of log.c, msc.c, remote.c, perf.c and library.c pass;
 #   - ruff (or pyflakes) and codespell find nothing (when installed);
 #   - the functions of ours the linker drops (dead code) are listed, not refused.
 # --full also builds the test variants (ECHO_HWTEST, ECHO_HWSYN, ECHO_NO_HWFFT, ECHO_FFTCMP,
@@ -74,6 +74,15 @@ for t in log msc remote perf; do
         bad "${t}_test (see fw/$C/${t}_test.log)"; tail -5 $C/${t}_test.log
     fi
 done
+# the library index (ETUDE §123): made by mklib.py from a fixture, read by library.c, compared
+if python3 tools/mklib.py --json tools/library_fixture.json -o $C/lib.dat \
+        --expect $C/lib_expect.txt > $C/library_test.log 2>&1 &&
+    cc -O1 -Wall -Werror -Isrc -o $C/library_test tools/library_test.c >> $C/library_test.log 2>&1 &&
+    $C/library_test $C/lib.dat $C/lib_expect.txt >> $C/library_test.log 2>&1; then
+    printf 'ok    library_test\n'
+else
+    bad "library_test (see fw/$C/library_test.log)"; tail -5 $C/library_test.log
+fi
 
 if [ "$1" = "--full" ]; then
     say "fuzzing harnesses"

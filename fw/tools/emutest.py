@@ -2,13 +2,17 @@
 """Emulator tests that need nothing but the build (for the CI): a disk with a synthetic boot area
 (mkdisk.py --synth-idb), generated test files, the emulator, the decoded log, then checks.
 
-  emutest.py IMG ELF [NAME ...]        (all the tests by default; exit code 1 when one fails)
+  emutest.py [-j N] IMG ELF [NAME ...]   (all the tests by default; exit code 1 when one fails)
+
+-j N: N tests at a time (default: the cores, at most 8; -j 1 one after the other); the results
+are printed in the order of the list. The test sets the tests need are made once, before.
 
 Each test: the files of the user volume, the keys, the simulated time, the patterns that must
 appear in the log and the emulator's output (in that order) and the ones that must not; an
 optional second boot on the disk the first run left, the image chosen as the stock loader does.
 Needs mtools, dosfstools and the unicorn module. The disks go to $TMPDIR and are deleted.
 """
+import concurrent.futures
 import json
 import math
 import os
@@ -129,6 +133,21 @@ TESTS = {
                          expect=[r"audio: paused", r"audio: resumed", r"audio: paused",
                                  r"audio: resumed", r"player: finished after 441000 frames, 94\d\d ms"],
                          forbid=[r"core B stuck", r"core B underruns [1-9]"]),
+    # both headphone outputs in, PLAY: the 3.5 mm out (the 4.4 mm still in: no pause), then the
+    # 4.4 mm out: a pause (ETUDE §119); in again: no play until PLAY; PLAY, PLAY (paused by
+    # hand), out again: nothing more
+    "unplug-pause": dict(files={"A.WAV": "wav10"}, ms=13000,
+                         emu_args=["--gpio-at", "0:0:13:1,0:2:8:0,4000:0:13:0,5000:2:8:1,"
+                                   "6000:2:8:0,8500:2:8:1"],
+                         keys=keys((2000, "PLAY"), (7000, "PLAY"), (8000, "PLAY")),
+                         expect=[r"keys: jack 3\.5 mm out", r"keys: jack 4\.4 mm out(?:\n[^\n]*){0,3}"
+                                 r"ui: headphones out: paused",
+                                 r"keys: jack 4\.4 mm in", r"keys: play", r"audio: resumed",
+                                 r"keys: play", r"audio: paused", r"keys: jack 4\.4 mm out"],
+                         check=lambda w: [] if w.count("headphones out: paused") == 1 and not
+                         re.search(r"jack 4\.4 mm in\n(?:(?![^\n]*keys: play)[^\n]*\n)*?"
+                                   r"[^\n]*audio: resumed", w)
+                         else ["a pause or a play not expected"]),
     # a track saved paused at position 0 (the state written by the test: the keys cannot pause
     # before anything is heard), then a power on: it comes back paused (PR #9: it was lost, its
     # position 0 read as "nothing to resume")
@@ -172,10 +191,19 @@ TESTS = {
     "lang": dict(files={"A.WAV": "wav"}, ms=8000,
                  keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "PLAY"),
                            (5200, "PLAY"), (5800, "BACK")),
-                 expect=[r"lang: 3 catalogue\(s\) in FW1", r"lang: fr \(Français\), 153 strings",
+                 expect=[r"lang: 3 catalogue\(s\) in FW1", r"lang: fr \(Français\), \d+ strings",
                          r"ui: language fr", r"ui: settings 3: .*language fr",
                          r"lang: fr \(Français\)"],
                  reboot=dict(ms=12000)),
+    # Settings, the line Clock (under Date and time) to hidden, back; after the reboot the
+    # setting read (ETUDE §120; the clock itself is not set in the emulator: nothing drawn)
+    "clock-hide": dict(files={"A.WAV": "wav"}, ms=8000,
+                       keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"),
+                                 (4600, "PLAY"), (5000, "VOL-"), (5300, "VOL-"), (5600, "PLAY"),
+                                 (6200, "BACK")),
+                       expect=[r"ui: clock hidden", r"ui: settings 3: .*clock hidden"],
+                       forbid=[r"ui: settings 3: .*clock shown"],
+                       reboot=dict(ms=8000)),
     "install-ok": dict(files={"NEWDATE.IMG": "@NEWDATE.IMG"}, fw2=True,
                        keys=keys(*_INST, (14000, "PLAY")), ms=60000,
                        emu_args=["--expect-fw", "@NEWDATE.IMG"],
@@ -260,6 +288,7 @@ TESTS["set-ci"] = dict(set="tags,formats,covers", pick=[
     "covers/flac-cover1m.flac", "covers/mp3-cover1m.mp3", "covers/opus-cover1m.opus",
     "covers/aac-coverjpg600.m4a", "tags/mpc-unicode.mpc", "covers/mpc-cover1m.mpc"])
 FIELD_MAX = dict(title=96, artist=128, album=128)    # struct tags (tags.h), with the 0
+MORE_MAX = dict(albumartist=96, genre=48)           # its library fields (§122)
 
 
 def shown(s, field):
@@ -267,7 +296,7 @@ def shown(s, field):
     out, n = "", 0
     for c in s or "":
         k = len(c.encode())
-        if n + k > FIELD_MAX[field] - 1:
+        if n + k > {**FIELD_MAX, **MORE_MAX}[field] - 1:
             break
         out, n = out + c, n + k
     return out.rstrip(" ")
@@ -287,7 +316,7 @@ def run_set(group, t, img, elf, tmp):
     held for each next one, open_ms() apart); each
     'ui: tags' line checked against the manifest, the format too (PCM, FLAC, ALAC: rate and
     bits; the others: the rate). EMUTEST_SET: a set already made, else one is made here."""
-    src = os.environ.get("EMUTEST_SET")
+    src = t.get("set_dir") or os.environ.get("EMUTEST_SET")
     if not src:
         src = os.path.join(tmp, "set")
         subprocess.run([sys.executable, MKSET, src, "--only", group, "--seconds",
@@ -326,11 +355,13 @@ def run_set(group, t, img, elf, tmp):
                          capture_output=True, text=True)
     text = read_log(dump) if os.path.exists(dump) else ""
     fails = [] if text else [f"no log (emulator: {out.stderr.strip()[-300:]!r})"]
-    seen, tags, fmt = set(), None, None
+    seen, tags, fmt, more = set(), None, None, None
     lines = text.splitlines()
     for at, line in enumerate(lines):
         if "ui: tags in " in line:
-            tags, fmt = line, None
+            tags, fmt, more = line, None, None
+        elif "ui: tags+: " in line:
+            more = line
         elif "player: format: " in line:
             fmt = line
         mq = re.search(r"ui: queue \d+/\d+: (\S+) \((-?\d+)\)", line)
@@ -358,6 +389,14 @@ def run_set(group, t, img, elf, tmp):
             cut = got.rstrip("\ufffd")             # a log line holds 255 bytes (log.c)
             if got != want and not (len((tags or "").encode()) >= 240 and want.startswith(cut)):
                 fails.append(what + f"tags {got!r}, expected {want!r}")
+            num = lambda v: int(re.match(r"\d*", v or "").group() or 0)  # noqa: E731
+            yr = num(tg.get("year"))
+            mw = "'{}' / '{}' / {} / {}".format(shown(tg.get("albumartist"), "albumartist"),
+                                              shown(tg.get("genre"), "genre"),
+                                              yr if 1000 <= yr <= 9999 else 0, num(tg.get("disc")))
+            mg = (more or "").split("ui: tags+: ", 1)[-1] if more else "'' / '' / 0 / 0"
+            if mg != mw:
+                fails.append(what + f"tags+ {mg!r}, expected {mw!r}")
         mf = re.search(r"format: (\d+) Hz, (\d+) ch, (\d+) bits", fmt or "")
         if not mf:
             fails.append(what + "no format line")
@@ -464,6 +503,8 @@ def run(name, t, img, elf, tmp):
     subprocess.run([sys.executable, MKDISK, disk, img, "--synth-idb", "--size-mb", "300"] +
                    (["--fw2"] if t.get("fw2") else []) + files, check=True,
                    stdout=subprocess.DEVNULL)
+    if "prep" in t:                             # the volume changed before the run (fragmented,
+        t["prep"](disk, tmp)                    # a full root...)
     sd = []
     if t.get("sd"):                             # a blank card: 64 MiB of zeros (sparse)
         sd = ["--sd", os.path.join(tmp, "sd.img")]
@@ -476,6 +517,7 @@ def run(name, t, img, elf, tmp):
                           t["keys"], "--ms", str(t["ms"]), "--steps", "30000000000",
                           "--dump-disk", dump] + sd + [at(a) for a in t.get("emu_args", [])],
                          capture_output=True, text=True).stdout
+    between = t["between"](dump, tmp) if "between" in t and os.path.exists(dump) else []
     if "reboot" in t and os.path.exists(dump):
         shutil.move(dump, disk)
         if t["reboot"].get("state"):
@@ -494,6 +536,11 @@ def run(name, t, img, elf, tmp):
             pos = m.end()
         else:
             fails.append(f"missing: {pat}")
+    fails += between
+    if "check" in t:
+        fails += t["check"](whole)
+    if "disk_check" in t:
+        fails += t["disk_check"](dump, tmp) if os.path.exists(dump) else ["no disk after the run"]
     for pat in ([] if t.get("fault") else ALWAYS_FORBID) + t.get("forbid", []) + \
             ([] if t.get("hwtest") else [LOW_ORDER]):
         m = re.search(pat, whole, re.M)
@@ -502,23 +549,209 @@ def run(name, t, img, elf, tmp):
     return fails, whole
 
 
+# ---- the library's file created by the firmware (ETUDE §124): ECHO_LIBCREATE images only ----
+LIB_SIZE = 512 + (8 << 20)
+
+
+def lib_header():
+    h = b"NEWFWLIB" + struct.pack("<II", 1, 0xffffffff)
+    h += bytes(508 - len(h))
+    import zlib
+    return h + struct.pack("<I", zlib.crc32(h))
+
+
+def part_offset(disk):
+    with open(disk, "rb") as f:
+        f.seek(VOL_SECTOR * 512 + 446 + 8)
+        return (VOL_SECTOR + struct.unpack("<I", f.read(4))[0]) * 512
+
+
+def mtools(disk, *cmd):
+    return subprocess.run([cmd[0], "-i", f"{disk}@@{part_offset(disk)}", *cmd[1:]],
+                          capture_output=True, text=True)
+
+
+def fsck(disk, tmp, lost_ok=False):
+    """fsck.fat -n on the volume: [] when clean (FSInfo's free count unknown or stale allowed:
+    the hosts count again); lost_ok: what a cut during the creation leaves, clusters reserved
+    that nothing uses (in the first FAT only when the cut came between the two copies)"""
+    off = part_offset(disk)
+    with open(disk, "rb") as f:
+        f.seek(off + 32)
+        total = struct.unpack("<I", f.read(4))[0]
+        f.seek(off)
+        part = os.path.join(tmp, "part.img")
+        with open(part, "wb") as o:
+            left = total * 512
+            while left:
+                b = f.read(min(left, 1 << 22))
+                o.write(b)
+                left -= len(b)
+    r = subprocess.run(["/usr/sbin/fsck.fat", "-n", part], capture_output=True, text=True)
+    os.remove(part)
+    bad = [ln for ln in r.stdout.splitlines()[1:] if ln.strip() and not re.match(
+        r"(Checking|Free cluster summary|\s*Auto-correcting|Starting check|Leaving filesystem|"
+        r".*: \d+ files,|  Leaving)", ln) and not (lost_ok and re.search(
+            r"[Rr]eclaim|unused clusters|orphan|[Ll]ost|FATs differ but appear to be intact|"
+            r"Using first FAT", ln))]
+    return [f"fsck: {ln.strip()}" for ln in bad][:5]
+
+
+def lib_file_check(disk, tmp, lost_ok=False):
+    """The volume clean, NEWFWLIB.DAT there: its size, one run of clusters, the empty header"""
+    from fatimg import Volume
+    fails = fsck(disk, tmp, lost_ok)
+    v = Volume(disk, VOL_SECTOR)
+    e = next((e for e in v.list() if e.name == "NEWFWLIB.DAT"), None)
+    if not e:
+        return fails + ["no NEWFWLIB.DAT"]
+    chain = list(v.chain(e.cluster))
+    if e.size != LIB_SIZE or chain != list(range(e.cluster, e.cluster + len(chain))) or \
+            len(chain) * v.spc * 512 < LIB_SIZE:
+        fails.append(f"NEWFWLIB.DAT: {e.size} bytes, {len(chain)} clusters, not one run")
+    elif v.sector(v.heap + (e.cluster - 2) * v.spc) != lib_header():
+        fails.append("NEWFWLIB.DAT: not the empty header")
+    return fails
+
+
+def no_lib_check(disk, tmp):
+    from fatimg import Volume
+    v = Volume(disk, VOL_SECTOR)
+    return fsck(disk, tmp) + (["NEWFWLIB.DAT created"] if any(
+        e.name == "NEWFWLIB.DAT" for e in v.list()) else [])
+
+
+def fill_holes(disk, tmp, holes_only_at_start=False):
+    """Files of 7 MiB with a file of 1 KiB after each, then the big ones deleted: free runs of
+    7 MiB (less than the library's 8 MiB); holes_only_at_start: ten of them, the rest of the
+    volume free, FSInfo's next free cluster put back to 2 (the search goes through the holes)"""
+    big, pin = os.path.join(tmp, "big.bin"), os.path.join(tmp, "pin.bin")
+    open(big, "wb").write(bytes(7 << 20))
+    open(pin, "wb").write(b"x" * 1024)
+    k = 0
+    while not holes_only_at_start or k < 10:
+        r1 = mtools(disk, "mcopy", big, f"::B{k:04d}.BIN")
+        r2 = mtools(disk, "mcopy", pin, f"::P{k:04d}.BIN")
+        if r1.returncode or r2.returncode:
+            mtools(disk, "mdel", f"::B{k:04d}.BIN")
+            break
+        k += 1
+    for i in range(k):
+        mtools(disk, "mdel", f"::B{i:04d}.BIN")
+    if holes_only_at_start:
+        off = part_offset(disk)
+        with open(disk, "r+b") as f:
+            f.seek(off + 48)
+            fsinfo = struct.unpack("<H", f.read(2))[0]
+            f.seek(off + fsinfo * 512 + 492)
+            f.write(struct.pack("<I", 2))
+
+
+def fill_root(disk, tmp):
+    """The root directory's clusters full: as many 8.3 files of one byte as it has free entries"""
+    from fatimg import Volume
+    v = Volume(disk, VOL_SECTOR)
+    free = 0
+    for c in v.chain(v.root):
+        for s in range(v.spc):
+            b = v.sector(v.heap + (c - 2) * v.spc + s)
+            free += sum(1 for i in range(16) if b[32 * i] in (0, 0xe5))
+    one = os.path.join(tmp, "one.bin")
+    open(one, "wb").write(b"1")
+    for i in range(free):
+        mtools(disk, "mcopy", one, f"::R{i:05d}.BIN")
+
+
+def lib_cut(n):
+    """A cut after n sectors of the creation (1: its first sector, 35 more: the two FATs, then
+    the directory entry, FSInfo): the file at the next boot, created then, or found (the entry
+    was written)"""
+    return dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                emu_args=["--cut-user-after", str(n)],
+                between=lambda d, tmp: fsck(d, tmp, lost_ok=True),
+                reboot=dict(ms=3000),
+                expect=[r"library: NEWFWLIB.DAT " + ("created" if n < 36 else "found")],
+                check=lambda w: [] if "POWER CUT after" in w else ["no power cut"],
+                disk_check=lambda d, tmp: lib_file_check(d, tmp, lost_ok=True))
+
+
+TESTS.update({
+    # a fresh volume: created (clean, its size, one run, the empty header); the next boot finds it
+    "lib-create": dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                       reboot=dict(ms=3000),
+                       expect=[r"fatwrite: NEWFWLIB\.DAT: 2049 clusters",
+                               r"library: NEWFWLIB\.DAT created, sectors",
+                               r"library: NEWFWLIB\.DAT found"],
+                       disk_check=lib_file_check),
+    # free space only in runs of 7 MiB: nothing written, the volume clean
+    "lib-nospace": dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                        prep=fill_holes, expect=[r"library: NEWFWLIB\.DAT not created \(-3\)"],
+                        disk_check=no_lib_check),
+    # holes at the start, the search from cluster 2: the run after them
+    "lib-holes": dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                      prep=lambda d, tmp: fill_holes(d, tmp, True),
+                      expect=[r"library: NEWFWLIB\.DAT created"], disk_check=lib_file_check),
+    # no free entry in the root: one more cluster for it, then the file
+    "lib-rootfull": dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                         prep=fill_root, expect=[r"\(the root grows\)",
+                                                 r"library: NEWFWLIB\.DAT created"],
+                         disk_check=lib_file_check),
+    # a power cut after 0 to 36 sectors written (among them: within the FATs, between the two
+    # copies, after the directory entry): a consistent volume, then the file at the next boot
+    **{f"lib-cut{n}": lib_cut(n) for n in (0, 1, 2, 17, 18, 34, 35, 36)},
+})
+
+
+def make_sets(names, tmp):
+    """The test sets of the tests named, made once (one per length of file, the groups of all
+    the tests of that length together), unless EMUTEST_SET gives one: {name: set folder}"""
+    if os.environ.get("EMUTEST_SET"):
+        return {}
+    by_len = {}
+    for n in names:
+        if "set" in TESTS[n]:
+            by_len.setdefault(TESTS[n].get("seconds", SET_SECONDS), set()).update(
+                TESTS[n]["set"].split(","))
+    dirs = {}
+    for sec, groups in by_len.items():
+        d = os.path.join(tmp, f"set{sec}")
+        subprocess.run([sys.executable, MKSET, d, "--only", ",".join(sorted(groups)),
+                        "--seconds", str(sec)], check=True, stdout=subprocess.DEVNULL)
+        dirs[sec] = d
+    return {n: dirs[TESTS[n].get("seconds", SET_SECONDS)] for n in names if "set" in TESTS[n]}
+
+
+def run_named(name, img, elf, set_dir):
+    t = dict(TESTS[name], set_dir=set_dir) if set_dir else TESTS[name]
+    with tempfile.TemporaryDirectory(prefix=f"emutest_{name}_") as tmp:
+        return run(name, t, img, elf, tmp)
+
+
 def main():
-    if len(sys.argv) < 3:
+    args = sys.argv[1:]
+    jobs = min(8, os.cpu_count() or 1)
+    if args[:1] == ["-j"] and len(args) > 1:
+        jobs, args = max(1, int(args[1])), args[2:]
+    if len(args) < 2:
         sys.exit(__doc__)
-    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or [
-        n for n in TESTS if not TESTS[n].get("fault") and not TESTS[n].get("hwtest")]
+    img, elf = os.path.abspath(args[0]), os.path.abspath(args[1])
+    names = args[2:] or [n for n in TESTS if not TESTS[n].get("fault") and
+                         not TESTS[n].get("hwtest") and not TESTS[n].get("libcreate")]
     failed = 0
-    for name in names:
-        with tempfile.TemporaryDirectory(prefix=f"emutest_{name}_") as tmp:
-            fails, whole = run(name, TESTS[name], os.path.abspath(img), os.path.abspath(elf), tmp)
-        print(f"{name}: {'FAIL' if fails else 'PASS'}")
-        for f in fails:
-            print("  " + f[:300])
-        if os.environ.get("EMUTEST_DUMP"):
-            open(os.environ["EMUTEST_DUMP"], "w").write(whole)
-        if fails and os.environ.get("EMUTEST_VERBOSE"):
-            print(whole[-4000:])
-        failed += bool(fails)
+    with tempfile.TemporaryDirectory(prefix="emutest_sets_") as sets_tmp, \
+            concurrent.futures.ThreadPoolExecutor(jobs) as pool:
+        sets = make_sets(names, sets_tmp)       # (each test runs its emulator as a process)
+        futures = [pool.submit(run_named, n, img, elf, sets.get(n)) for n in names]
+        for name, fut in zip(names, futures):
+            fails, whole = fut.result()
+            print(f"{name}: {'FAIL' if fails else 'PASS'}", flush=True)
+            for f in fails:
+                print("  " + f[:300])
+            if os.environ.get("EMUTEST_DUMP"):
+                open(os.environ["EMUTEST_DUMP"], "w").write(whole)
+            if fails and os.environ.get("EMUTEST_VERBOSE"):
+                print(whole[-4000:])
+            failed += bool(fails)
     sys.exit(1 if failed else 0)
 
 

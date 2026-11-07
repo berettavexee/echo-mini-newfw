@@ -372,14 +372,22 @@ msgstr ""
 msgid "none"
 msgstr ""
 
+#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#: src/settings.c
+msgid "Clock"
+msgstr ""
+
+#. TRANSLATORS: the time shown at the top of the play screen and the browser
 #: src/settings.c
 msgid "Screen off after"
 msgstr ""
 
+#. TRANSLATORS: the time shown at the top of the play screen and the browser
 #: src/settings.c
 msgid "Brightness"
 msgstr ""
 
+#. TRANSLATORS: the time shown at the top of the play screen and the browser
 #: src/settings.c
 msgid "Track title"
 msgstr ""
@@ -430,6 +438,16 @@ msgstr ""
 
 #: src/settings.c
 msgid "not set"
+msgstr ""
+
+#. TRANSLATORS: the value of the line "Clock": the time shown or not
+#: src/settings.c
+msgid "hidden"
+msgstr ""
+
+#. TRANSLATORS: the value of the line "Clock": the time shown or not
+#: src/settings.c
+msgid "shown"
 msgstr ""
 
 #: src/settings.c

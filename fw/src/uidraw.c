@@ -47,8 +47,9 @@ void text_right(int x0, int x1, int y, const char *s, uint16_t fg, uint16_t bg)
     lcd_text_clip(x, y, s, x1, fg, bg);
 }
 
-/* "HH:MM" right-aligned at x1 in [x0, x1) of the first line, once the clock has been set;
- * redrawn when the minute changes or when forced */
+/* "HH:MM" right-aligned at x1 in [x0, x1) of the first line, once the clock has been set and
+ * unless hidden (Settings, §120: the place left blank); redrawn when the minute changes or when
+ * forced */
 int clock_min = -1;
 
 void draw_clock(int x0, int x1, int force)
@@ -60,7 +61,7 @@ void draw_clock(int x0, int x1, int force)
     clock_min = m;
     char b[8] = { (char)('0' + t.hour / 10), (char)('0' + t.hour % 10), ':',
                   (char)('0' + t.min / 10), (char)('0' + t.min % 10), 0 };
-    if (!ok)
+    if (!ok || cfg.hide_clock)
         b[0] = 0;
     text_right(x0, x1, 0, b, DIM, BG);
 }

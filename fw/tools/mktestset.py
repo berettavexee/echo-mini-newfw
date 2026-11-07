@@ -45,14 +45,16 @@ SRC = os.path.join(HERE, "..", "..", "testdata", "goldberg", "variatio4-5s.flac"
 
 # ---- tag sets ----
 ASCII = dict(title="Variatio 4", artist="Kimiko Ishizaka", album="Open Goldberg Variations",
-             track="5")
+             track="5", albumartist="J. S. Bach", genre="Classical", year="2012", disc="1")
 TAGSETS = {
     "ascii": ASCII,
     "unicode": dict(title="Variation 4 — à 1 clavier · 第4変奏 "
                     "· Вариация 4 · "
                     "Παραλλαγή 4 \U0001f3b9",
                     artist="石坂紀美子 (Kimiko Ishizaka)",
-                    album="Goldberg-Variationen, BWV 988 – Öffnung", track="5/32"),
+                    album="Goldberg-Variationen, BWV 988 – Öffnung", track="5/32",
+                    albumartist="Johann Sebastian Bach (バッハ)", genre="Barock · バロック",
+                    year="2012-05-28", disc="1/2"),
     # past the 96 / 128 bytes of struct tags, cut inside a multi-byte character
     "long": dict(title="Variatio 4 a 1 Clav. " * 12, artist="é" * 150,
                  album="日本" * 60, track="5"),
@@ -63,7 +65,9 @@ TAGSETS = {
                               REPLAYGAIN_ALBUM_PEAK="0.999969")),
 }
 LATIN1 = dict(title="Variation 4 à 1 clavier", artist="Kimiko Ishizaka",
-              album="Goldberg-Variationen Öffnung", track="5")
+              album="Goldberg-Variationen Öffnung", track="5", genre="Classical", year="2012")
+MORE = ("albumartist", "genre", "year", "disc")        # the library's fields (tags.c, §122)
+ID3V1_GENRES = {"Classical": 32}                       # ID3v1's numbers of the genres used here
 COVERS = {"jpg300": ("jpg", 300), "jpg600": ("jpg", 600), "jpg1200": ("jpg", 1200),
           "1m": ("png", 600), "8m": ("png", 1700), "17m": ("png", 2440)}
 
@@ -119,8 +123,10 @@ def id3_text(s, enc):
 
 
 def id3_frames(t, ver, enc, pic=None):
-    ids = dict(title="TIT2", artist="TPE1", album="TALB", track="TRCK") if ver > 2 else \
-        dict(title="TT2", artist="TP1", album="TAL", track="TRK")
+    ids = dict(title="TIT2", artist="TPE1", album="TALB", track="TRCK", albumartist="TPE2",
+               genre="TCON", year="TDRC" if ver == 4 else "TYER", disc="TPOS") if ver > 2 else \
+        dict(title="TT2", artist="TP1", album="TAL", track="TRK", albumartist="TP2",
+             genre="TCO", year="TYE", disc="TPA")
     out = []
     if pic:                                     # first: the fields after it test the skip
         data, fmt = pic
@@ -130,7 +136,7 @@ def id3_frames(t, ver, enc, pic=None):
             body = bytes([0]) + f"image/{'jpeg' if fmt == 'jpg' else 'png'}".encode() + \
                 b"\x00\x03\x00" + data
         out.append(("PIC" if ver == 2 else "APIC", body))
-    for k in ("title", "artist", "album", "track"):
+    for k in ("title", "artist", "album", "track") + MORE:
         if k in t:
             out.append((ids[k], id3_text(t[k], enc)))
     for k, v in t.get("rg", {}).items():
@@ -171,7 +177,8 @@ def id3v1(t):
     f = lambda s, n: (s or "").encode("latin-1", "replace")[:n].ljust(n, b"\0")  # noqa: E731
     tr = int((t.get("track") or "0").split("/")[0])
     return b"TAG" + f(t.get("title"), 30) + f(t.get("artist"), 30) + f(t.get("album"), 30) + \
-        b"2012" + bytes(28) + b"\0" + bytes([tr]) + b"\xff"
+        f(t.get("year"), 4) + bytes(28) + b"\0" + bytes([tr]) + \
+        bytes([ID3V1_GENRES.get(t.get("genre"), 255)])
 
 
 # ---- FLAC metadata, block by block ----
@@ -192,12 +199,16 @@ def vorbis_comment(t, vendor=b"mktestset"):
     items = [f"{k.upper()}={t[k]}" for k in ("title", "artist", "album") if k in t]
     if "track" in t:
         items.append(f"TRACKNUMBER={t['track']}")
+    items += [f"{VORBIS_MORE[k]}={t[k]}" for k in MORE if k in t]
     items += [f"{k}={v}" for k, v in t.get("rg", {}).items()]
     b = struct.pack("<I", len(vendor)) + vendor + struct.pack("<I", len(items))
     for s in items:
         s = s.encode()
         b += struct.pack("<I", len(s)) + s
     return b
+
+
+VORBIS_MORE = dict(albumartist="ALBUMARTIST", genre="GENRE", year="DATE", disc="DISCNUMBER")
 
 
 def flac_picture(data, fmt, side):
@@ -239,6 +250,9 @@ def ogg_tag(path, kind, t, pic=None):
             f.tags.append((k.upper(), t[k]))
     if "track" in t:
         f.tags.append(("TRACKNUMBER", t["track"]))
+    for k in MORE:
+        if k in t:
+            f.tags.append((VORBIS_MORE[k], t[k]))
     for k, v in t.get("rg", {}).items():
         f.tags.append((k, v))
     f.save()
@@ -258,6 +272,12 @@ def mp4_tag(path, t, pic=None):
     if "track" in t:
         n, _, of = t["track"].partition("/")
         f["trkn"] = [(int(n), int(of or 0))]
+    for k, a in (("albumartist", "aART"), ("genre", "\xa9gen"), ("year", "\xa9day")):
+        if k in t:
+            f[a] = [t[k]]
+    if "disc" in t:
+        n, _, of = t["disc"].partition("/")
+        f["disk"] = [(int(n), int(of or 0))]
     for k, v in t.get("rg", {}).items():
         f["----:com.apple.iTunes:" + k.lower()] = [MP4FreeForm(v.encode())]
     f.save()
@@ -296,7 +316,8 @@ def wav_tag(path, t, where="before", id3=False):
         tag = [chunk(b"id3 ", id3v2(id3_frames(t, 3, 1), 3))]
     else:
         info = b"INFO"
-        for k, cid in (("title", b"INAM"), ("artist", b"IART"), ("album", b"IPRD")):
+        for k, cid in (("title", b"INAM"), ("artist", b"IART"), ("album", b"IPRD"),
+                       ("genre", b"IGNR"), ("year", b"ICRD")):
             if k in t:
                 info += chunk(cid, t[k].encode() + b"\0")
         tag = [chunk(b"LIST", info)] if t else []
@@ -348,7 +369,8 @@ def apev2(t, pic=None):
     items = []
     if pic:
         items.append((b"Cover Art (Front)", b"cover." + pic[1].encode() + b"\0" + pic[0], 2))
-    names = dict(title=b"Title", artist=b"Artist", album=b"Album", track=b"Track")
+    names = dict(title=b"Title", artist=b"Artist", album=b"Album", track=b"Track",
+                 albumartist=b"Album Artist", genre=b"Genre", year=b"Year", disc=b"Disc")
     items += [(names[k], v.encode(), 0) for k, v in t.items() if k in names]
     items += [(k.encode(), v.encode(), 0) for k, v in t.get("rg", {}).items()]
     body = b"".join(struct.pack("<II", len(v), fl) + k + b"\0" + v for k, v, fl in items)
@@ -365,9 +387,10 @@ def mpc_tag(path, t, pic=None):
 
 
 def carried(kind, t):
-    """The fields a format's tags here hold: WAV LIST INFO no track, AIFF NAME / AUTH
-    (Latin-1) no album either"""
-    keep = dict(wav=("title", "artist", "album"), aiff=("title", "artist")).get(kind)
+    """The fields a format's tags here hold: WAV LIST INFO no track, album artist nor disc,
+    AIFF NAME / AUTH (Latin-1) title and artist only"""
+    keep = dict(wav=("title", "artist", "album", "genre", "year"),
+                aiff=("title", "artist")).get(kind)
     return {k: v for k, v in t.items() if k in keep} if keep else t
 
 
@@ -499,6 +522,9 @@ def main():
                 ("v24-title-v1", dict(LATIN1, album=LATIN1["album"]),
                  id3v2(id3_frames(dict(title=LATIN1["title"]), 4, 3), 4), id3v1(LATIN1), "tags",
                  "the title from ID3v2, the artist and album from ID3v1 (fallback)"),
+                ("v23-genre-num", dict(U, genre="Classical"),
+                 id3v2(id3_frames(dict(U, genre="(32)"), 3, 1), 3), b"", "tags",
+                 "TCON \"(32)\": ID3v1's genre 32, read as its name"),
                 ("v24-rg", TAGSETS["rg"], id3v2(id3_frames(TAGSETS["rg"], 4, 3), 4), b"", "tags",
                  "ReplayGain in TXXX"),
                 ("v23-rg-utf16", TAGSETS["rg"], id3v2(id3_frames(TAGSETS["rg"], 3, 1), 3), b"",

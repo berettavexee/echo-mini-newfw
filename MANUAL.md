@@ -1,6 +1,6 @@
 # User manual
 
-This manual is for the ECHO MINI new firmware, version 0.101. It describes what the player shows
+This manual is for the ECHO MINI new firmware, version 0.102. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
 The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing Daft
@@ -89,7 +89,7 @@ From top to bottom:
 |---|---|
 | **PLAY** | pause / play |
 | **PLAY held** | next track. On the last track (play mode "in order"), it stops; PLAY then plays that last track again from its start |
-| **BACK** | back to the start of the track; within its first 3 s, the track before (in shuffle: the one heard before) |
+| **BACK** | back to the start of the track; within its first 3 s, the track before (in shuffle: the one heard before). So a double press of BACK goes to the track before |
 | **BACK held** | next play mode: in order → repeat all → repeat one → shuffle → in order. Shuffle plays every track of the queue once, in a random order, then another order |
 | **VOL+** / **VOL-** | volume up / down, 1 dB a step (held: repeats) |
 | **VOL+ held, then VOL-** | seek mode (below) |
@@ -120,6 +120,8 @@ page), after a short silence: about 0.2 s (Vorbis) or 0.3 s (Opus).
 
 ### Pauses
 
+- Unplugging the headphones pauses the music (when no other headphones stay plugged in the
+  other output, 3.5 mm or 4.4 mm). Plugging them back does not start it again: press PLAY.
 - A pause of 1 min "parks" the track: the DACs and the HiFi core stop to save the battery.
   PLAY starts it again where it was, after a short delay.
 - With nothing playing, the player powers off after 10 min without a key, unless the USB cable
@@ -234,6 +236,7 @@ power off (except the sleep timer).
 |---|---|---|
 | Language | the language of the screens: English, Français, 日本語, 简体中文 (the catalogues of the image; see below). This line stays in English, so that it can be found in any language | English |
 | Date and time | shows the date and time; PLAY opens the clock screen (below) | |
+| Clock | **shown**: the time at the top of the play screen and the browser (once the clock is set); **hidden**: not shown | shown |
 | Screen off after | 10 s, 30 s, 1 min, 2 min, 5 min, never | 30 s |
 | Brightness | 10 steps: 8, 12, 17, 23, 30, 39, 50, 63, 80, 100 % (even steps to the eye) | 100 % |
 | Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder | tags |
@@ -308,8 +311,8 @@ Storage:
 
 ## Installing
 
-1. Copy the image (`NEWFW101.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
-   instance `NEWFW101.IMG`) to the
+1. Copy the image (`NEWFW102.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
+   instance `NEWFW102.IMG`) to the
    root of the internal memory. Use the stock firmware's USB disk, or "USB disk, read/write"
    with this firmware.
 2. Main menu → **Install a firmware (.IMG)**:
