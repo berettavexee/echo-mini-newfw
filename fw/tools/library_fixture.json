@@ -1,0 +1,26 @@
+{
+ "comment": "The host test's tracks (library_test.c, mklib.py --json): the cases of the sort and the grouping of docs/LIBRARY.md",
+ "volumes": {"0": 0, "1": 3735928559},
+ "tracks": [
+  {"cluster": 100, "size": 4000000, "mtime": 1, "codec": 2, "file": "02 Help.flac", "title": "Help!", "artist": "The Beatles", "album": "Help!", "genre": "Rock", "year": "1965", "track": "2"},
+  {"cluster": 101, "size": 4100000, "mtime": 2, "codec": 2, "file": "01 Yesterday.flac", "title": "Yesterday", "artist": "The Beatles", "album": "Help!", "genre": "Rock", "year": "1965-08-06", "track": "1/14"},
+  {"cluster": 102, "size": 3000000, "mtime": 3, "codec": 3, "file": "Loser.mp3", "title": "Loser", "artist": "Beck", "album": "Mellow Gold", "genre": "Alternative", "year": "1994", "track": "1"},
+  {"cluster": 103, "size": 3000000, "mtime": 4, "codec": 5, "file": "a.opus", "title": "Écrire", "artist": "Émilie Simon", "album": "Végétal", "genre": "Électro", "year": "2006", "track": "3"},
+  {"cluster": 104, "size": 3000000, "mtime": 5, "codec": 5, "file": "b.opus", "title": "edge", "artist": "emilie simon", "album": "végétal", "genre": "électro", "year": "2006", "track": "4"},
+  {"cluster": 105, "size": 3000000, "mtime": 6, "codec": 4, "file": "c.ogg", "title": "Straße", "artist": "Øystein Sevåg", "album": "Global House", "genre": "New Age", "year": "1993", "track": "2"},
+  {"cluster": 106, "size": 3000000, "mtime": 7, "codec": 4, "file": "d.ogg", "title": "Ελλάδα", "artist": "Βαγγέλης", "album": "Ωδή", "genre": "Electronic", "year": "12", "track": "1"},
+  {"cluster": 107, "size": 3000000, "mtime": 8, "codec": 4, "file": "e.ogg", "title": "Ёлка", "artist": "Земфира", "album": "Вендетта", "genre": "Rock", "year": "2005", "track": "1"},
+  {"cluster": 108, "size": 3000000, "mtime": 9, "codec": 7, "file": "f.m4a", "title": "夜に駆ける", "artist": "YOASOBI", "album": "THE BOOK", "genre": "J-Pop", "year": "2021", "track": "1"},
+  {"cluster": 109, "size": 3000000, "mtime": 10, "codec": 8, "file": "g.m4a", "title": "第4変奏", "artist": "石坂紀美子", "album": "ゴルトベルク変奏曲", "albumartist": "J. S. Bach", "genre": "Classical", "year": "2012", "disc": "1/2", "track": "5"},
+  {"cluster": 110, "size": 3000000, "mtime": 11, "codec": 8, "file": "h.m4a", "title": "Aria", "artist": "Kimiko Ishizaka", "album": "ゴルトベルク変奏曲", "albumartist": "J. S. Bach", "genre": "Classical", "year": "2012", "disc": "2", "track": "1"},
+  {"cluster": 111, "size": 3000000, "mtime": 12, "codec": 8, "file": "i.m4a", "title": "Variatio 1", "artist": "Kimiko Ishizaka", "album": "ゴルトベルク変奏曲", "albumartist": "J. S. Bach", "genre": "Baroque", "year": "2011", "disc": "1", "track": "6"},
+  {"cluster": 112, "size": 3000000, "mtime": 13, "codec": 3, "file": "Track 01.mp3", "title": "", "artist": "", "album": "", "genre": "", "track": ""},
+  {"cluster": 113, "size": 3000000, "mtime": 14, "codec": 3, "file": "Track 02.mp3", "title": "No album", "artist": "Beck", "album": "", "genre": "", "track": ""},
+  {"cluster": 114, "size": 3000000, "mtime": 15, "codec": 1, "file": "same.wav", "title": "Same", "artist": "Various", "album": "Compilation", "genre": "Pop", "track": "1"},
+  {"cluster": 115, "size": 3000000, "mtime": 16, "codec": 1, "file": "same.wav", "title": "Same", "artist": "Various", "album": "Compilation", "genre": "Pop", "track": "1", "vol": 1, "contig": 1},
+  {"cluster": 116, "size": 3000000, "mtime": 17, "codec": 9, "file": "the.mpc", "title": "The End", "artist": "The", "album": "Theme", "genre": "Rock", "track": "9"},
+  {"cluster": 117, "size": 3000000, "mtime": 18, "codec": 6, "file": "long.aiff", "title": "A title of more than ninety-five bytes: é é é é é é é é é é é é é é é é é é é é é é é é é é é é é é é é é é é", "artist": "Theodorakis", "album": "Zorba", "genre": "Soundtrack", "year": "1964", "track": "1"},
+  {"cluster": 118, "size": 3000000, "mtime": 19, "codec": 2, "file": "z.flac", "title": "zebra", "artist": "the cure", "album": "Disintegration", "genre": "rock", "year": "1989", "track": "10"},
+  {"cluster": 119, "size": 3000000, "mtime": 20, "codec": 2, "file": "y.flac", "title": "Pictures of You", "artist": "The Cure", "album": "Disintegration", "genre": "Rock", "year": "1989", "track": "2"}
+ ]
+}
