@@ -2,6 +2,7 @@
  * sorted folders first then files in natural order, the path from the top, the card set up on
  * first use and followed by its detect switch, the browser screen and its keys. */
 #include "ui_priv.h"
+#include "library.h"
 #include "storage.h"
 
 /* ---- names ---- */
@@ -43,7 +44,7 @@ static int name_cmp(const char *a, const char *b)
 }
 
 /* Our codec for a file name (by its extension), 0 when we do not play it */
-static uint32_t codec_of(const char *name)
+uint32_t file_codec(const char *name)
 {
     static const struct { const char *ext; uint32_t codec; } t[] = {
         { "wav", HP_CODEC_WAV }, { "flac", HP_CODEC_FLAC }, { "fla", HP_CODEC_FLAC },
@@ -120,7 +121,7 @@ static int list_add(struct listing *l, const char *name, uint32_t len, uint32_t 
 static int collect(const struct fat_dirent *d, void *ctx)
 {
     struct listing *l = ctx;
-    uint32_t codec = d->attr & FAT_ATTR_DIR ? 0 : codec_of(d->name);
+    uint32_t codec = d->attr & FAT_ATTR_DIR ? 0 : file_codec(d->name);
     if (!(d->attr & FAT_ATTR_DIR) && (!codec || (l->skip_empty && !d->size)))
         return 0;                               /* not something we play (the queue: empty) */
     /* a big folder: files stop at max - 50, the last places are kept for folders, and the

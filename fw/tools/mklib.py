@@ -176,13 +176,15 @@ def build(tracks, volumes):
     song = sorted(range(len(tracks)), key=lambda i: (str_order(tracks[i]["title"] or
                                                                tracks[i]["file"]), i))
     songs = b"".join(struct.pack("<I", i) for i in song)
+    clus = sorted(range(len(tracks)), key=lambda i: (tracks[i]["vol"] << 31 | tracks[i]["cluster"], i))
+    clu = b"".join(struct.pack("<II", tracks[i]["vol"] << 31 | tracks[i]["cluster"], i) for i in clus)
     vols = b"".join(struct.pack("<B3xII", v, volumes.get(v, 0),
                                 sum(1 for t in tracks if t["vol"] == v))
                     for v in sorted(set(volumes) | {t["vol"] for t in tracks}))
 
     sections = [(b"VOLS", vols, 12), (b"STRS", bytes(st.blob), 0), (b"TRKS", trks, 36),
                 (b"ARTS", arts, 8), (b"ALBS", albs, 16), (b"GENS", gens, 12),
-                (b"GALB", galb, 2), (b"SONG", songs, 4)]
+                (b"GALB", galb, 2), (b"SONG", songs, 4), (b"CLUS", clu, 8)]
     at = 16 + 16 * len(sections)
     table, body = b"", b""
     for sid, data, size in sections:
@@ -194,7 +196,7 @@ def build(tracks, volumes):
     if len(half) > HALF:
         raise ValueError(f"the index takes {len(half)} bytes: more than {HALF}")
     return half, dict(tracks=tracks, artists=artists, albums=albums, genres=genres,
-                      g_albums=g_albums, song=song, al_first=al_first, al_count=al_count,
+                      g_albums=g_albums, song=song, clus=clus, volumes=volumes, al_first=al_first, al_count=al_count,
                       al_year=al_year, ar_first=ar_first, ar_count=ar_count, a_index=a_index,
                       g_index=g_index, al_index=al_index)
 
@@ -202,7 +204,8 @@ def build(tracks, volumes):
 def index_file(half, generation=1):
     """The whole file: header, half A in use, half B empty"""
     crc = zlib.crc32(half)
-    h = b"NEWFWLIB" + struct.pack("<IIIIIII", 1, 0, generation, len(half), crc, 0, 0)
+    tracks = struct.unpack_from("<I", half, 16 + 16 * 2 + 12)[0]       # TRKS's count
+    h = b"NEWFWLIB" + struct.pack("<IIIIIIII", 1, 0, generation, len(half), crc, 0, 0, tracks)
     h += bytes(508 - len(h))
     h += struct.pack("<I", zlib.crc32(h))
     return h + half + bytes(HALF - len(half)) + bytes(HALF)
@@ -226,6 +229,11 @@ def expect_lines(t):
             k["contig"], k["cluster"], k["size"], k["mtime"])))
     for i, k in enumerate(t["song"]):
         out.append(f"song\t{i}\t{k}")
+    for i, k in enumerate(t["clus"]):
+        out.append(f"clus\t{i}\t{t['tracks'][k]['vol']}\t{t['tracks'][k]['cluster']}\t{k}")
+    for v in sorted(set(t["volumes"]) | {k["vol"] for k in t["tracks"]}):
+        out.append(f"vol\t{v}\t{t['volumes'].get(v, 0)}\t"
+                   f"{sum(1 for k in t['tracks'] if k['vol'] == v)}")
     names = sorted({k["artist"] for k in t["tracks"]} | {k["album"] for k in t["tracks"]} |
                    {k["title"] for k in t["tracks"]})
     out.append("order\t0\t" + "\t".join(sorted(names, key=str_order)))
@@ -363,10 +371,8 @@ def image_tracks(path, sector, vol):
         ext = e.name.rsplit(".", 1)[-1].lower() if "." in e.name else ""
         if ext not in CODECS or not e.size:
             continue
-        codec = CODECS[ext]
+        codec = CODECS[ext]                     # (M4A: 7, AAC or ALAC: the player's open says)
         data = v.read(e)
-        if codec == 7 and b"alac" in data[:1 << 20]:     # M4A: ALAC or AAC (mp4.c decides)
-            codec = 8
         out.append(track_of(dict(file_fields(e.name, data), vol=vol, contig=e.contig,
                                  cluster=e.cluster, size=e.size, mtime=e.mtime, codec=codec,
                                  file=e.name)))
@@ -388,11 +394,12 @@ def main():
     elif a.image:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         sector = VOL_SECTOR if os.path.getsize(a.image) > VOL_SECTOR * 512 else 0
+        from fatimg import Volume
         tracks = image_tracks(a.image, sector, 0)
         volumes = {0: 0}
         if a.sd:
             tracks += image_tracks(a.sd, 0, 1)
-            volumes[1] = 0                      # the card's serial: step 6 (ETUDE §121)
+            volumes[1] = Volume(a.sd, 0).serial     # the card's volume serial
     else:
         sys.exit(__doc__)
     half, tables = build(tracks, volumes)

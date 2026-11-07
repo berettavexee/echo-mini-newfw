@@ -58,12 +58,14 @@ class Volume:
         self.base = sector
         if bs[3:11] == b"EXFAT   ":
             self.exfat = True
+            self.serial = struct.unpack_from("<I", bs, 100)[0]
             self.fat_lba = sector + struct.unpack_from("<I", bs, 80)[0]
             self.heap = sector + struct.unpack_from("<I", bs, 88)[0]
             self.root = struct.unpack_from("<I", bs, 96)[0]
             self.spc = 1 << bs[109]
         elif bs[0x52:0x57] == b"FAT32":
             self.exfat = False
+            self.serial = struct.unpack_from("<I", bs, 67)[0]
             reserved, nfats = struct.unpack_from("<H", bs, 14)[0], bs[16]
             fatsz = struct.unpack_from("<I", bs, 36)[0]
             self.fat_lba = sector + reserved

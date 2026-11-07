@@ -652,3 +652,79 @@ msgstr "affichée"
 #: src/settings.c
 msgid "hidden"
 msgstr "masquée"
+
+#: src/libui.c
+msgid "Updating the library"
+msgstr "Mise à jour de la bibliothèque"
+
+#: src/libui.c
+msgid "BACK: stop (the library before is kept)"
+msgstr "BACK : arrêter (l'ancienne est gardée)"
+
+#: src/libui.c
+msgid "Looking for the music"
+msgstr "Recherche de la musique"
+
+#: src/libui.c
+msgid "Reading the tags"
+msgstr "Lecture des tags"
+
+#: src/libui.c
+msgid "Sorting"
+msgstr "Tri"
+
+#: src/libui.c
+msgid "Writing the library"
+msgstr "Écriture de la bibliothèque"
+
+#: src/libui.c
+#, c-format
+msgid "%u files"
+msgstr "%u fichiers"
+
+#: src/libui.c
+#, c-format
+msgid "%u of %u"
+msgstr "%u sur %u"
+
+#: src/libui.c
+#, c-format
+msgid "about %u min left"
+msgstr "encore environ %u min"
+
+#: src/libui.c
+#, c-format
+msgid "about %u s left"
+msgstr "encore environ %u s"
+
+#: src/libui.c
+#, c-format
+msgid "Library updated: %u tracks"
+msgstr "Bibliothèque à jour : %u morceaux"
+
+#: src/libui.c
+msgid "Stopped: the library before is kept"
+msgstr "Arrêté : l'ancienne bibliothèque est gardée"
+
+#: src/libui.c
+msgid "No room for NEWFWLIB.DAT"
+msgstr "Pas de place pour NEWFWLIB.DAT"
+
+#: src/libui.c
+msgid "Too much music for the library"
+msgstr "Trop de musique pour la bibliothèque"
+
+#: src/libui.c
+#, c-format
+msgid "The library could not be updated (%d)"
+msgstr "La bibliothèque n'a pas pu être mise à jour (%d)"
+
+#. TRANSLATORS: the music library (artists, albums...): its index, PLAY updates it
+#: src/settings.c
+msgid "Library (PLAY: update)"
+msgstr "Bibliothèque (PLAY : mettre à jour)"
+
+#: src/settings.c
+#, c-format
+msgid "%u tracks"
+msgstr "%u morceaux"

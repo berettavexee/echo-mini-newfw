@@ -484,6 +484,8 @@ def patch_state(disk, fields):
 
 
 def run(name, t, img, elf, tmp):
+    if "custom" in t:
+        return t["custom"](img, elf, tmp)
     if "set" in t:
         return run_set(t["set"], t, img, elf, tmp)
     disk, dump = os.path.join(tmp, "disk.img"), os.path.join(tmp, "after.img")
@@ -699,6 +701,150 @@ TESTS.update({
     # a power cut after 0 to 36 sectors written (among them: within the FATs, between the two
     # copies, after the directory entry): a consistent volume, then the file at the next boot
     **{f"lib-cut{n}": lib_cut(n) for n in (0, 1, 2, 17, 18, 34, 35, 36)},
+})
+
+
+# ---- the library's index built by the firmware (ETUDE §125): ECHO_LIBBUILD images only ----
+def lib_disks(tmp):
+    """A disk with the test set's tags, containers and formats files, and an exFAT card with
+    12 of them (some fragmented)"""
+    src = os.path.join(tmp, "set")
+    subprocess.run([sys.executable, MKSET, src, "--only", "tags,containers,formats", "--seconds",
+                    "1"], check=True, stdout=subprocess.DEVNULL)
+    log0 = os.path.join(tmp, "NEWFWLOG.TXT")
+    open(log0, "wb").write(bytes(256 * 1024))
+    files = [f"{log0}=NEWFWLOG.TXT"]
+    for root, _, names in os.walk(src):
+        for n in sorted(names):
+            if n != "manifest.json":
+                p = os.path.join(root, n)
+                files.append(f"{p}={os.path.relpath(p, src)}")
+    disk, card = os.path.join(tmp, "disk.img"), os.path.join(tmp, "card.img")
+    subprocess.run([sys.executable, MKDISK, disk, IMG_FOR_DISK[0], "--synth-idb", "--size-mb",
+                    "300"] + files, check=True, stdout=subprocess.DEVNULL)
+    with open(card, "wb") as f:
+        f.truncate(64 << 20)
+    subprocess.run(["/usr/sbin/mkfs.exfat", card], check=True, stdout=subprocess.DEVNULL)
+    tags = sorted(os.listdir(os.path.join(src, "tags")))[:12]
+    spec = [{"path": "Card", "dir": True}] + [
+        dict(path=f"Card/{n}", src=os.path.join(src, "tags", n), **({"fragmented": True} if
+                                                                    i % 4 == 1 else {}))
+        for i, n in enumerate(tags)]
+    json.dump(spec, open(os.path.join(tmp, "spec.json"), "w"))
+    subprocess.run([sys.executable, os.path.join(TOOLS, "exfat_add.py"), card,
+                    os.path.join(tmp, "spec.json")], check=True, stdout=subprocess.DEVNULL)
+    return disk, card, src
+
+
+IMG_FOR_DISK = [None]
+
+
+def lib_boot(img, elf, disk, card, dump, extra=()):
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "16000", "--steps", "30000000000", "--dump-disk", dump] +
+                         list(extra), capture_output=True, text=True).stdout
+    return out
+
+
+def lib_compare(dump, disk, card, tmp, tag):
+    """NEWFWLIB.DAT of the disk after the run against mklib.py's answers for disk and card"""
+    from fatimg import Volume
+    v = Volume(dump, VOL_SECTOR)
+    e = next((e for e in v.list() if e.name == "NEWFWLIB.DAT"), None)
+    if not e:
+        return [f"{tag}: no NEWFWLIB.DAT"]
+    dev = os.path.join(tmp, f"dev_{tag}.dat")
+    open(dev, "wb").write(v.read(e))
+    exp = os.path.join(tmp, f"exp_{tag}.txt")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "--sd", card, "-o",
+                    os.path.join(tmp, "pc.dat"), "--expect", exp], check=True,
+                   capture_output=True)
+    lt = os.path.join(tmp, "library_test")
+    if not os.path.exists(lt):
+        subprocess.run(["cc", "-O1", "-w", "-I", os.path.join(TOOLS, "..", "src"), "-o", lt,
+                        os.path.join(TOOLS, "library_test.c")], check=True)
+    r = subprocess.run([lt, dev, exp], capture_output=True, text=True)
+    return [] if r.returncode == 0 else [f"{tag}: " + ln for ln in r.stdout.splitlines()[-4:]]
+
+
+def lib_build_test(variant):
+    def go(img, elf, tmp):
+        IMG_FOR_DISK[0] = img
+        disk, card, src = lib_disks(tmp)
+        dump = os.path.join(tmp, "after.img")
+        whole = lib_boot(img, elf, disk, card, dump)
+        text = read_log(dump)
+        fails = [] if re.search(r"library: 89 tracks \(89 read, 0 from the index before\)",
+                                text) else ["first build: not 89 tracks read"]
+        fails += lib_compare(dump, disk, card, tmp, "first")
+        if variant == "update":                 # one file deleted, one added, one changed
+            shutil.move(dump, disk)
+            mtools(disk, "mdel", "::tags/flac-ascii.flac")
+            mtools(disk, "mcopy", os.path.join(src, "tags", "mp3-ascii.mp3"), "::new.mp3")
+            mtools(disk, "mcopy", "-o", os.path.join(src, "tags", "opus-unicode.opus"),
+                   "::tags/opus-ascii.opus")
+            whole += lib_boot(img, elf, disk, card, dump)
+            text = read_log(dump)
+            if not re.search(r"building into half B \(the index before reused\)", text) or \
+                    not re.search(r"library: 89 tracks \(2 read, 87 from the index before\)",
+                                  text):
+                fails.append("update: not 2 read and 87 reused into half B")
+            fails += lib_compare(dump, disk, card, tmp, "update")
+        if variant == "nochange":               # the same files: the update stops after the count
+            shutil.move(dump, disk)
+            whole += lib_boot(img, elf, disk, card, dump)
+            text = read_log(dump)
+            if not re.search(r"library: no change \(89 tracks, the same fingerprint\)", text):
+                fails.append("no change: not seen")
+            fails += lib_compare(dump, disk, card, tmp, "no change")
+        if variant.startswith("cut"):           # a cut during a second build: the first kept
+            shutil.move(dump, disk)
+            first = os.path.join(tmp, "first.img")
+            shutil.copy(disk, first)
+            mtools(disk, "mdel", "::tags/flac-ascii.flac")     # (a change: the build writes)
+            whole += lib_boot(img, elf, disk, card, dump,
+                              ["--cut-user-after", variant[3:]])
+            if "POWER CUT" not in whole:
+                fails.append("no power cut")
+            fails += fsck(dump, tmp)
+            fails += lib_compare(dump, first, card, tmp, "after the cut")
+            shutil.move(dump, disk)
+            whole += lib_boot(img, elf, disk, card, dump)
+            fails += lib_compare(dump, disk, card, tmp, "rebuilt")
+        return fails, text + "\n" + whole
+    return go
+
+
+LIB_KEYS = keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "PLAY"),
+               *[(5200 + 250 * i, "VOL-") for i in range(12)], (8800, "PLAY"))
+
+
+def lib_settings(img, elf, tmp):
+    """Settings, the line Library (the 13th), PLAY: the update screen; the index compared with
+    mklib.py's answers (the production image: the path the user takes)"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dump = os.path.join(tmp, "after.img")
+    whole = lib_boot(img, elf, disk, card, dump, ["--keys", LIB_KEYS])
+    text = read_log(dump)
+    fails = [] if re.search(r"library: 89 tracks \(89 read, 0 from the index before\)", text) \
+        else ["not 89 tracks read"]
+    return fails + lib_compare(dump, disk, card, tmp, "settings"), text + "\n" + whole
+
+
+TESTS["lib-settings"] = dict(custom=lib_settings)
+
+TESTS.update({
+    # built from the tags, compared with mklib.py's answers (content: STRS's order differs)
+    "libb-build": dict(custom=lib_build_test("build"), libcreate=True),
+    # then one file deleted, one added, one changed: 2 read, 87 from the index before, half B
+    "libb-update": dict(custom=lib_build_test("update"), libcreate=True),
+    # then the same files again: nothing read nor written (the fingerprint)
+    "libb-nochange": dict(custom=lib_build_test("nochange"), libcreate=True),
+    # a cut during the second build (early, in the strings, late): the first index intact,
+    # the volume clean; the next boot builds it
+    **{f"libb-cut{n}": dict(custom=lib_build_test(f"cut{n}"), libcreate=True)
+       for n in (3, 12, 30)},
 })
 
 

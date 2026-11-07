@@ -128,6 +128,72 @@ msgstr ""
 msgid "English"
 msgstr ""
 
+#: src/libui.c
+msgid "Updating the library"
+msgstr ""
+
+#: src/libui.c
+msgid "BACK: stop (the library before is kept)"
+msgstr ""
+
+#: src/libui.c
+msgid "Looking for the music"
+msgstr ""
+
+#: src/libui.c
+msgid "Reading the tags"
+msgstr ""
+
+#: src/libui.c
+msgid "Sorting"
+msgstr ""
+
+#: src/libui.c
+msgid "Writing the library"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "%u files"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "%u of %u"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "about %u min left"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "about %u s left"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "Library updated: %u tracks"
+msgstr ""
+
+#: src/libui.c
+msgid "Stopped: the library before is kept"
+msgstr ""
+
+#: src/libui.c
+msgid "No room for NEWFWLIB.DAT"
+msgstr ""
+
+#: src/libui.c
+msgid "Too much music for the library"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "The library could not be updated (%d)"
+msgstr ""
+
 #: src/main.c
 msgid "any key: back"
 msgstr ""
@@ -368,7 +434,7 @@ msgstr ""
 msgid "VOL+/- move  PLAY go  BACK cancel"
 msgstr ""
 
-#: src/playscreen.c
+#: src/playscreen.c src/settings.c
 msgid "none"
 msgstr ""
 
@@ -416,6 +482,12 @@ msgstr ""
 msgid "Swap VOL+ and VOL-"
 msgstr ""
 
+#. TRANSLATORS: the music library (artists, albums...): its index, PLAY updates it
+#: src/settings.c
+msgid "Library (PLAY: update)"
+msgstr ""
+
+#. TRANSLATORS: the music library (artists, albums...): its index, PLAY updates it
 #: src/settings.c
 msgid "Restore the defaults (PLAY)"
 msgstr ""
@@ -486,6 +558,11 @@ msgstr ""
 
 #: src/settings.c
 msgid "no"
+msgstr ""
+
+#: src/settings.c
+#, c-format
+msgid "%u tracks"
 msgstr ""
 
 #: src/uac.c src/usbmode.c

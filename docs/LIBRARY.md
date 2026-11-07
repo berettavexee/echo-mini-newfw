@@ -4,10 +4,24 @@ The library (`ETUDE.md` §121) browses the music by its tags: artists, albums, g
 It reads an index built in advance, never the files' tags while browsing. This page describes
 the index file, version 1.
 
-The index is **deterministic**: the same files, with the same tags at the same places of the
-disk, give the same bytes, whoever builds it. `fw/tools/mklib.py` builds it on a PC from a disk
-image; the firmware will build the same bytes on the device (step 3), and the emulator compares
-the two. `fw/src/library.c` reads it.
+The index's **content** is determined by the files: the same files, with the same tags at the
+same places of the disk, give the same artists, albums, genres, tracks, orders and fields,
+whoever builds it. `fw/tools/mklib.py` builds it on a PC from a disk image; the firmware builds
+it on the device (`fw/src/libbuild.c`); the emulator compares every answer of the two (the order
+of the strings inside `STRS` may differ: the device writes them as it reads the files).
+`fw/src/library.c` reads it.
+
+On the device, the index is built in a screen of its own, nothing playing (Settings, the line
+Library; and at once after a USB session in which the computer wrote): core B's memory is the
+work memory (384 KiB, and the input ring). A file whose volume, first cluster, size and last
+write are those of the index before keeps its fields without its tags being read again.
+The build goes: count the files (and their fingerprint: the same as the index in use, it stops
+there), read the tags of the new or changed files (only the fields: an Ogg comment header is not
+followed to its end), sort, write the half not in use, read it back for its CRC, then the header.
+The log (`NEWFWLOG.TXT`) gives the time of each phase, the reads on the card and on the internal
+memory, the tags read per format and the three slowest files. On the device (18,003 tracks):
+3 to 4 minutes from the tags, about 3 s with the same files. Big embedded cover art is the main
+cost: an Ogg or Opus file is read through its whole cover, page by page.
 
 ## The file
 
@@ -46,7 +60,9 @@ All numbers are little-endian.
 | 16 | 4 | generation: one more at each new index |
 | 20 | 8 | half A: its length in bytes, its CRC-32 |
 | 28 | 8 | half B: the same |
-| 36 | 472 | zeros |
+| 36 | 4 | the count of tracks of the half in use (shown in the settings without opening it) |
+| 40 | 8 | the files' fingerprint: two sums, over the files indexed, of a hash of the volume (the card's serial), first cluster, size, last write and codec; the same files give the same sums, and an update then writes nothing; 0 and 0: none (`mklib.py` writes none) |
+| 48 | 460 | zeros |
 | 508 | 4 | CRC-32 of bytes 0 to 507 |
 
 CRC-32 is the one of zlib (polynomial `0xedb88320`, initial value and final XOR `0xffffffff`).
@@ -74,6 +90,7 @@ add one without breaking the readers of version 1. The sections of version 1:
 | `GENS` | 12 bytes | the genres, sorted |
 | `GALB` | 2 bytes | the albums of each genre: album numbers |
 | `SONG` | 4 bytes | the tracks sorted by title: track numbers |
+| `CLUS` | 8 bytes | the tracks by volume and first cluster: `volume << 31 \| cluster`, track number (an update finds a file of the index before by a binary search) |
 
 String references are offsets into `STRS`. Numbers of artists, albums and genres are indexes into
 their sections (16 bits: at most 65,535 of each).
@@ -93,7 +110,7 @@ their sections (16 bits: at most 65,535 of each).
 | 28 | 2 | track number (0: none) |
 | 30 | 2 | year (0: none) |
 | 32 | 1 | disc number (0: none; capped at 255) |
-| 33 | 1 | codec (`enum hp_codec`, `fw/src/hifi_proto.h`) |
+| 33 | 1 | codec, from the file's extension as the browser decides it (`enum hp_codec`, `fw/src/hifi_proto.h`; `.m4a` 7: the player tells AAC from ALAC when it opens it) |
 | 34 | 1 | volume |
 | 35 | 1 | flags: bit 0, exFAT "no FAT chain" (the clusters follow each other) |
 

@@ -181,6 +181,7 @@ is open, except for the USB and system entries, which stop it.
 - After a read/write session, the clock is set from the newest file the computer wrote, when
   the clock was not set or was behind that file.
 - The microSD card is not available over USB yet.
+- When the computer wrote, the library is updated at once (see Settings, Library).
 
 **USB sound card** (0.97, high speed in 0.98, 192 kHz in 0.99, remote and Power key since 0.99): plug the cable, then choose the entry. The computer
 sees a sound card named "ECHO MINI" (USB Audio Class 2 at high speed, or Class 1 on an older
@@ -246,7 +247,18 @@ power off (except the sleep timer).
 | Sleep timer | off, 15, 30, 45, 60, 90 min; shows the minutes left. At the end the music fades out over 5 s, pauses, and the player powers off (it resumes paused there) | off |
 | Power off when idle | 5, 10, 20, 30 min, never: nothing played and no key for that long (not with the USB cable) | 10 min |
 | Swap VOL+ and VOL- | the volume keys of the play screen swapped (lists and seek unchanged) | no |
+| Library (PLAY: update) | the tracks in the library's index, or **none**; PLAY updates it (below) | |
 | Restore the defaults | PLAY puts back all the defaults above, except the language | |
+
+**Library** (being written: the screens to browse it come next): an index of the tags of the
+music on the internal memory and the card, in the file NEWFWLIB.DAT at the root of the internal
+memory (created by the player, 8 MiB). The update stops the music and shows its progress:
+looking for the music, reading the tags, sorting, writing. Files not changed since the last
+update are not read again, and an update with the same files ends in a few seconds. **BACK**
+stops it; the library before is kept, as after a power cut. Reading the tags is the long part:
+about 3 to 4 minutes for 18,000 tracks the first time. Big cover art embedded in the files
+slows it down (an Ogg or Opus file is read through its whole cover): 600 pixels wide are
+plenty for the player's screen.
 
 The translations are those of `fw/po/` in the repository (docs/TRANSLATING.md): a string not yet
 translated shows in English. The Japanese and Simplified Chinese ones are partial for now. The log

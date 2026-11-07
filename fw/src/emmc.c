@@ -39,17 +39,26 @@ int emmc_sectors(uint32_t *n)
     return *n ? 0 : EMMC_EDATA;
 }
 
+struct io_count emmc_io;
+uint32_t ticks(void);
+
 int emmc_read(uint32_t sector, uint32_t count, void *buf)
 {
+    uint32_t t0 = ticks();
     while (count) {
         uint32_t n = count > 64 ? 64 : count;
         int r = transfer(sector, n, buf, 0);
-        if (r)
+        emmc_io.cmds++;
+        emmc_io.sectors += n;
+        if (r) {
+            emmc_io.us += ticks() - t0;
             return r;
+        }
         sector += n;
         count -= n;
         buf = (uint8_t *)buf + 512 * n;
     }
+    emmc_io.us += ticks() - t0;
     return 0;
 }
 

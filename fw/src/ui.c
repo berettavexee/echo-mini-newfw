@@ -6,6 +6,20 @@
 #include "crash.h"
 #include "ui_priv.h"
 #include "storage.h"
+#include "msc.h"
+#ifdef ECHO_LIBBUILD
+#include "libbuild.h"
+static int lb_test_progress(int phase, uint32_t done, uint32_t total)
+{
+    static uint32_t t;
+    if (millis() - t > 2000) {
+        t = millis();
+        log_printf("library: phase %d, %u of %u", phase, done, total);
+    }
+    return 0;
+}
+static const struct lb_hooks lb_test_hooks = { lb_test_progress };
+#endif
 
 #define STORAGE_BUDGET_US 4000                  /* the storage task per pass of the loop */
 
@@ -291,6 +305,11 @@ static void menu_action(int m, int *scr)
             dir_load(&path[1].dir);
             q_clear();
         }
+        if (m == M_USB_RW && msc.written_sectors) {     /* the computer wrote: the library */
+            log_printf("ui: %u sectors written over USB: the library updated",
+                       msc.written_sectors);
+            lib_update();                       /* (BACK: later, from the settings) */
+        }
     }
 }
 
@@ -332,6 +351,12 @@ void ui_main(void)
         path_root(FAT_VOL_INT);
         dir_load(&path[1].dir);
     }
+#ifdef ECHO_LIBBUILD
+    if (!q_playing && !parked) {                /* test build (ETUDE §125): the library's index */
+        struct lb_result lr;                    /* built at power-on, nothing playing */
+        lib_build(&lb_test_hooks, &lr);
+    }
+#endif
     if (q_playing || parked)
         scr = SCR_PLAYING;                      /* show a track restored at power-on */
     for (;;) {

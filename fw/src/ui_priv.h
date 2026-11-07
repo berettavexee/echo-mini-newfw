@@ -226,6 +226,10 @@ extern const struct screen settings_screen;
 uint32_t settings_put(uint32_t *w);             /* into the state sector (64 words): its sum */
 void settings_get(const uint32_t *w);           /* from it, when valid; then applied */
 
+/* ---- libui.c (ETUDE §126) ---- */
+int lib_status(void);           /* the tracks of the library's index, -1: none */
+int lib_update(void);           /* the update screen (the player stopped): 0, or < 0 (LB_*) */
+
 /* ---- resume.c ---- */
 void resume_save(void);
 void resume_save_later(void);   /* the same, written by the loop after the frame */

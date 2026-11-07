@@ -248,11 +248,17 @@ One line per version; the measurements are in `ETUDE.md`.
     genres, all songs), separate from the file browser, from an index of the tags in one
     contiguous file on the internal memory (NEWFWLIB.DAT, created by the firmware: its first
     file creation, FAT32 only), the card's tracks keyed by its serial; built in the storage
-    task, updated on demand and proposed after a USB session. Steps: 1. genre, album artist,
+    in a screen of its own. Steps: 1. genre, album artist,
     year and disc in the tag readers (done, §122); 2. the index format (docs/LIBRARY.md), a PC
     tool (`mklib.py`), the reader (`library.c`) and its host test (done, §123); then the file
-    creation (`fatwrite.c`, tested in the emulator with power cuts, §124); 3. the scan on the device; 4. the views; 5. playback and resume from a
-    view; 6. the card. Favourites would build on it;
+    creation (`fatwrite.c`, tested in the emulator with power cuts, §124); 3. the index built on
+    the device in a screen of its own with core B's memory, nothing playing (Settings, the line
+    Library; at once after a USB session that wrote; files unchanged not read again), compared
+    with mklib.py in the emulator up to 18,162 tracks; an update with the same files ends after
+    the count (a fingerprint, 3 s); on the device 18,003 tracks: 3 to 4 min built from the tags,
+    165 s after 5,733 files changed (done, §126; next: the old index's tables in RAM during an
+    update, 37 s of single-sector reads); 4. the views (the same track on both memories shown
+    once); 5. playback and resume from a view; 6. the card. Favourites would build on it;
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;
   - folder jumping: at the end of a folder, go on with the next one;

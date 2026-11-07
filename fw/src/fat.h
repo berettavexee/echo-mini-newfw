@@ -18,6 +18,7 @@ struct fat_vol {
     uint32_t spc;               /* sectors per cluster */
     uint32_t clusters;
     uint32_t root;              /* first cluster of the root directory */
+    uint32_t serial;            /* the volume serial number (boot sector) */
 };
 
 struct fat_file {
