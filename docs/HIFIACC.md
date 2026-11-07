@@ -168,7 +168,7 @@ bits); an AAC album (13 tracks) at 22.8-23.1 MHz of core B instead of 25 (-9 %),
 Test builds: `-DECHO_HWTEST` (both computed, pvaacdec's sound, `hwf:` log line) and
 `-DECHO_FFTCMP` (HIFIACC's sound, compared with pvaacdec on a copy).
 
-## The ALAC filter (from the stock firmware, not verified yet)
+## The ALAC filter (verified on the device, used by our ALAC decoder)
 
 Found in the stock ALAC module (overlay 79 of V3.9.0, `ETUDE.md` §113). Its decoder is FFmpeg's,
 and the hardware replaces its `lpc_prediction`: the whole adaptive predictor, the coefficient
@@ -186,8 +186,17 @@ update after each sample included.
   5. the same DMAC2 transfer as the FLAC filter (input to `+0x40`, output from `+0xa0`, in
      place);
   6. wait for bit 15 of `+0x08`, then `+0x04` &= ~`0x8000`.
-- To check on the device: exactness against a software predictor, orders 1 and 2 (wrong for
-  FLAC), the `lpc_quant` limit, the longest block.
+- **On the device** (the bench below, `ETUDE.md` §116): exact against our software predictor
+  for orders 3, 4, 8, 16 and 30, in 16-bit stereo (17 bits in the side channel), 24-bit 96 kHz
+  and mono, with the coefficients in FFmpeg's order (reversed from the stream; in stream order
+  every prediction differs). **Orders 1 and 2 are wrong**, from the first predicted sample on,
+  as for the FLAC filter; the stock ALAC module does not avoid them (Apple's encoder only
+  writes orders 4 and 8). 10 to 14 times faster than our predictor, DMA included (a 4,096-sample
+  frame at order 8: about 0.4 ms against 4.4 ms on the bench).
+- Not covered: `lpc_quant` of 12 and more (FFmpeg's encoder writes 5 to 9; kept in software, as
+  the stock module does), blocks over 8,191 samples (the length field; the coefficients adapt
+  along a block, so it cannot be split: kept in software).
+- Our driver: `fw/hifi/alacacc.c`, for orders 3 to 30 and `lpc_quant` below 12.
 
 ## The APE filters (from the stock firmware, not verified yet)
 
@@ -226,9 +235,9 @@ reversed (FFmpeg's order) and in stream order, and is compared. `fw/tools/mktest
 alacorder` makes ALAC files with the prediction order forced from 1 to 30.
 
 The emulator `fw/tools/emu_fw.py` models the LPC filter and DMAC2 (`tools/emu_host.py`, class
-`Accel`); the model is exact for orders 3 to 32 but, unlike the hardware, also for orders 1
-and 2. It models the ALAC filter after the stock module (FFmpeg's adaptive predictor), not yet
-after the device. The two filters run in C (`tools/emu_accel.c`, built on first use into
+`Accel`) and the ALAC filter (FFmpeg's adaptive predictor, exact on the device for orders 3 to
+30). Orders 1 and 2, wrong on the hardware, make the model print `!! HIFIACC order` (a failure
+in every emulator test). The two filters run in C (`tools/emu_accel.c`, built on first use into
 `tools/__pycache__` and loaded through ctypes; in Python when there is no C compiler, or with
 `EMU_NATIVE=0`), and the DMA moves a whole block per memory access.
 

@@ -103,6 +103,9 @@ struct hp_ctl {
     uint32_t hacc_sub, hacc_soft;       /* FLAC: LPC subframes on HIFIACC, in software after a
                                            timeout (ETUDE §67) */
     uint32_t synth_gran, synth_soft;    /* MP3: granules on SYNTH, in software (ETUDE §71) */
+    uint32_t alac_hw, alac_low, alac_quant, alac_long, alac_soft;   /* ALAC predictions (§116):
+                                           on HIFIACC; in software: order 1 or 2, lpc_quant >= 12,
+                                           over 8191 samples, after a timeout */
     uint32_t why;                       /* B: enum hp_why, with an HP_ERR_* of the open */
     /* The PCM ring read by the DMA (version 2, rework step 4, ETUDE §103): core B writes its
      * frames straight into the ring DMAC1 channel 5 plays (the output ring above), and follows

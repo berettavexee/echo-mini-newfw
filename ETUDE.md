@@ -4345,3 +4345,32 @@ La refonte (branche `rework`, 0.99r1 à r37, §97 à §110) fusionnée dans `mai
 **Correction (0.100f2)** : `pcm_update()` ne compte pas de tours d'après le temps au premier relevé qui suit un débit nul (le DMA était arrêté : la position suffit). Émulateur : le DMA du DAC s'arrête quand `I2S1 XFER` est à 0. Test `pause-resume` renforcé : deux pauses de 2 s (plus d'un demi-anneau), la piste jusqu'au bout, aucune sous-alimentation du cœur B, la durée entendue d'une lecture sans pause ; il échoue sur la 0.100f1 (2 sous-alimentations, 599 072 octets). Image de test 0.100f2hwt : `work/images/NEWFWHA3.IMG`.
 
 **L'écran pendant la pause** : il s'éteint après le délai réglé (30 s ici) sans touche, pause ou non ; la pause de 28 s était sous ce délai, la suivante l'a franchi. Pas un défaut.
+
+## 116. Bancs ALAC et Imdct36 sur l'appareil ; l'ALAC sur HIFIACC en production (0.100a1, 2026-11-07)
+
+**Bancs sur l'appareil** (image 0.100f1hwt, `work/hwlog/2026-11-07_0.100f1hwt/`, puis 0.100f2hwt) :
+- **Filtre ALAC** : 20 fichiers du jeu `alacorder` (5 s chacun, pas 20 s : `--seconds` du jeu), aucun délai dépassé. Coefficients inversés (l'ordre de FFmpeg) : **exact sur toutes les prédictions aux ordres 3, 4, 8, 16 et 30**, en 16 bits stéréo (17 bits dans le canal de différence), en 24 bits 96 kHz et en mono, `lpc_quant` de 5 à 9. Dans l'ordre du flux : tout diffère (le banc voit un mauvais ordre). **Ordres 1 et 2 : toujours faux**, dès le premier échantillon prédit (ordre 1 : nous −38, matériel −52 ; ordre 2 : −42 contre −43) — le même défaut que le filtre LPC du FLAC (§66). Le module FLAC d'origine les garde en logiciel ; le module ALAC d'origine (79) non : il n'exclut que l'ordre 0, l'ordre 31 et `lpc_quant` ≥ 12 (à `0x462e`), et calcule la chauffe comme nous (`0x4608`). L'encodeur d'Apple n'écrivant que les ordres 4 et 8, le défaut ne s'y voit pas.
+- **Vitesse** (TIMER1, DMA compris, contre notre prédicteur, par fichier de 5 s) : ordre 4 72 contre 837 ms, ordre 8 100 contre 1 094, ordre 16 121 contre 1 770, ordre 30 159 contre 2 170 ; 24/96 ordre 8 125 contre 1 231 : **10 à 14 fois plus rapide**.
+- **Imdct36** : la fin de calcul est bien l'**IRQ 7 en attente** (`NVIC_ISPR0` bit 7), sur 100 % des transformées (plus de 113 000, aucun délai dépassé), **0,4 à 1,5 µs** après la dernière entrée (contre 200 µs d'attente aveugle). En mode 3 la sortie vaut la référence × 2⁻⁸ (99,99 % à 1 près) ; en mode 1, environ × 16 mais 6 à 9 % seulement d'exactes (saturation probable). Le gain d'Imdct36 sur le MP3 resterait vers 0,2 MHz (110 ms de cœur B par minute) : non intégré.
+- **SYNTH** : l'IRQ 1 est en attente à chaque fin (165 456 sur 165 456 par piste).
+
+**Revue des attentes par interruption** : toutes nos attentes d'accélérateur sont des scrutations d'un registre d'état (FLAC et ALAC : état du DMA et bit 15 de `+0x08` ; FFT de Vorbis et AAC : bit 15 ; SYNTH : `+0x80c`). Les calculs durent de quelques µs (SYNTH, FFT : une interruption coûterait autant) à quelques ms (blocs LPC : 0,3 à 3 % du temps). Le bit d'IRQ en attente ne sert que là où aucun registre ne dit la fin (Imdct36). Une vraie interruption avec sommeil du cœur B pendant les longs blocs baisserait un peu la charge vue par le régulateur (< 3 %) : laissée pour plus tard (la ligne d'IRQ de HIFIACC ou du DMAC2 reste à trouver).
+
+**L'ALAC sur HIFIACC (0.100a1)** :
+- `fw/hifi/alacacc.c` (inclus par `codec_alac.c`) : la séquence du module 79, en place dans le tampon de sortie (la chauffe calculée en logiciel, puis les résidus), attente de 30 ms au plus. `unpc_block()` (`alacdec.c`) l'appelle pour les ordres 1 à 30 ; il prend les **ordres 3 à 30, `lpc_quant` < 12, blocs d'au plus 8 191 échantillons** (les trames ALAC en font 4 096 ; un bloc plus long ne se découpe pas, les coefficients s'adaptant le long du bloc). Le reste, et la suite d'une piste après 3 délais dépassés, restent en logiciel ; les résidus étant dans un autre tampon, un délai dépassé est refait en logiciel sans perte. `-DECHO_NO_HWALAC` l'éteint ; l'image de banc (`ECHO_HWTEST`) garde le son du logiciel.
+- Le chaînage DMA, en trois copies, passe dans `fw/hifi/haccdma.h` (FLAC, ALAC, banc).
+- Journal en fin de piste : `alacacc: <piste>: N predictions on HIFIACC; in software: … of order 1 or 2, … lpc_quant >= 12, … over 8191 samples, … after a timeout`.
+- **Émulateur** : le modèle du filtre écrit `!! HIFIACC order N` dès qu'un ordre 1 ou 2 lui est envoyé (FLAC ou ALAC), interdit dans tous les tests sauf les bancs (`hwtest`). Test `alac-exact` : ordres 8 (16 bits) et 30 (24/96) sur HIFIACC, ordre 2 en logiciel, chacun **identique au bit près** à FFmpeg dans ce que le DAC a joué (`--dac`) ; les fichiers d'un dossier s'enchaînent d'eux-mêmes pour être entendus en entier.
+- **Gain attendu** : le prédicteur fait environ 63 % du temps de notre décodeur (§57) : un décodeur environ 2,3 fois plus léger, en 16 bits/44,1 kHz d'environ 27 MHz à 12 MHz en moyenne. À mesurer sur l'appareil (image `work/images/NEWFWA1.IMG`) : `test_alacorder` et l'album en ALAC de `test_alac`, le « used mean » du cœur B contre les journaux de la 0.100.
+
+**Essai de la 0.100a1 sur l'appareil** (`work/hwlog/2026-11-07_0.100a1/`) : le jeu `alacorder`, 4 pistes de l'album en ALAC de `test_alac`, le 24/96 et le mono. Aucun délai dépassé, aucune prédiction des ordres 3 à 30 laissée au logiciel ; les ordres 1 et 2 (216 prédictions) en logiciel ; aucune sous-alimentation en lecture établie, son normal à l'écoute. La seule sous-alimentation (52 Ko) est celle du changement de piste à la main vers le 24/96 (ouverture du MP4 de 94 Mo : 242 ms), comme avant.
+
+| Piste | Cœur B, moyenne |
+|---|---|
+| 02 See Emily Play (16 bits/44,1 kHz) | **9,5 MHz** (35,3 MHz en 0.99r15) |
+| 01, 03, 04 de l'album (16/44,1) | 9,2 à 9,5 MHz |
+| 08 The Great Gig in the Sky (24/96) | 27,4 MHz |
+| 10 Money (mono 16/44,1) | 4,9 MHz |
+| `alacorder` 16/44,1, ordres 3 à 30 | 9,0 à 11,4 MHz (ordres 1 et 2, en logiciel : 10,7 et 12,4) |
+
+Le cœur B est **3,7 fois moins chargé** sur l'ALAC 16 bits que dans la 0.99r15, au-delà des 2,3 attendus (le prédicteur pesait plus que les 63 % mesurés sous QEMU au §57).

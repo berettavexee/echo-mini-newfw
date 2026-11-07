@@ -73,8 +73,11 @@ core goes from 37-39 MHz to 21-23 MHz (44.1 kHz, *Discovery*), SYNTH busy about 
 - **The end is an interrupt, not a register**: `+0x80c` never changes when polled. The stock
   module takes **IRQ 7** of core B (exception 23): its handler writes 0 to `+0x80c` and reads the
   36 outputs (`ETUDE.md` §113). SYNTH has **IRQ 1** (exception 17), whose handler writes 0 to
-  `+0x810`. Not tried yet: polling bit 7 of `NVIC_ISPR0` (`0xe000e200`) with the interrupt
-  masked, instead of waiting. Results were right after 200 µs.
+  `+0x810`. **Checked on the device** (`ETUDE.md` §116): with the interrupt masked, bit 7 of
+  `NVIC_ISPR0` (`0xe000e200`) is set at the end of every transform, 0.4 to 1.5 µs after the
+  last input (cleared through `NVIC_ICPR0` after the acknowledge); bit 1 at the end of every
+  SYNTH slot. In mode 3 the output is the exact transform scaled by 2^-8 (99.99 % within 1);
+  in mode 1 about 16 times larger, but only 6 to 9 % exact (it probably saturates).
 
 Not used by this firmware: pvmp3dec's 18-point MDCT with window and overlap takes 16 µs per
 subband, and its history format would force a rewrite of the whole IMDCT stage for a small

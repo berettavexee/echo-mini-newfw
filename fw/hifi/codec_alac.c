@@ -7,6 +7,7 @@
 #include <string.h>
 #include "rt.h"
 #include "alacdec.h"
+#include "alacacc.c"
 #ifdef ECHO_HWTEST
 #include "hwtest_alac.c"
 #endif
@@ -31,6 +32,7 @@ int codec_open(void)
         return -HP_ERR_FORMAT;
     if (h.config_len > sizeof cfg || in_read_wait(cfg, h.config_len) < h.config_len)
         return -HP_ERR_FORMAT;
+    alacc_track();
     if (alac_init(&dec, cfg, h.config_len, alloc))
         return -HP_ERR_UNSUPPORTED;
     /* the largest packet: maxFrameBytes when the encoder gave it, else uncompressed plus room for

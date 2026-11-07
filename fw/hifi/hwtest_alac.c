@@ -6,45 +6,15 @@
  * the counts, per order and lpc_quant, the first difference, times and timeouts), then in stream
  * order (ours: exact or not only, to show that the bench sees a wrong order). In ctl->hwa,
  * logged by core A at the end of the track. Included by codec_alac.c. */
-#include "accel.h"
+#include "haccdma.h"
 
 #define HWA_MAX_N   8191u                       /* the length field: 13 bits */
-#define HWA_CHUNK   2048u                       /* words per DMA block (LLI chain) */
 
-struct lli { uint32_t sar, dar, llp, ctl_lo, ctl_hi, sstat, dstat; };
 static int32_t hwa_buf[HWA_MAX_N];
 static struct lli hwa_in[4], hwa_out[4];
 static int16_t hwa_coefs[32];
 static uint32_t hwa_t0;
 static int hwa_ready;
-
-static void hwa_chain(struct lli *l, uint32_t src, uint32_t dst, int src_inc, uint32_t n,
-                      uint32_t ctl_chain, uint32_t ctl_last)
-{
-    uint32_t k = 0;
-    for (int i = 0; k < n; i++) {
-        uint32_t m = n - k < HWA_CHUNK ? n - k : HWA_CHUNK;
-        l[i].sar = src_inc ? src + 4 * k : src;
-        l[i].dar = src_inc ? dst : dst + 4 * k;
-        l[i].ctl_hi = m;
-        k += m;
-        l[i].llp = k < n ? (uint32_t)&l[i + 1] : 0;
-        l[i].ctl_lo = k < n ? ctl_chain : ctl_last;
-        l[i].sstat = l[i].dstat = 0;
-    }
-}
-
-static void hwa_channel(int ch, const struct lli *l, uint32_t cfg, uint32_t cfg_h)
-{
-    /* the first block in the registers too (ETUDE §66, HW1 and HW2) */
-    REG(DMA_CH(ch) + 0x00) = l[0].sar;
-    REG(DMA_CH(ch) + 0x08) = l[0].dar;
-    REG(DMA_CH(ch) + 0x10) = l[0].llp ? (uint32_t)l : 0;
-    REG(DMA_CH(ch) + 0x18) = l[0].ctl_lo;
-    REG(DMA_CH(ch) + 0x1c) = l[0].ctl_hi;
-    REG(DMA_CH(ch) + 0x40) = cfg;
-    REG(DMA_CH(ch) + 0x44) = cfg_h;
-}
 
 /* Before our predictor: 1 when this one is tested (its coefficients kept: ours adapts them) */
 int echo_alac_pre(const int16_t *coefs, uint32_t act, uint32_t num)
@@ -86,10 +56,7 @@ static int hwa_run(uint32_t num, uint32_t act, uint32_t chanbits, uint32_t densh
     for (uint32_t k = 0; k < act; k++)
         REG(HACC_ACOEF + 4 * k) = (uint32_t)(int32_t)(reversed ? hwa_coefs[act - 1 - k]
                                                               : hwa_coefs[k]);
-    hwa_chain(hwa_in, (uint32_t)hwa_buf, HACC_FIN, 1, num, 0x1a109125, 0x02109125);
-    hwa_chain(hwa_out, HACC_FOUT, (uint32_t)hwa_buf, 0, num, 0x18a09425, 0x00a09425);
-    hwa_channel(1, hwa_in, 0x800, 0x807);
-    hwa_channel(0, hwa_out, 0x400, 7);
+    hacc_dma_block(hwa_in, hwa_out, hwa_buf, hwa_buf, num);
     REG(HACC + 0x0c) = 0x60000000u | num << 15 | 3;     /* start */
     REG(DMA + 0x3a0) = 0x202;                   /* ChEnReg: channel 1, then 0 */
     REG(DMA + 0x3a0) = 0x101;

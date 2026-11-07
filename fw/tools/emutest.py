@@ -25,6 +25,8 @@ EMU, MKDISK, READLOG, MKBAD = (os.path.join(TOOLS, n) for n in
 VOL_SECTOR = 0x81000
 GOLDBERG = os.path.join(TOOLS, "..", "..", "testdata", "goldberg", "variatio4-5s.flac")
 ALWAYS_FORBID = [r"EXCEPTION", r"!! WRITE OUTSIDE", r"(?i)hard ?fault"]
+LOW_ORDER = r"!! HIFIACC order"                 # orders 1 and 2, wrong on the device (ETUDE §66,
+                                                # §116): never sent, but by the benches (hwtest)
 
 
 def keys(*seq):
@@ -240,6 +242,13 @@ def check_hwi(text):
 
 # The benches of the accelerators (ETUDE §113): the test image only (make EXTRA=-DECHO_HWTEST),
 # not in the default list
+# ALAC on HIFIACC (ETUDE §116): orders 8 and 30 (16-bit stereo, 24/96) on it, 2 in software
+# (wrong on the device: LOW_ORDER forbidden), each bit-exact against ffmpeg in what the DAC played
+TESTS["alac-exact"] = dict(set="alacorder", seconds=2, exact=True, pick=[
+    "alacorder/alac-16-44100-stereo-o8.m4a", "alacorder/alac-24-96000-stereo-o30.m4a",
+    "alacorder/alac-16-44100-stereo-o2.m4a"],
+    check=lambda text: [] if re.search(r"alacacc: \S+: [1-9]\d* predictions on HIFIACC", text)
+    else ["no prediction on HIFIACC"])
 TESTS["hwt-alac"] = dict(set="alacorder", seconds=1, hwtest=True, check=check_hwa)
 TESTS["hwt-imdct"] = dict(set="formats", pick=["formats/mp3-16-44100.mp3"], hwtest=True,
                           check=check_hwi)
@@ -307,9 +316,14 @@ def run_set(group, t, img, elf, tmp):
         at += open_ms(m)
         ks.append((at, "PLAY", 800))
     ms = at + open_ms(man[-1]) + 6000           # the log is written every 5 s
+    if t.get("exact"):                          # each file whole: the folder plays on by itself
+        ks = [(2000, "PLAY", 200)]
+        ms = 2000 + 1000 * len(man) * (t.get("seconds", SET_SECONDS) + 1) + 6000
+    dac = os.path.join(tmp, "dac.raw")
     out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--keys",
                           keys(*ks), "--ms", str(ms), "--steps", "300000000000", "--dump-disk",
-                          dump], capture_output=True, text=True)
+                          dump] + (["--dac", dac] if t.get("exact") else []),
+                         capture_output=True, text=True)
     text = read_log(dump) if os.path.exists(dump) else ""
     fails = [] if text else [f"no log (emulator: {out.stderr.strip()[-300:]!r})"]
     seen, tags, fmt = set(), None, None
@@ -354,13 +368,39 @@ def run_set(group, t, img, elf, tmp):
     for n, m in names.items():
         if n not in seen:
             fails.append(f"{m['file']}: never played")
-    for pat in ALWAYS_FORBID:
+    for pat in ALWAYS_FORBID + ([] if t.get("hwtest") else [LOW_ORDER]):
         mm = re.search(pat, text + "\n" + out.stdout, re.M)
         if mm:
             fails.append(f"forbidden: {pat}")
+    if t.get("exact"):
+        fails += check_exact(man, src, dac)
     if "check" in t:
         fails += t["check"](text)
     return fails, text + "\n" + out.stdout
+
+
+def check_exact(man, src, dac):
+    """Each file decoded by ffmpeg, in the ring's format (16-bit: packed stereo; 20 and 24-bit:
+    32-bit words, the data in the high bits; mono duplicated), found whole in what the DMA read
+    (--dac): bit-exact, from the first sample to the last"""
+    heard = open(dac, "rb").read() if os.path.exists(dac) else b""
+    fails = []
+    for m in man:
+        ref = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i",
+                              os.path.join(src, m["file"]), "-ac", "2", "-f",
+                              "s16le" if m["bits"] == 16 else "s32le", "-"],
+                             capture_output=True, check=True).stdout
+        if not ref or heard.find(ref) < 0:
+            fb = 4 if m["bits"] == 16 else 8    # where its start is, and how far it agrees
+            at = heard.find(ref[fb * 2048:fb * 2048 + 1024]) - fb * 2048
+            same = 0
+            if at >= 0:
+                while same < len(ref) and at + same < len(heard) and \
+                        heard[at + same] == ref[same]:
+                    same += 1
+            fails.append(f"{m['file']}: not bit-exact in what the DAC played ({len(ref)} bytes "
+                         f"expected; found from {at}, the same for {same} bytes)")
+    return fails
 
 
 def read_log(dump):
@@ -454,7 +494,8 @@ def run(name, t, img, elf, tmp):
             pos = m.end()
         else:
             fails.append(f"missing: {pat}")
-    for pat in ([] if t.get("fault") else ALWAYS_FORBID) + t.get("forbid", []):
+    for pat in ([] if t.get("fault") else ALWAYS_FORBID) + t.get("forbid", []) + \
+            ([] if t.get("hwtest") else [LOW_ORDER]):
         m = re.search(pat, whole, re.M)
         if m:
             fails.append(f"forbidden: {pat}: {whole[max(0, m.start() - 60):m.end() + 60]!r}")

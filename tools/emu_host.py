@@ -300,7 +300,13 @@ class Accel:
         x = list(memoryview(array.array("I", [v & 0xffffffff for v in self.fin[:n]])).cast("B")
                  .cast("i"))                                      # signed, in one pass
         del self.fin[:n]
-        if getattr(self, "func", 5) == 3:
+        alac = getattr(self, "func", 5) == 3
+        order = (self.reg.get(self.HACC + (0x28 if alac else 0x2c), 0) >> 16) & 0xff
+        if order < 3 and not getattr(self, "low_order_told", False):
+            self.low_order_told = True                            # once a run (the benches
+            print(f"!! HIFIACC order {order} ({'ALAC' if alac else 'FLAC'}): wrong on the "
+                  "device, the model computes it anyway")         # send them on purpose)
+        if alac:
             y = self._alac(x)
         else:
             cfg = self.reg.get(self.HACC + 0x2c, 0)

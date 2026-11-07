@@ -10,9 +10,9 @@
 #elif defined(ECHO_BPROBE)
 #define FW_VERSION "0.100p"          /* test build: what core B can reach, its costs (rework) */
 #elif defined(ECHO_HWTEST)
-#define FW_VERSION "0.100f2hwt"           /* test build: accelerators against the software */
+#define FW_VERSION "0.100a1hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.100f2"           /* test build: the resume after a pause (ETUDE §115) */
+#define FW_VERSION "0.100a1"           /* test build: ALAC on HIFIACC (ETUDE §116) */
 #endif
 #define FW_DATE    "2026-11-07"
 

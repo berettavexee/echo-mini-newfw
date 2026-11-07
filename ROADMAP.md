@@ -49,6 +49,7 @@ Last update: 2026-11-06, version 0.100 (the rework merged into `main`).
 | Musepack SV7 and SV8, APEv2 tags, exact seek | 0.80 | §61 |
 | Decoders hardened against damaged files; a fuzzing bench (Ogg, Vorbis, Opus, MP3, AAC, MP4, tags, FAT) | 0.81-0.83, 0.91 | §62-§64 |
 | The chip's accelerators: FLAC LPC (HIFIACC), MP3 synthesis (SYNTH), Vorbis IMDCT (HIFIACC FFT), AAC IMDCT FFTs (HIFIACC), Musepack synthesis (SYNTH): 28 to 65 % less core B load | 0.85-0.93 | §66-§77 |
+| ALAC's adaptive predictor on HIFIACC (orders 3 to 30; checked against our decoder on the device), the end of Imdct36 and SYNTH as pending IRQs | 0.100a1 | §113-§116 |
 | Automatic checks (`make check`, pre-commit hook, GitHub Actions); images reproducible byte for byte; emulator tests in the CI on a shareable test set (CC0 recording) | 0.91, 0.92, 0.99 | §94 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
@@ -183,10 +184,10 @@ One line per version; the measurements are in `ETUDE.md`.
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64); more varied seeds for the FAT
   target (its coverage stops growing after 20 minutes).
 - The accelerators (`docs/HIFIACC.md`, `docs/MP3ACC.md`): mapped from the stock modules but not
-  yet checked on the device (§113): HIFIACC's ALAC filter (module 79), its APE filters (module
-  80), the FIFOs without DMA, Imdct36's end (IRQ 7). Still unknown: the 64-bit MAC (no stock
-  module uses it). Each to check on the device with a comparison bench, with an emulator model.
-  Done: LPC, FFT, SYNTH.
+  yet checked on the device (§113): HIFIACC's APE filters (module 80), the FIFOs without DMA,
+  Imdct36's mode 1 (saturates). Still unknown: the 64-bit MAC (no stock module uses it), the
+  interrupt line of HIFIACC or DMAC2 (core B could sleep through long LPC blocks, §116). Done:
+  LPC, FFT, SYNTH, the ALAC filter, Imdct36's end (IRQ 7, §116).
 - Actions on the plug events (to be proposed and agreed first):
   - pause when the headphones are unplugged;
   - a USB screen to mount the internal memory or the card, read only or read/write.

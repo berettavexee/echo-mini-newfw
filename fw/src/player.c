@@ -1078,6 +1078,10 @@ void player_close(int stopped)
                    c->hwf.within1, c->hwf.max, c->hwf.hw_ticks / 24, c->hwf.sw_ticks / 24,
                    c->hwf.timeouts);
 #endif
+    if (c->alac_hw || c->alac_low || c->alac_quant || c->alac_long || c->alac_soft)
+        log_printf("alacacc: %s: %u predictions on HIFIACC; in software: %u of order 1 or 2, "
+                   "%u lpc_quant >= 12, %u over 8191 samples, %u after a timeout", own_file.name,
+                   c->alac_hw, c->alac_low, c->alac_quant, c->alac_long, c->alac_soft);
     if (c->hacc_sub || c->hacc_soft)
         log_printf("hifiacc: %s: %u LPC subframes on HIFIACC, %u in software after a timeout",
                    own_file.name, c->hacc_sub, c->hacc_soft);

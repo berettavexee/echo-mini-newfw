@@ -17,6 +17,11 @@ int alac_init(struct alac *a, const uint8_t *cookie, uint32_t n, void *(*alloc)(
  * bits (two words per frame); mono duplicated. 0 and *frames, or -1 on a damaged packet. */
 int alac_decode(struct alac *a, const uint8_t *pkt, uint32_t n, uint32_t *out, uint32_t *frames);
 
+/* The predictor of order act (1 to 30) on HIFIACC (alacacc.c, included by codec_alac.c): 1 done,
+ * 0 when it stays in software (pc then untouched) */
+int echo_alac_hw(const int32_t *pc, int32_t *out, uint32_t num, const int16_t *coefs,
+                 uint32_t act, uint32_t chanbits, uint32_t denshift);
+
 #ifdef ECHO_HWTEST
 /* Test build only (ETUDE §113): hwtest_alac.c, around alacdec.c's predictor */
 int echo_alac_pre(const int16_t *coefs, uint32_t act, uint32_t num);
