@@ -52,6 +52,7 @@ ALAC on the accelerator).
 | USB sound card as a headset remote (HID): PLAY play/pause, VOL+ or VOL- twice next or previous, MENU the remote on and off (kept); tested with VLC and YouTube on Linux | 0.100 | §95 |
 | USB sound card: the Power key (screen off and on; held 2 s, the card left, then the power off) | 0.100 | §95 |
 | ALAC's adaptive predictor on HIFIACC (orders 3 to 30; checked against our decoder on the device): core B at 9.5 MHz on 16-bit ALAC instead of 35; the end of Imdct36 and SYNTH as pending IRQs | 0.101 | §113-§116 |
+| Pause when the headphones are unplugged (the last plug out; plugging back does not play) | 0.101u1 | §119 |
 | Interface languages (gettext PO files, catalogues in the image, the Language setting): English, French, Japanese and Simplified Chinese (partial) | 0.101 | §112 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
@@ -68,6 +69,9 @@ the one fault record was the pause bug fixed in 0.101, §115). What is left of i
 do".
 
 ## Waiting for a test on the device
+
+- Pause when the headphones are unplugged, with a 4.4 mm plug (checked with 3.5 mm only, §119;
+  the emulator covers both and the two plugged together).
 
 - A steady battery percent (0.97): the mean of a minute of readings, moving freely only down on
   battery and up on USB, never 100 % while charging (§82); to check: no jump when a track
@@ -179,7 +183,6 @@ One line per version; the measurements are in `ETUDE.md`.
   interrupt line of HIFIACC or DMAC2 (core B could sleep through long LPC blocks, §116). Done:
   LPC, FFT, SYNTH, the ALAC filter, Imdct36's end (IRQ 7, §116).
 - Actions on the plug events (to be proposed and agreed first):
-  - pause when the headphones are unplugged (proposed in pull request #1, not merged);
   - a USB screen to mount the internal memory or the card, read only or read/write.
 - USB access to the microSD card (step S5 of §36).
 - USB sound card (done so far: the table above; history in `docs/USB_AUDIO.md`, §83-§93):

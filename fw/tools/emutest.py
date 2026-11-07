@@ -133,6 +133,21 @@ TESTS = {
                          expect=[r"audio: paused", r"audio: resumed", r"audio: paused",
                                  r"audio: resumed", r"player: finished after 441000 frames, 94\d\d ms"],
                          forbid=[r"core B stuck", r"core B underruns [1-9]"]),
+    # both headphone outputs in, PLAY: the 3.5 mm out (the 4.4 mm still in: no pause), then the
+    # 4.4 mm out: a pause (ETUDE §119); in again: no play until PLAY; PLAY, PLAY (paused by
+    # hand), out again: nothing more
+    "unplug-pause": dict(files={"A.WAV": "wav10"}, ms=13000,
+                         emu_args=["--gpio-at", "0:0:13:1,0:2:8:0,4000:0:13:0,5000:2:8:1,"
+                                   "6000:2:8:0,8500:2:8:1"],
+                         keys=keys((2000, "PLAY"), (7000, "PLAY"), (8000, "PLAY")),
+                         expect=[r"keys: jack 3\.5 mm out", r"keys: jack 4\.4 mm out(?:\n[^\n]*){0,3}"
+                                 r"ui: headphones out: paused",
+                                 r"keys: jack 4\.4 mm in", r"keys: play", r"audio: resumed",
+                                 r"keys: play", r"audio: paused", r"keys: jack 4\.4 mm out"],
+                         check=lambda w: [] if w.count("headphones out: paused") == 1 and not
+                         re.search(r"jack 4\.4 mm in\n(?:(?![^\n]*keys: play)[^\n]*\n)*?"
+                                   r"[^\n]*audio: resumed", w)
+                         else ["a pause or a play not expected"]),
     # a track saved paused at position 0 (the state written by the test: the keys cannot pause
     # before anything is heard), then a power on: it comes back paused (PR #9: it was lost, its
     # position 0 read as "nothing to resume")
@@ -498,6 +513,8 @@ def run(name, t, img, elf, tmp):
             pos = m.end()
         else:
             fails.append(f"missing: {pat}")
+    if "check" in t:
+        fails += t["check"](whole)
     for pat in ([] if t.get("fault") else ALWAYS_FORBID) + t.get("forbid", []) + \
             ([] if t.get("hwtest") else [LOW_ORDER]):
         m = re.search(pat, whole, re.M)

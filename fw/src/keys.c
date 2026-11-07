@@ -172,6 +172,11 @@ static int plug_poll(int *src)
     return EV_NONE;
 }
 
+int plug_present(int src)
+{
+    return src >= SRC_JACK35 && src <= SRC_USB && plug_in[src - SRC_JACK35];
+}
+
 int key_poll(struct key_ev *e)
 {
     e->key = KEY_NONE;

@@ -120,6 +120,8 @@ page), after a short silence: about 0.2 s (Vorbis) or 0.3 s (Opus).
 
 ### Pauses
 
+- Unplugging the headphones pauses the music (when no other headphones stay plugged in the
+  other output, 3.5 mm or 4.4 mm). Plugging them back does not start it again: press PLAY.
 - A pause of 1 min "parks" the track: the DACs and the HiFi core stop to save the battery.
   PLAY starts it again where it was, after a short delay.
 - With nothing playing, the player powers off after 10 min without a key, unless the USB cable
