@@ -503,6 +503,8 @@ def run(name, t, img, elf, tmp):
     subprocess.run([sys.executable, MKDISK, disk, img, "--synth-idb", "--size-mb", "300"] +
                    (["--fw2"] if t.get("fw2") else []) + files, check=True,
                    stdout=subprocess.DEVNULL)
+    if "prep" in t:                             # the volume changed before the run (fragmented,
+        t["prep"](disk, tmp)                    # a full root...)
     sd = []
     if t.get("sd"):                             # a blank card: 64 MiB of zeros (sparse)
         sd = ["--sd", os.path.join(tmp, "sd.img")]
@@ -515,6 +517,7 @@ def run(name, t, img, elf, tmp):
                           t["keys"], "--ms", str(t["ms"]), "--steps", "30000000000",
                           "--dump-disk", dump] + sd + [at(a) for a in t.get("emu_args", [])],
                          capture_output=True, text=True).stdout
+    between = t["between"](dump, tmp) if "between" in t and os.path.exists(dump) else []
     if "reboot" in t and os.path.exists(dump):
         shutil.move(dump, disk)
         if t["reboot"].get("state"):
@@ -533,14 +536,170 @@ def run(name, t, img, elf, tmp):
             pos = m.end()
         else:
             fails.append(f"missing: {pat}")
+    fails += between
     if "check" in t:
         fails += t["check"](whole)
+    if "disk_check" in t:
+        fails += t["disk_check"](dump, tmp) if os.path.exists(dump) else ["no disk after the run"]
     for pat in ([] if t.get("fault") else ALWAYS_FORBID) + t.get("forbid", []) + \
             ([] if t.get("hwtest") else [LOW_ORDER]):
         m = re.search(pat, whole, re.M)
         if m:
             fails.append(f"forbidden: {pat}: {whole[max(0, m.start() - 60):m.end() + 60]!r}")
     return fails, whole
+
+
+# ---- the library's file created by the firmware (ETUDE §124): ECHO_LIBCREATE images only ----
+LIB_SIZE = 512 + (8 << 20)
+
+
+def lib_header():
+    h = b"NEWFWLIB" + struct.pack("<II", 1, 0xffffffff)
+    h += bytes(508 - len(h))
+    import zlib
+    return h + struct.pack("<I", zlib.crc32(h))
+
+
+def part_offset(disk):
+    with open(disk, "rb") as f:
+        f.seek(VOL_SECTOR * 512 + 446 + 8)
+        return (VOL_SECTOR + struct.unpack("<I", f.read(4))[0]) * 512
+
+
+def mtools(disk, *cmd):
+    return subprocess.run([cmd[0], "-i", f"{disk}@@{part_offset(disk)}", *cmd[1:]],
+                          capture_output=True, text=True)
+
+
+def fsck(disk, tmp, lost_ok=False):
+    """fsck.fat -n on the volume: [] when clean (FSInfo's free count unknown or stale allowed:
+    the hosts count again); lost_ok: what a cut during the creation leaves, clusters reserved
+    that nothing uses (in the first FAT only when the cut came between the two copies)"""
+    off = part_offset(disk)
+    with open(disk, "rb") as f:
+        f.seek(off + 32)
+        total = struct.unpack("<I", f.read(4))[0]
+        f.seek(off)
+        part = os.path.join(tmp, "part.img")
+        with open(part, "wb") as o:
+            left = total * 512
+            while left:
+                b = f.read(min(left, 1 << 22))
+                o.write(b)
+                left -= len(b)
+    r = subprocess.run(["/usr/sbin/fsck.fat", "-n", part], capture_output=True, text=True)
+    os.remove(part)
+    bad = [ln for ln in r.stdout.splitlines()[1:] if ln.strip() and not re.match(
+        r"(Checking|Free cluster summary|\s*Auto-correcting|Starting check|Leaving filesystem|"
+        r".*: \d+ files,|  Leaving)", ln) and not (lost_ok and re.search(
+            r"[Rr]eclaim|unused clusters|orphan|[Ll]ost|FATs differ but appear to be intact|"
+            r"Using first FAT", ln))]
+    return [f"fsck: {ln.strip()}" for ln in bad][:5]
+
+
+def lib_file_check(disk, tmp, lost_ok=False):
+    """The volume clean, NEWFWLIB.DAT there: its size, one run of clusters, the empty header"""
+    from fatimg import Volume
+    fails = fsck(disk, tmp, lost_ok)
+    v = Volume(disk, VOL_SECTOR)
+    e = next((e for e in v.list() if e.name == "NEWFWLIB.DAT"), None)
+    if not e:
+        return fails + ["no NEWFWLIB.DAT"]
+    chain = list(v.chain(e.cluster))
+    if e.size != LIB_SIZE or chain != list(range(e.cluster, e.cluster + len(chain))) or \
+            len(chain) * v.spc * 512 < LIB_SIZE:
+        fails.append(f"NEWFWLIB.DAT: {e.size} bytes, {len(chain)} clusters, not one run")
+    elif v.sector(v.heap + (e.cluster - 2) * v.spc) != lib_header():
+        fails.append("NEWFWLIB.DAT: not the empty header")
+    return fails
+
+
+def no_lib_check(disk, tmp):
+    from fatimg import Volume
+    v = Volume(disk, VOL_SECTOR)
+    return fsck(disk, tmp) + (["NEWFWLIB.DAT created"] if any(
+        e.name == "NEWFWLIB.DAT" for e in v.list()) else [])
+
+
+def fill_holes(disk, tmp, holes_only_at_start=False):
+    """Files of 7 MiB with a file of 1 KiB after each, then the big ones deleted: free runs of
+    7 MiB (less than the library's 8 MiB); holes_only_at_start: ten of them, the rest of the
+    volume free, FSInfo's next free cluster put back to 2 (the search goes through the holes)"""
+    big, pin = os.path.join(tmp, "big.bin"), os.path.join(tmp, "pin.bin")
+    open(big, "wb").write(bytes(7 << 20))
+    open(pin, "wb").write(b"x" * 1024)
+    k = 0
+    while not holes_only_at_start or k < 10:
+        r1 = mtools(disk, "mcopy", big, f"::B{k:04d}.BIN")
+        r2 = mtools(disk, "mcopy", pin, f"::P{k:04d}.BIN")
+        if r1.returncode or r2.returncode:
+            mtools(disk, "mdel", f"::B{k:04d}.BIN")
+            break
+        k += 1
+    for i in range(k):
+        mtools(disk, "mdel", f"::B{i:04d}.BIN")
+    if holes_only_at_start:
+        off = part_offset(disk)
+        with open(disk, "r+b") as f:
+            f.seek(off + 48)
+            fsinfo = struct.unpack("<H", f.read(2))[0]
+            f.seek(off + fsinfo * 512 + 492)
+            f.write(struct.pack("<I", 2))
+
+
+def fill_root(disk, tmp):
+    """The root directory's clusters full: as many 8.3 files of one byte as it has free entries"""
+    from fatimg import Volume
+    v = Volume(disk, VOL_SECTOR)
+    free = 0
+    for c in v.chain(v.root):
+        for s in range(v.spc):
+            b = v.sector(v.heap + (c - 2) * v.spc + s)
+            free += sum(1 for i in range(16) if b[32 * i] in (0, 0xe5))
+    one = os.path.join(tmp, "one.bin")
+    open(one, "wb").write(b"1")
+    for i in range(free):
+        mtools(disk, "mcopy", one, f"::R{i:05d}.BIN")
+
+
+def lib_cut(n):
+    """A cut after n sectors of the creation (1: its first sector, 35 more: the two FATs, then
+    the directory entry, FSInfo): the file at the next boot, created then, or found (the entry
+    was written)"""
+    return dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                emu_args=["--cut-user-after", str(n)],
+                between=lambda d, tmp: fsck(d, tmp, lost_ok=True),
+                reboot=dict(ms=3000),
+                expect=[r"library: NEWFWLIB.DAT " + ("created" if n < 36 else "found")],
+                check=lambda w: [] if "POWER CUT after" in w else ["no power cut"],
+                disk_check=lambda d, tmp: lib_file_check(d, tmp, lost_ok=True))
+
+
+TESTS.update({
+    # a fresh volume: created (clean, its size, one run, the empty header); the next boot finds it
+    "lib-create": dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                       reboot=dict(ms=3000),
+                       expect=[r"fatwrite: NEWFWLIB\.DAT: 2049 clusters",
+                               r"library: NEWFWLIB\.DAT created, sectors",
+                               r"library: NEWFWLIB\.DAT found"],
+                       disk_check=lib_file_check),
+    # free space only in runs of 7 MiB: nothing written, the volume clean
+    "lib-nospace": dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                        prep=fill_holes, expect=[r"library: NEWFWLIB\.DAT not created \(-3\)"],
+                        disk_check=no_lib_check),
+    # holes at the start, the search from cluster 2: the run after them
+    "lib-holes": dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                      prep=lambda d, tmp: fill_holes(d, tmp, True),
+                      expect=[r"library: NEWFWLIB\.DAT created"], disk_check=lib_file_check),
+    # no free entry in the root: one more cluster for it, then the file
+    "lib-rootfull": dict(files={"A.WAV": "wav"}, keys="", ms=3000, libcreate=True,
+                         prep=fill_root, expect=[r"\(the root grows\)",
+                                                 r"library: NEWFWLIB\.DAT created"],
+                         disk_check=lib_file_check),
+    # a power cut after 0 to 36 sectors written (among them: within the FATs, between the two
+    # copies, after the directory entry): a consistent volume, then the file at the next boot
+    **{f"lib-cut{n}": lib_cut(n) for n in (0, 1, 2, 17, 18, 34, 35, 36)},
+})
 
 
 def make_sets(names, tmp):
@@ -577,7 +736,7 @@ def main():
         sys.exit(__doc__)
     img, elf = os.path.abspath(args[0]), os.path.abspath(args[1])
     names = args[2:] or [n for n in TESTS if not TESTS[n].get("fault") and
-                         not TESTS[n].get("hwtest")]
+                         not TESTS[n].get("hwtest") and not TESTS[n].get("libcreate")]
     failed = 0
     with tempfile.TemporaryDirectory(prefix="emutest_sets_") as sets_tmp, \
             concurrent.futures.ThreadPoolExecutor(jobs) as pool:

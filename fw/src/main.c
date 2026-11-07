@@ -11,6 +11,7 @@
 #include "hifi_proto.h"
 #include "crash.h"
 #include "lang.h"
+#include "library.h"
 #include "log.h"
 #include "regs.h"
 #include "rtc.h"
@@ -108,6 +109,12 @@ void sys_volume_init(void)
                    logs.next, logs.wraps);
         crash_boot();                           /* a fault of the last session (0.99r32) */
     }
+#ifdef ECHO_LIBCREATE
+    {                                           /* test build (ETUDE §124): the library's file */
+        struct fat_file lf;                     /* created at power-on when missing */
+        lib_file(&lf);
+    }
+#endif
 }
 
 static void storage_init(void)

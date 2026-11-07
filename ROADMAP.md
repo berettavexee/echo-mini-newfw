@@ -250,7 +250,7 @@ One line per version; the measurements are in `ETUDE.md`.
     task, updated on demand and proposed after a USB session. Steps: 1. genre, album artist,
     year and disc in the tag readers (done, §122); 2. the index format (docs/LIBRARY.md), a PC
     tool (`mklib.py`), the reader (`library.c`) and its host test (done, §123); then the file
-    creation; 3. the scan on the device; 4. the views; 5. playback and resume from a
+    creation (`fatwrite.c`, tested in the emulator with power cuts, §124); 3. the scan on the device; 4. the views; 5. playback and resume from a
     view; 6. the card. Favourites would build on it;
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;

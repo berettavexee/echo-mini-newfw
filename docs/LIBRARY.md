@@ -23,6 +23,17 @@ plus 8 MiB:
 A new index is written into the half not in use, then the header is rewritten to point at it:
 a power cut leaves the index before it.
 
+The firmware creates the file when it is missing (`fw/src/fatwrite.c`, `lib_file()` in
+`fw/src/library.c`), its header naming no half; it never deletes it: a file of that name with
+another size, or fragmented, is left as it is (to be deleted from a computer). The creation
+writes, in this order, the file's first sector (in free clusters), its chain in both FATs, its
+directory entry (one sector: the file appears whole) and FSInfo (the free count set to
+"unknown"); a power cut leaves at most clusters reserved that nothing uses. Only the sectors the
+creation planned can be written. It is tested in the emulator (`emutest.py lib-*`, an
+`ECHO_LIBCREATE` image): `fsck.fat` clean, the file one run of clusters with the empty header, a
+volume whose free space is fragmented (refused, nothing written), holes before a free run, a
+full root directory (one more cluster for it), and power cuts at eight points of the creation.
+
 All numbers are little-endian.
 
 ### The header

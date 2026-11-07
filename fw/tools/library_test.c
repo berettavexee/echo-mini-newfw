@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#define LIBRARY_HOST                            /* (lib_file: the device's) */
 #include "../src/library.c"
 
 static uint8_t *img;

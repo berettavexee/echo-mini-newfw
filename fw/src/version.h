@@ -9,6 +9,8 @@
 #define FW_VERSION "0.101fc"            /* test build: AAC sound from HIFIACC, compared */
 #elif defined(ECHO_BPROBE)
 #define FW_VERSION "0.101p"          /* test build: what core B can reach, its costs (rework) */
+#elif defined(ECHO_LIBCREATE)
+#define FW_VERSION "0.101lc"           /* test build: the library's file created at power-on */
 #elif defined(ECHO_HWTEST)
 #define FW_VERSION "0.101hwt"           /* test build: accelerators against the software */
 #else

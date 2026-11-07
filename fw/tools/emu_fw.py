@@ -27,6 +27,8 @@ too long); --rate only stands in without the ELF's symbol.
 state (ACMD41), as one that does not answer.
 --cut-after N: a power cut once N sectors of the firmware area are written (the rest of that
 write lost, the emulation stopped); with --dump-disk, the half-written disk is kept.
+--cut-user-after N: the same, counting the sectors written in the user volume, those of
+NEWFWLOG.TXT left out (ETUDE §124: the file system's writes).
 --cycles: the time comes from the instructions run instead (ETUDE §94): core A runs in slices
 of --slice instructions (20000), each one advancing the clock by slice / cpu_hz (the
 firmware's own variable, so it follows the PLL and the clocks on the crystal); ticks() and
@@ -184,6 +186,7 @@ class MMC:
         self.order = []                                           # write runs, in order
         self.p = 0x1b000                                          # from the IDB of BOOTDUMP
         self.cut, self.fw_written, self.stop = None, 0, None      # --cut-after
+        self.cut_user, self.user_written, self.skip = None, 0, set()  # --cut-user-after
         self.cut_done = False
         self.now, self.lat = None, None                           # --mmc-lat / --sd-lat
         self.pending, self.ready_at, self.wbusy_until = None, 0, 0
@@ -241,6 +244,15 @@ class MMC:
                     lba = self.wlba + i
                     if not FW1 <= lba < FW1 + self.p and not 0x81000 <= lba:
                         self.log.append(f"!! WRITE OUTSIDE THE FIRMWARE AREA: sector {lba:#x}")
+                    if self.cut_user is not None and lba >= 0x81000 and lba not in self.skip:
+                        if self.user_written >= self.cut_user:    # the power is gone
+                            self.log.append(f"POWER CUT after {self.user_written} sectors of "
+                                            f"the user volume, at sector {lba:#x}")
+                            self.cut_user, self.cut_done = None, True
+                            if self.stop:
+                                self.stop()
+                            break
+                        self.user_written += 1
                     if self.cut is not None and FW1 <= lba < FW1 + self.p:
                         if self.fw_written >= self.cut:           # the power is gone
                             self.log.append(f"POWER CUT after {self.fw_written} firmware "
@@ -540,6 +552,14 @@ def main():
         mmc.now, mmc.lat = clock_us, [int(x) for x in mmc_lat.split(",")]
     if opt("--cut-after", None):
         mmc.cut, mmc.stop = int(opt("--cut-after", None)), u.emu_stop
+    if opt("--cut-user-after", None):
+        mmc.cut_user, mmc.stop = int(opt("--cut-user-after", None)), u.emu_stop
+        from fatimg import Volume                                 # NEWFWLOG.TXT's sectors:
+        fv = Volume(opt("--disk", None), 0x81000)                 # not counted
+        for e in fv.list():
+            if e.name.upper() == "NEWFWLOG.TXT":
+                for c in fv.chain(e.cluster):
+                    mmc.skip.update(range(fv.heap + (c - 2) * fv.spc, fv.heap + (c - 1) * fv.spc))
     sdc = SDCard(opt("--sd", None), log) if opt("--sd", None) else None
     if sdc and opt("--sd-lat", None):
         sdc.now, sdc.lat = clock_us, [int(x) for x in opt("--sd-lat", None).split(",")]

@@ -36,6 +36,17 @@ int lib_track(uint32_t i, struct lib_track *t);
 /* A string into buf (max bytes, ended by 0, cut on a character boundary): its length, or < 0 */
 int lib_str(uint32_t ref, char *buf, uint32_t max);
 
+/* The file on the device (ETUDE §124): NEWFWLIB.DAT at the root of the internal volume, created
+ * when missing (fatwrite.c) with a header that names no half. 0 and f: there, the right size and
+ * contiguous (created now or before); < 0: not there and not created (FATW_*), or
+ * LIB_EDAMAGED: a file of that name that is not one (left as it is) */
+#define LIB_FILE     "NEWFWLIB.DAT"
+#define LIB_FILE_SIZE (512u + (8u << 20))
+#define LIB_EDAMAGED (-10)
+struct fat_file;
+int lib_file(struct fat_file *f);
+void lib_empty_header(uint8_t h[512]);  /* the header of a file with no index yet */
+
 /* The order of two strings (UTF-8): < 0, 0, > 0; artist: a leading "The " skipped. The sort of
  * the index (docs/LIBRARY.md): the folded characters, then the bytes; the empty string last */
 int lib_cmp(const char *a, const char *b, int artist);

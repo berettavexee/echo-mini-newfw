@@ -18,7 +18,12 @@ static struct {
 
 /* ---- reading, through four sectors cached ---- */
 #define CACHE 4
-static struct { uint32_t sector; uint32_t age; uint8_t b[512]; } cache[CACHE];
+#ifdef LIBRARY_HOST
+#define SCREENRAM
+#else
+#define SCREENRAM __attribute__((section(".screenram")))  /* not the BSS: set in lib_open */
+#endif
+static struct { uint32_t sector; uint32_t age; uint8_t b[512]; } cache[CACHE] SCREENRAM;
 static uint32_t cache_age;
 
 static void cache_clear(void)
@@ -76,6 +81,44 @@ static uint32_t crc_add(uint32_t c, const uint8_t *p, uint32_t n)
     }
     return c;
 }
+
+/* ---- the file on the device ---- */
+#ifndef LIBRARY_HOST
+#include "fat.h"
+#include "fatwrite.h"
+#include "log.h"
+
+void lib_empty_header(uint8_t h[512])
+{
+    for (int i = 0; i < 512; i++)
+        h[i] = 0;
+    __builtin_memcpy(h, "NEWFWLIB", 8);
+    h[8] = 1;                                   /* version 1 */
+    h[12] = h[13] = h[14] = h[15] = 0xff;       /* no half in use */
+    uint32_t c = ~crc_add(0xffffffffu, h, 508);
+    for (int i = 0; i < 4; i++)
+        h[508 + i] = (uint8_t)(c >> 8 * i);
+}
+
+int lib_file(struct fat_file *f)
+{
+    static uint8_t h[512] __attribute__((aligned(4))) SCREENRAM;
+    lib_empty_header(h);
+    int r = fat_create_contig(LIB_FILE, LIB_FILE_SIZE, h, f);
+    if (r < 0) {
+        log_printf("library: %s not created (%d)", LIB_FILE, r);
+        return r;
+    }
+    uint32_t first, count;
+    if (f->size != LIB_FILE_SIZE || fat_extent(f, &first, &count)) {
+        log_printf("library: %s is not one (%u bytes%s): left as it is", LIB_FILE, f->size,
+                   f->size == LIB_FILE_SIZE ? ", fragmented" : "");
+        return LIB_EDAMAGED;
+    }
+    log_printf("library: %s %s, sectors %x + %u", LIB_FILE, r ? "found" : "created", first, count);
+    return 0;
+}
+#endif
 
 /* ---- opening ---- */
 void lib_close(void)
