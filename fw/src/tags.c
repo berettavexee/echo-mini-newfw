@@ -1,5 +1,6 @@
 /* Tags for the play screen (step 6, ETUDE §25): title, artist, album, track number, read by core A
- * when a track starts. ID3v2.2/2.3/2.4 (then ID3v1) for MP3, Vorbis comments for FLAC, Ogg
+ * when a track starts; for the library (0.101t1, ETUDE §122) also the album artist, the genre (a
+ * number of ID3v1's table read as its name), the year and the disc number. ID3v2.2/2.3/2.4 (then ID3v1) for MP3, Vorbis comments for FLAC, Ogg
  * Vorbis and Opus (read through the Ogg pages), RIFF INFO or an ID3v2 chunk for WAV, ID3v2 or NAME
  * and AUTH chunks for AIFF (0.74, ETUDE §53; both after the samples too). Big fields (cover art, lyrics)
  * are skipped by position, never read. Unsynchronised or compressed ID3v2 frames are skipped.
@@ -128,6 +129,59 @@ static uint16_t num(const char *s)
     return v;
 }
 
+/* ID3v1's genres 0 to 79 (the standard list); the later Winamp numbers stay numbers */
+static const char *const id3_genres[80] = {
+    "Blues", "Classic Rock", "Country", "Dance", "Disco", "Funk", "Grunge", "Hip-Hop", "Jazz",
+    "Metal", "New Age", "Oldies", "Other", "Pop", "R&B", "Rap", "Reggae", "Rock", "Techno",
+    "Industrial", "Alternative", "Ska", "Death Metal", "Pranks", "Soundtrack", "Euro-Techno",
+    "Ambient", "Trip-Hop", "Vocal", "Jazz+Funk", "Fusion", "Trance", "Classical", "Instrumental",
+    "Acid", "House", "Game", "Sound Clip", "Gospel", "Noise", "AlternRock", "Bass", "Soul",
+    "Punk", "Space", "Meditative", "Instrumental Pop", "Instrumental Rock", "Ethnic", "Gothic",
+    "Darkwave", "Techno-Industrial", "Electronic", "Pop-Folk", "Eurodance", "Dream",
+    "Southern Rock", "Comedy", "Cult", "Gangsta", "Top 40", "Christian Rap", "Pop/Funk",
+    "Jungle", "Native American", "Cabaret", "New Wave", "Psychedelic", "Rave", "Showtunes",
+    "Trailer", "Lo-Fi", "Tribal", "Acid Punk", "Acid Jazz", "Polka", "Retro", "Musical",
+    "Rock & Roll", "Hard Rock",
+};
+
+static void copy_str(char *d, int max, const char *s)
+{
+    int i = 0;
+    for (; i < max - 1 && s[i]; i++)
+        d[i] = s[i];
+    d[i] = 0;
+}
+
+/* A genre given as text: "(17)", "(17)Rock" or "17" for ID3v1's number 17, else the text */
+static void genre_set(struct tags *t, const char *s)
+{
+    const char *p = s + (s[0] == '(');
+    if (*p >= '0' && *p <= '9') {
+        uint16_t n = num(p);
+        while (*p >= '0' && *p <= '9')
+            p++;
+        if (n < 80 && (s[0] == '(' ? *p == ')' && !p[1] : !*p)) {
+            copy_str(t->genre, sizeof t->genre, id3_genres[n]);
+            return;
+        }
+    }
+    copy_str(t->genre, sizeof t->genre, s);
+}
+
+/* The genre, year or disc from a value of n bytes in encoding enc (field: 'g', 'y', 'd') */
+static void field_text(struct tags *t, int field, const uint8_t *s, uint32_t n, int enc)
+{
+    char v[48];
+    set_text(v, sizeof v, s, n, enc);
+    if (field == 'g')
+        genre_set(t, v);
+    else if (field == 'y') {
+        uint16_t y = num(v);                    /* "2016-05-01": 2016 */
+        t->year = y >= 1000 && y <= 9999 ? y : 0;
+    } else
+        t->disc = num(v);                       /* "1/2": 1 */
+}
+
 static int key_is(const uint8_t *s, uint32_t n, const char *key)  /* "KEY=", no case */
 {
     uint32_t i = 0;
@@ -250,7 +304,17 @@ static void vorbis_comment(struct tags *t, const uint8_t *s, uint32_t n)
         char v[8];
         set_text(v, sizeof v, s + 12, n - 12, 3);
         t->track = num(v);
-    } else if ((s[0] | 0x20) == 'r') {
+    } else if (key_is(s, n, "ALBUMARTIST"))
+        set_text(t->albumartist, sizeof t->albumartist, s + 12, n - 12, 3);
+    else if (key_is(s, n, "ALBUM ARTIST"))
+        set_text(t->albumartist, sizeof t->albumartist, s + 13, n - 13, 3);
+    else if (key_is(s, n, "GENRE"))
+        field_text(t, 'g', s + 6, n - 6, 3);
+    else if (key_is(s, n, "DATE") || key_is(s, n, "YEAR"))
+        field_text(t, 'y', s + 5, n - 5, 3);
+    else if (key_is(s, n, "DISCNUMBER"))
+        field_text(t, 'd', s + 11, n - 11, 3);
+    else if ((s[0] | 0x20) == 'r') {
         char key[24], v[24];
         uint32_t k = 0;
         while (k < n && s[k] != '=')
@@ -309,27 +373,37 @@ static uint32_t id3v2(struct tags *t, uint32_t base)
         int fflags = ver == 2 ? 0 : fh[9];
         const char *id = (const char *)fh;
         char *dst = 0;
-        int max = 0, trk = 0;
+        int max = 0, trk = 0, fld = 0;
         if (ver == 2) {
             if (id[0] == 'T' && id[1] == 'T' && id[2] == '2') { dst = t->title; max = sizeof t->title; }
             else if (id[0] == 'T' && id[1] == 'P' && id[2] == '1') { dst = t->artist; max = sizeof t->artist; }
             else if (id[0] == 'T' && id[1] == 'A' && id[2] == 'L') { dst = t->album; max = sizeof t->album; }
+            else if (id[0] == 'T' && id[1] == 'P' && id[2] == '2') { dst = t->albumartist; max = sizeof t->albumartist; }
             else if (id[0] == 'T' && id[1] == 'R' && id[2] == 'K') trk = 1;
+            else if (id[0] == 'T' && id[1] == 'C' && id[2] == 'O') fld = 'g';
+            else if (id[0] == 'T' && id[1] == 'Y' && id[2] == 'E') fld = 'y';
+            else if (id[0] == 'T' && id[1] == 'P' && id[2] == 'A') fld = 'd';
         } else {
             if (!__builtin_memcmp(id, "TIT2", 4)) { dst = t->title; max = sizeof t->title; }
             else if (!__builtin_memcmp(id, "TPE1", 4)) { dst = t->artist; max = sizeof t->artist; }
             else if (!__builtin_memcmp(id, "TALB", 4)) { dst = t->album; max = sizeof t->album; }
+            else if (!__builtin_memcmp(id, "TPE2", 4)) { dst = t->albumartist; max = sizeof t->albumartist; }
             else if (!__builtin_memcmp(id, "TRCK", 4)) trk = 1;
             else if (!__builtin_memcmp(id, "TXXX", 4)) trk = 2;
+            else if (!__builtin_memcmp(id, "TCON", 4)) fld = 'g';
+            else if (!__builtin_memcmp(id, "TDRC", 4) || !__builtin_memcmp(id, "TYER", 4)) fld = 'y';
+            else if (!__builtin_memcmp(id, "TPOS", 4)) fld = 'd';
         }
         /* compressed, encrypted or unsynchronised frames are skipped */
-        if (!(dst || trk) || size < 2 || (fflags & (ver == 4 ? 0x0e : 0xc0)))
+        if (!(dst || trk || fld) || size < 2 || (fflags & (ver == 4 ? 0x0e : 0xc0)))
             skipped(size);
         else {
             uint32_t n = size > 1024 ? 1024 : size;
             const uint8_t *d;
             if (!rd_at(base + pos + hl, n, &d)) {
-                if (trk == 2)
+                if (fld)
+                    field_text(t, fld, d + 1, n - 1, d[0]);
+                else if (trk == 2)
                     id3_txxx(t, d, n);
                 else if (trk) {
                     char v[8];
@@ -368,6 +442,10 @@ static void id3v1(struct tags *t)
         set_text(t->album, sizeof t->album, p + 63, 30, 0);
     if (!t->track && !p[125] && p[126])
         t->track = p[126];
+    if (!t->year)
+        field_text(t, 'y', p + 93, 4, 0);
+    if (!t->genre[0] && p[127] < 80)
+        copy_str(t->genre, sizeof t->genre, id3_genres[p[127]]);
 }
 
 /* ---- FLAC ---- */
@@ -558,8 +636,13 @@ static void wav(struct tags *t)
                 if (!__builtin_memcmp(s, "INAM", 4)) { dst = t->title; max = sizeof t->title; }
                 else if (!__builtin_memcmp(s, "IART", 4)) { dst = t->artist; max = sizeof t->artist; }
                 else if (!__builtin_memcmp(s, "IPRD", 4)) { dst = t->album; max = sizeof t->album; }
-                if (dst && n <= 512 && !rd_at(q + 8, n, &s))
-                    set_text(dst, max, s, n, 3);
+                int fld = !__builtin_memcmp(s, "IGNR", 4) ? 'g' : !__builtin_memcmp(s, "ICRD", 4) ? 'y' : 0;
+                if ((dst || fld) && n <= 512 && !rd_at(q + 8, n, &s)) {
+                    if (fld)
+                        field_text(t, fld, s, n, 3);
+                    else
+                        set_text(dst, max, s, n, 3);
+                }
                 q += 8 + n + (n & 1);
             }
         } else if (!__builtin_memcmp(p, "id3 ", 4) || !__builtin_memcmp(p, "ID3 ", 4))
@@ -648,9 +731,11 @@ static void mp4(struct tags *t)
         if (c == 0xa96e616d) { dst = t->title; max = sizeof t->title; }         /* ©nam */
         else if (c == 0xa9415254) { dst = t->artist; max = sizeof t->artist; }  /* ©ART */
         else if (c == 0xa9616c62) { dst = t->album; max = sizeof t->album; }    /* ©alb */
-        else if (c != 0x74726b6e && c != 0x2d2d2d2d) {                          /* trkn, ---- */
-            skipped(next - pos);                /* covr and the rest: the window goes on */
-            continue;
+        else if (c == 0x61415254) { dst = t->albumartist; max = sizeof t->albumartist; }   /* aART */
+        else if (c != 0x74726b6e && c != 0x2d2d2d2d && c != 0xa967656e &&       /* trkn, ----, */
+                 c != 0x676e7265 && c != 0xa9646179 && c != 0x6469736b) {      /* ©gen, gnre, */
+            skipped(next - pos);                /* ©day, disk; covr and the rest: the window */
+            continue;                           /* goes on */
         }
         char key[32];
         key[0] = 0;
@@ -666,7 +751,15 @@ static void mp4(struct tags *t)
         uint32_t n = de - db - 8;
         if (dst)
             set_text(dst, max, p + 8, n, 3);
-        else if (key[0]) {
+        else if (c == 0xa967656e || c == 0xa9646179)                            /* ©gen, ©day */
+            field_text(t, c == 0xa967656e ? 'g' : 'y', p + 8, n, 3);
+        else if (c == 0x676e7265) {             /* gnre: ID3v1's number + 1 */
+            if (n >= 2 && be16(p + 8) >= 1 && be16(p + 8) <= 80)
+                copy_str(t->genre, sizeof t->genre, id3_genres[be16(p + 8) - 1]);
+        } else if (c == 0x6469736b) {           /* disk: 0, disc, total */
+            if (n >= 4)
+                t->disc = be16(p + 10);
+        } else if (key[0]) {
             char v[32];
             set_text(v, sizeof v, p + 8, n, 3);
             rg_field(t, key, v);
@@ -713,6 +806,14 @@ static void apev2(struct tags *t)
                 set_text(t->artist, sizeof t->artist, p, vlen, 3);
             else if (!__builtin_memcmp(kk, "ALBUM", 6))
                 set_text(t->album, sizeof t->album, p, vlen, 3);
+            else if (!__builtin_memcmp(kk, "ALBUM ARTIST", 13))
+                set_text(t->albumartist, sizeof t->albumartist, p, vlen, 3);
+            else if (!__builtin_memcmp(kk, "GENRE", 6))
+                field_text(t, 'g', p, vlen, 3);
+            else if (!__builtin_memcmp(kk, "YEAR", 5))
+                field_text(t, 'y', p, vlen, 3);
+            else if (!__builtin_memcmp(kk, "DISC", 5))
+                field_text(t, 'd', p, vlen, 3);
             else if (!__builtin_memcmp(kk, "TRACK", 6)) {
                 char tv[8];
                 set_text(tv, sizeof tv, p, vlen, 3);
@@ -729,8 +830,8 @@ static void apev2(struct tags *t)
 
 void tags_read(const struct fat_file *f, uint32_t codec, struct tags *t)
 {
-    t->title[0] = t->artist[0] = t->album[0] = 0;
-    t->track = 0;
+    t->title[0] = t->artist[0] = t->album[0] = t->albumartist[0] = t->genre[0] = 0;
+    t->track = t->year = t->disc = 0;
     t->rg_gain[0] = t->rg_gain[1] = RG_NONE;
     t->rg_peak[0] = t->rg_peak[1] = 0;
     t->ogg_end_page = t->ogg_end_seg = 0;

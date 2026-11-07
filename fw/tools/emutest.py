@@ -288,6 +288,7 @@ TESTS["set-ci"] = dict(set="tags,formats,covers", pick=[
     "covers/flac-cover1m.flac", "covers/mp3-cover1m.mp3", "covers/opus-cover1m.opus",
     "covers/aac-coverjpg600.m4a", "tags/mpc-unicode.mpc", "covers/mpc-cover1m.mpc"])
 FIELD_MAX = dict(title=96, artist=128, album=128)    # struct tags (tags.h), with the 0
+MORE_MAX = dict(albumartist=96, genre=48)           # its library fields (§122)
 
 
 def shown(s, field):
@@ -295,7 +296,7 @@ def shown(s, field):
     out, n = "", 0
     for c in s or "":
         k = len(c.encode())
-        if n + k > FIELD_MAX[field] - 1:
+        if n + k > {**FIELD_MAX, **MORE_MAX}[field] - 1:
             break
         out, n = out + c, n + k
     return out.rstrip(" ")
@@ -354,11 +355,13 @@ def run_set(group, t, img, elf, tmp):
                          capture_output=True, text=True)
     text = read_log(dump) if os.path.exists(dump) else ""
     fails = [] if text else [f"no log (emulator: {out.stderr.strip()[-300:]!r})"]
-    seen, tags, fmt = set(), None, None
+    seen, tags, fmt, more = set(), None, None, None
     lines = text.splitlines()
     for at, line in enumerate(lines):
         if "ui: tags in " in line:
-            tags, fmt = line, None
+            tags, fmt, more = line, None, None
+        elif "ui: tags+: " in line:
+            more = line
         elif "player: format: " in line:
             fmt = line
         mq = re.search(r"ui: queue \d+/\d+: (\S+) \((-?\d+)\)", line)
@@ -386,6 +389,14 @@ def run_set(group, t, img, elf, tmp):
             cut = got.rstrip("\ufffd")             # a log line holds 255 bytes (log.c)
             if got != want and not (len((tags or "").encode()) >= 240 and want.startswith(cut)):
                 fails.append(what + f"tags {got!r}, expected {want!r}")
+            num = lambda v: int(re.match(r"\d*", v or "").group() or 0)  # noqa: E731
+            yr = num(tg.get("year"))
+            mw = "'{}' / '{}' / {} / {}".format(shown(tg.get("albumartist"), "albumartist"),
+                                              shown(tg.get("genre"), "genre"),
+                                              yr if 1000 <= yr <= 9999 else 0, num(tg.get("disc")))
+            mg = (more or "").split("ui: tags+: ", 1)[-1] if more else "'' / '' / 0 / 0"
+            if mg != mw:
+                fails.append(what + f"tags+ {mg!r}, expected {mw!r}")
         mf = re.search(r"format: (\d+) Hz, (\d+) ch, (\d+) bits", fmt or "")
         if not mf:
             fails.append(what + "no format line")

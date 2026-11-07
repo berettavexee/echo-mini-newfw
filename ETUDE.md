@@ -4404,3 +4404,31 @@ Idée de la PR #5 (CHEYAN), reprise de zéro sur proposition validée. Une ligne
 **Tests** : `clock-hide` (les réglages ouverts au menu, la ligne basculée, retour ; au redémarrage la ligne `ui: settings` dit `clock hidden`) ; `lang` attend maintenant un nombre quelconque de chaînes. L'émulateur n'a pas d'horloge réglée : le dessin se vérifie sur l'appareil.
 
 **Sur l'appareil** (`work/hwlog/2026-11-07_0.101c1/`) : le bloc de réglages écrit par l'image précédente (0.101u1, sans le champ) relu `clock shown` au premier démarrage, ce qui confirme la compatibilité ; masquée et réaffichée plusieurs fois, en anglais, français, japonais et chinois ; masquée avant l'arrêt, relue `clock hidden` au démarrage suivant. Conforme pour l'utilisateur.
+
+## 121. Bibliothèque par métadonnées : le plan (2026-11-07)
+
+**Constat** : le navigateur est un navigateur de fichiers ; l'utilisateur préfère une navigation par métadonnées **séparée**. Les autres firmwares font tous ainsi : le firmware d'origine (« Media Library » : All Songs, Artists, Albums, Genres, d'après un index en zone cachée de la NAND bâti par « Media Library Refresh », REPORT §22 ; la navigation par dossiers lit la FAT en direct), EchoPod et Podium (`/.echo/library.db` réservé d'un seul tenant, reconstruit à la demande ou après une session USB qui a écrit ; idées seulement, GPL), Rockbox (navigateur de fichiers et « Database » séparés). Point commun : un index construit d'avance, jamais de lecture de tags à la navigation.
+
+**Décisions de l'utilisateur** : (1) un seul index, sur la mémoire interne (eMMC), les morceaux de la carte repérés par son numéro de série ; (2) le fichier créé **par le firmware** (sa première création de fichier : un fichier d'un seul tenant en FAT32, sur la mémoire interne seulement ; jusqu'ici il ne réécrivait que `NEWFWLOG.TXT`, créé sur le PC) ; (3) la mise à jour proposée automatiquement après une session USB en lecture/écriture, et à la demande.
+
+**Étapes** : 1. genre, artiste de l'album, année, disque dans les lecteurs de tags ; 2. format de l'index (`docs/LIBRARY.md` : enregistrements, table de chaînes sans doublons, tables triées par vue, deux moitiés A/B contre les coupures), outil PC `mklib.py`, tests sur le PC ; puis la création du fichier par le firmware (testée avec coupures de courant dans l'émulateur) ; 3. construction sur l'appareil dans la tâche de stockage (tri par morceaux via le fichier, mise à jour incrémentale par cluster et taille) ; 4. les vues (Library → Artists → albums → morceaux, Albums, Genres, All songs ; regroupement par artiste de l'album) ; 5. lecture et reprise depuis une vue (`queue.c` indépendant de la source) ; 6. la carte. Les favoris viendraient ensuite. Une étape à la fois, chacune proposée en détail avant le code.
+
+## 122. Bibliothèque, étape 1 : artiste de l'album, genre, année, disque (0.101t1, 2026-11-07)
+
+**Lecteurs de tags** (`tags.c`) : `struct tags` gagne `albumartist[96]`, `genre[48]`, `year`, `disc` (0 quand absents ; environ 150 octets de plus par structure : `tg`, `tg_next`, et une copie sur la pile de la tâche de stockage ; il reste 3 140 octets de BSS avant l'anneau du DAC).
+
+| Format | Artiste de l'album | Genre | Année | Disque |
+|---|---|---|---|---|
+| Commentaires Vorbis (FLAC, Vorbis, Opus) | ALBUMARTIST, « ALBUM ARTIST » | GENRE | DATE, YEAR | DISCNUMBER |
+| ID3v2.3/2.4 | TPE2 | TCON | TDRC, TYER | TPOS |
+| ID3v2.2 | TP2 | TCO | TYE | TPA |
+| ID3v1 (repli) | — | octet de genre | champ année | — |
+| MP4 | aART | ©gen, gnre | ©day | disk |
+| APEv2 | Album Artist | Genre | Year | Disc |
+| RIFF INFO | — | IGNR | ICRD | — |
+
+Un genre « (17) », « 17 » (ID3v2) ou un numéro (ID3v1, `gnre` de MP4 : numéro + 1) se lit comme son nom dans la table standard des 80 genres d'ID3v1 (« Psychedelic » corrigé : la table d'origine l'écrit « Psychadelic ») ; au-delà de 79, le texte reste tel quel. Année : les quatre premiers chiffres (« 2012-05-28 » donne 2012), entre 1000 et 9999 ; disque : « 1/2 » donne 1. Rien de nouveau ne s'affiche ; le journal ajoute `ui: tags+: '<artiste de l'album>' / '<genre>' / <année> / <disque>` quand l'un des champs est présent.
+
+**Tests** : `mktestset.py` écrit ces champs dans chaque format (les jeux `ascii`, `unicode` et `rg`, le jeu Latin-1 avec genre et année, un cas ID3v2.3 « (32) » lu « Classical », l'octet de genre ID3v1) ; les tests de jeux comparent la ligne `ui: tags+:` au manifeste (contre-épreuve : un numéro de genre faux est signalé). Banc de fuzzing `tags` : 3 minutes, 23 108 exécutions avec des graines portant les nouveaux champs, aucun plantage ni blocage.
+
+**Sur l'appareil** (`work/hwlog/2026-11-07_0.101t1/`) : une quinzaine de pistes de la bibliothèque de l'utilisateur (Vorbis, FLAC, MP3, Opus, WAV ; mémoire interne et carte). Les trois fichiers de la mémoire interne relus sur le PC avec mutagen donnent les mêmes valeurs : Vorbis `'Beast In Black' / 'Metal' / 2021 / 1` (DATE « 2021-10-29 ») ; FLAC `'FiiO' / 'FiiO' / 2017 / 0` (la clé « ALBUM ARTIST », avec une espace) ; MP3 `'Daft Punk' / '' / 2001 / 1` (TPOS « 1/1 », pas de genre). Sur la carte (non lisible en USB), des valeurs cohérentes : une compilation Opus en `'Various Artists'`, des genres ID3 texte (Rock, Stoner Rock, Soundtrack…). Le WAV sans tags : pas de ligne `tags+`. Lecture des tags inchangée en durée (40 µs pour une piste lue d'avance).

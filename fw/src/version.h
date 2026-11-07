@@ -12,7 +12,7 @@
 #elif defined(ECHO_HWTEST)
 #define FW_VERSION "0.101hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.101c1"           /* test build: the clock shown or hidden (§120) */
+#define FW_VERSION "0.101t1"           /* test build: album artist, genre, year, disc read (§122) */
 #endif
 #define FW_DATE    "2026-11-07"
 

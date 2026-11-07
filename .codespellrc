@@ -1,4 +1,4 @@
 [codespell]
 # English text and code; ETUDE.md and the translations (fw/po/*.po) are not
 skip = ./ETUDE.md,./fw/po/*.po,./third_party,./work,./loader,./flash,./fwbase,./fw/build,./fw/font,./fw/hifi/ext,./docs/manual,*.png,*.jpg,*.bin,*.IMG,fft_tw.h,upsample_tab.h,hwtest_imdct_tab.h,./.git
-ignore-words-list = ans,nd,nam,synopsys,statics,clen
+ignore-words-list = ans,nd,nam,synopsys,statics,clen,tye

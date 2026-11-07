@@ -243,8 +243,14 @@ One line per version; the measurements are in `ETUDE.md`.
     linear phase, and no oversampling);
   - left/right balance (the stock firmware corrects each DAC, ETUDE §3.5).
 - Music features of the stock firmware:
-  - media library: all songs, artists, albums, genres, from an index of the tags kept on the
-    internal memory, refreshed on demand or after a USB session;
+  - media library (planned, ETUDE §121): a Library entry beside the volumes (artists, albums,
+    genres, all songs), separate from the file browser, from an index of the tags in one
+    contiguous file on the internal memory (NEWFWLIB.DAT, created by the firmware: its first
+    file creation, FAT32 only), the card's tracks keyed by its serial; built in the storage
+    task, updated on demand and proposed after a USB session. Steps: 1. genre, album artist,
+    year and disc in the tag readers; 2. the index format, a PC tool and host tests; then the
+    file creation; 3. the scan on the device; 4. the views; 5. playback and resume from a
+    view; 6. the card. Favourites would build on it;
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;
   - folder jumping: at the end of a folder, go on with the next one;
