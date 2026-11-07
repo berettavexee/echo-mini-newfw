@@ -10,15 +10,35 @@ ALAC on the accelerator).
 
 | Feature | Since | ETUDE |
 |---|---|---|
+| Firmware installer from the main menu | 0.1x | §11 |
 | Playback of WAV, FLAC, MP3, Ogg Vorbis and Opus with our own decoders on the HiFi core | 0.4x | §19-§27 |
-| Gapless playback, the next track queued behind the end of the current one | 0.51 | §32 |
-| Sample-rate changes between tracks without freezing the screen | 0.52 | §33 |
 | Folder browser with long names (UTF-8), folders first, natural order | 0.4x | §25 |
-| Lists with the position "selected/total" and a scroll bar | 0.90 | — |
-| Internal memory (FAT32) and microSD card (FAT32 or exFAT), card insertion and removal | 0.58, 0.66 | §36-§38, §45 |
 | Play queue (folder, or everything under a folder), modes: in order, repeat all, repeat one, shuffle | 0.4x | §25 |
 | Resume after power off (folder, track, position, volume, modes), also on the card | 0.4x, 0.58 | §25, §38 |
+| USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
+| Real-time clock and its setting screen | 0.48 | §28 |
+| Power saving in pause (parked track, clocks on the crystal, power off after 10 min) | 0.49 | §30 |
+| Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
+| Gapless playback, the next track queued behind the end of the current one | 0.51 | §32 |
+| Sample-rate changes between tracks without freezing the screen | 0.52 | §33 |
+| Reliable keys (loose contacts filtered), volume on release, end of the queue | 0.53, 0.54 | §34 |
 | ReplayGain album / track / off (FLAC, Vorbis, Opus R128, MP3 ID3v2, APEv2, iTunes), track gain shown on yellow | 0.55, 0.59 | §35 |
+| Internal memory (FAT32) and microSD card (FAT32 or exFAT), card insertion and removal | 0.58, 0.66 | §36-§38, §45 |
+| Flicker-free drawing | 0.60 | §39 |
+| Low battery: warning, power off, refusal to start; battery gauge from a measured discharge (about 15.5 h of playback; runs per version in `docs/BATTERY.md`) | 0.64, 0.84 | §43, §61, §65 |
+| Empty files greyed, damaged files skipped, a "Cannot play" screen: what went wrong (the reason of a refusal) and what to do | 0.65-0.67, 0.94 | §44, §46, §78 |
+| Charging screen (cable in at power on, or Power held with the cable in) | 0.68, 0.69 | §48 |
+| Core B's RAMs without the wait state (about 22 % less load) | 0.73 | §51-§52 |
+| AIFF and AIFF-C (uncompressed), in the WAV image; tags after the samples read in WAV and AIFF | 0.74 | §53 |
+| AAC-LC in M4A: PacketVideo decoder, MP4 read on core A, gapless, exact seek, iTunes tags and ReplayGain | 0.75 | §54-§55 |
+| ALAC in M4A (16, 20, 24 bits), on the same MP4 reader; our decoder derived from Apple's (half the load) | 0.76, 0.77 | §56-§57 |
+| Sample rates from 8 to 192 kHz played as they are (the stock firmware's 15 rates, three PLLs corrected: 176.4 kHz was 0.28 % slow until 0.98); upsampling for unusual rates; the real output rate in the log | 0.78, 0.79, 0.98 | §59-§60, §88 |
+| Musepack SV7 and SV8, APEv2 tags, exact seek | 0.80 | §61 |
+| Decoders hardened against damaged files; a fuzzing bench (Ogg, Vorbis, Opus, MP3, AAC, MP4, tags, FAT) | 0.81-0.83, 0.91 | §62-§64 |
+| The chip's accelerators: FLAC LPC (HIFIACC), MP3 synthesis (SYNTH), Vorbis IMDCT (HIFIACC FFT), AAC IMDCT FFTs (HIFIACC), Musepack synthesis (SYNTH): 28 to 65 % less core B load | 0.85-0.93 | §66-§77 |
+| Lists with the position "selected/total" and a scroll bar | 0.90 | — |
+| Automatic checks (`make check`, pre-commit hook, GitHub Actions); images reproducible byte for byte; emulator tests in the CI on a shareable test set (CC0 recording) | 0.91, 0.92, 0.99 | §94 |
+| Play queue by folders: PLAY held on a tree or the whole card (4,000 folders), shuffle as a permutation of all the tracks | 0.95 | §79 |
 | Tags and ReplayGain found after a large cover (Ogg, FLAC, ID3v2: up to 16 MiB) and in an APEv2 tag holding a cover | 0.96 | §81 |
 | Settings screen: screen timeout, brightness (backlight PWM), tags or file names, ReplayGain auto and preamp, start-up, sleep timer, power off when idle, swapped volume keys | 0.96 | §81 |
 | Brightness in ten perceptual steps (8 to 100 %, about x1.3 a step) | 0.97 | §82 |
@@ -31,70 +51,21 @@ ALAC on the accelerator).
 | A queue made by PLAY held (a tree, the whole card) resumes after a power off, same track, same shuffled order (18,257 tracks in 1,396 folders walked again in 2.4 s) | 0.100 | §96 |
 | USB sound card as a headset remote (HID): PLAY play/pause, VOL+ or VOL- twice next or previous, MENU the remote on and off (kept); tested with VLC and YouTube on Linux | 0.100 | §95 |
 | USB sound card: the Power key (screen off and on; held 2 s, the card left, then the power off) | 0.100 | §95 |
-| Seek on the bar (VOL+ and VOL- together); fast seek in Ogg files | 0.50, 0.89 | §31, §75 |
-| Real-time clock and its setting screen | 0.48 | §28 |
-| USB mass storage of the internal memory (read only or read/write) | 0.4x | — |
-| Power saving in pause (parked track, clocks on the crystal, power off after 10 min) | 0.49 | §30 |
-| Reliable keys (loose contacts filtered), volume on release, end of the queue | 0.53, 0.54 | §34 |
-| Flicker-free drawing | 0.60 | §39 |
-| Firmware installer from the main menu | 0.1x | §11 |
-| Low battery: warning, power off, refusal to start; battery gauge from a measured discharge (about 15.5 h of playback) | 0.64, 0.84 | §43, §61, §65 |
-| Play queue by folders: PLAY held on a tree or the whole card (4,000 folders), shuffle as a permutation of all the tracks | 0.95 | §79 |
-| Empty files greyed, damaged files skipped, a "Cannot play" screen: what went wrong (the reason of a refusal) and what to do | 0.65-0.67, 0.94 | §44, §46, §78 |
-| Charging screen (cable in at power on, or Power held with the cable in) | 0.68, 0.69 | §48 |
-| Core B's RAMs without the wait state (about 22 % less load) | 0.73 | §51-§52 |
-| AIFF and AIFF-C (uncompressed), in the WAV image; tags after the samples read in WAV and AIFF | 0.74 | §53 |
-| AAC-LC in M4A: PacketVideo decoder, MP4 read on core A, gapless, exact seek, iTunes tags and ReplayGain | 0.75 | §54-§55 |
-| ALAC in M4A (16, 20, 24 bits), on the same MP4 reader; our decoder derived from Apple's (half the load) | 0.76, 0.77 | §56-§57 |
-| Sample rates from 8 to 192 kHz played as they are (the stock firmware's 15 rates, three PLLs corrected: 176.4 kHz was 0.28 % slow until 0.98); upsampling for unusual rates; the real output rate in the log | 0.78, 0.79, 0.98 | §59-§60, §88 |
-| Musepack SV7 and SV8, APEv2 tags, exact seek | 0.80 | §61 |
-| Decoders hardened against damaged files; a fuzzing bench (Ogg, Vorbis, Opus, MP3, AAC, MP4, tags, FAT) | 0.81-0.83, 0.91 | §62-§64 |
-| The chip's accelerators: FLAC LPC (HIFIACC), MP3 synthesis (SYNTH), Vorbis IMDCT (HIFIACC FFT), AAC IMDCT FFTs (HIFIACC), Musepack synthesis (SYNTH): 28 to 65 % less core B load | 0.85-0.93 | §66-§77 |
 | ALAC's adaptive predictor on HIFIACC (orders 3 to 30; checked against our decoder on the device): core B at 9.5 MHz on 16-bit ALAC instead of 35; the end of Imdct36 and SYNTH as pending IRQs | 0.101 | §113-§116 |
 | Interface languages (gettext PO files, catalogues in the image, the Language setting): English, French, Japanese and Simplified Chinese (partial) | 0.101 | §112 |
-| Automatic checks (`make check`, pre-commit hook, GitHub Actions); images reproducible byte for byte; emulator tests in the CI on a shareable test set (CC0 recording) | 0.91, 0.92, 0.99 | §94 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
 
-A rework of how the work is shared between the two cores (core B: the whole PCM path to the
-DMA; core A: one loop with a time budget, short interrupts), in seven steps, each one checked
-in the emulator, then on the device, on the branch `rework`; merged into `main` with 0.100.
-
-| Step | Versions | Checked | ETUDE |
-|---|---|---|---|
-| 1. Measure: the longest gaps of the audio path and of the loops, with the operation behind them, the rings' lowest fill (`fw/tools/perfreport.py`, the emulator's `perf-*` scenarios) | r1-r4 | device (77 min session, r4) | §97 |
-| 2. One loop and a stack of screens: the screen wakes without blocking (the 120 ms gap gone), menu, settings and clock screens served by the main loop, the sleep timer's fade a step of the loop | r5-r9 | device (r9) | §99 |
-| 3. A storage task (a coroutine, 4 ms a pass): the next track's tags read ahead (a 17.9 MB Ogg cover no longer between two tracks), the tree walk (the whole card, 18,257 tracks, 27 ms at most out of the audio path), saves after the frame; a seek keeps the tags | r10-r16 | device (r15, r16) | §100-§101 |
-| 4. Core B writes the PCM ring the DMA reads (96 KiB in HIGHRAM1; core A no longer copies PCM), the input ring 96 KiB in SYSRAM (96 KiB left free for the screens), the battery beeps mixed by core B; r23: the resume of a tree queue plays its track at once, the tree walked meanwhile | r17-r23 | device (r21) | §102-§104 |
-| 5. The input ring in segments (a jump core B cannot serve is a request core A answers: back, forward, Musepack's seek table), a chained track and a seek opened while the loop goes on, gapless checked sample for sample; r26: the card mounted at power-on | r24-r26 | emulator; the card at power-on and album chains on the device (r30, r31) | §105-§106 |
-| 6. Core B's clock: our feedback loop kept, with finer rules (a window of a quarter of the PCM ring; the ring under half a level up, under a quarter the top; over 85 % load up at once, under 65 % for 1 s straight down to the level for 75 %); core B lighter (its SysTick only while playing); r30-r31: core B's load in 24-bit WAV halved again (192 kHz: 63-66 MHz since r18, now 33 MHz), by a shorter PCM ring write and SYSRAM read by aligned words | r27-r31 | device (r30, r31) | §107-§108 |
-| 7. Robustness: a fault record in a sector of NEWFWLOG.TXT written by the fault handler (it survives a power off; a "Fault" screen once at the next boot); core B reloaded after a fault or 500 ms stuck, the same track again 1 s before (passed over the second time); the watchdog at 2.7 s, its interrupt writing the record; an `ECHO_FAULT` test image | r32-r36 | device (r34f-r36f) | §109 |
-
-Margins measured (§103, §106): a 500 ms stall of core A causes no underrun in MP3, Vorbis or
-AAC (3 to 5 s of protection); the tightest case, WAV 24/192, stands about 150 ms. Long tracks:
-1 to 4 clock changes of core B instead of 3 to 19, no underrun.
-
-Checked on the device with r31: the resume of a tree queue over three power cycles (the whole
-card, 18,257 tracks: the track at once, the tree walked in 3.4 s meanwhile), seeks, the sound
-card (16/44.1, 24/96, 24/192, no packet lost). Musepack SV7 (no seek table): a seek reads the
-file from its start again on core B (360 to 730 ms of silence, the loop free); kept as it is,
-SV7 being rare (decided 2026-11-06).
-
-Left from the rework:
-- a long session with the normal image (no fault record, no watchdog reset expected);
-- the keys read in the SysTick interrupt;
-- the screens that stop the music (USB, install, sound card, system) still in loops of their
-  own;
-- still blocking the loop: a folder opened by the browser, a card put in during playback
-  (mounted at its first use, up to 253 ms);
-- at 176.4 and 192 kHz the clock rules swing between 50 and 80 MHz (10 changes a track, the
-  ring kept over half); a DMA copy from SYSRAM would save about 5 MHz more there (§108);
-- the next track prepared in the input ring, without restarting core B: left out (nothing
-  audible to gain today) unless a need shows.
-
-Ideas from the other projects for it (ETUDE §98): still screens not redrawn and the loop in WFI
-(EchoPod), cold code built for size (Podium), a wired headset remote on the 3.5 mm mic contact
-(Podium; a feature, not part of the rework).
+How the work is shared between the two cores, redone in seven steps, each checked in the
+emulator then on the device (ETUDE §97-§109): measures of the audio path; one main loop and a
+stack of screens; a storage task (tags read ahead, the tree walked while the music plays); core
+B writes the PCM ring the DMA reads; the input ring in segments (chained tracks and seeks opened
+while the loop goes on, gapless checked sample for sample); finer clock rules for core B; a
+fault record, core B restarted after a fault or a hang, a watchdog. Margins: a 500 ms stall of
+core A causes no underrun in MP3, Vorbis or AAC; WAV 24/192 stands about 150 ms. The long
+session on the normal image is done (0.99r37, 14.6 h to an empty battery: no watchdog reset;
+the one fault record was the pause bug fixed in 0.101, §115). What is left of it is under "To
+do".
 
 ## Waiting for a test on the device
 
@@ -183,6 +154,18 @@ One line per version; the measurements are in `ETUDE.md`.
 
 ## To do
 
+- Left from the rework (§97-§109):
+  - the keys read in the SysTick interrupt;
+  - the screens that stop the music (USB, install, sound card, system) still in loops of their
+    own;
+  - still blocking the loop: a folder opened by the browser, a card put in during playback
+    (mounted at its first use, up to 253 ms);
+  - at 176.4 and 192 kHz the clock rules swing between 50 and 80 MHz (10 changes a track, the
+    ring kept over half); a DMA copy from SYSRAM would save about 5 MHz more there (§108);
+  - ideas from the other projects (§98): still screens not redrawn and the loop in WFI
+    (EchoPod), cold code built for size (Podium);
+  - the next track prepared in the input ring without restarting core B: left out (nothing
+    audible to gain today) unless a need shows.
 - Screen writes by DMA: a band (for instance 320 x 16) drawn into a buffer, then sent to the
   panel by the DMA, instead of the CPU writing each pixel: a scrolling line (the long title's
   32-pixel marquee every 33 ms, since PR #2) and full redraws (11 to 14 ms today) would no
@@ -196,7 +179,7 @@ One line per version; the measurements are in `ETUDE.md`.
   interrupt line of HIFIACC or DMAC2 (core B could sleep through long LPC blocks, §116). Done:
   LPC, FFT, SYNTH, the ALAC filter, Imdct36's end (IRQ 7, §116).
 - Actions on the plug events (to be proposed and agreed first):
-  - pause when the headphones are unplugged;
+  - pause when the headphones are unplugged (proposed in pull request #1, not merged);
   - a USB screen to mount the internal memory or the card, read only or read/write.
 - USB access to the microSD card (step S5 of §36).
 - USB sound card (done so far: the table above; history in `docs/USB_AUDIO.md`, §83-§93):
@@ -269,12 +252,9 @@ One line per version; the measurements are in `ETUDE.md`.
     the card;
   - delete a file from the browser (needs writing to FAT32 and exFAT: read only today);
   - format the internal memory or the card, reset the settings;
-  - interface languages besides English (the font already covers Latin, Greek, Cyrillic and
-    CJK): gettext PO files, open to Weblate (docs/TRANSLATING.md, ETUDE §112). Done in the
-    emulator and on the device (0.101): the strings marked, the catalogues in the image, the
-    Language setting, French (complete), Japanese and Simplified Chinese (81 of 153 strings from
-    pull request #1, the rest proposed, fuzzy); to do: a review of the Japanese and Chinese, the
-    Weblate project;
+  - interface languages (done in 0.101, §112): a native review of the Japanese and Chinese
+    strings proposed since pull request #1 (72 of 153, fuzzy, shown in English), the Weblate
+    project, more languages (docs/TRANSLATING.md);
   - colour themes (minor);
   - daylight saving time: the change between summer and winter time (the real-time clock keeps
     local time today, set by hand on its screen, §28).
@@ -299,17 +279,16 @@ One line per version; the measurements are in `ETUDE.md`.
   - enough for most MODs, the small S3Ms, few ITs.
 - Album covers (skipped today).
 - M3U playlists.
+- A wired headset remote on the 3.5 mm mic contact (Podium, §98).
 - A spoken "battery low" instead of the beeps: a short recording in the image (15-30 KiB), made
   with a speech synthesiser whose licence lets us ship the sound.
-- ALAC: the predictor (63 % of our decoder's time, §57) on the HIFIACC's adaptive FIR, as the
-  stock firmware does, or in Thumb-2 assembly; not needed for now (16-bit at the lowest step).
 - AAC: assembly optimisations, not a priority (core B at 23 MHz, the lowest step, since 0.92):
   a Cortex-M3 header for the fixed-point operations (smull/smlal; the decoder's ARMv5TE variant
   uses DSP instructions the M3 lacks), then hand-written Thumb-2 for the hot functions left by
   the QEMU profile (trans4m_freq_2_time_fxp_2 14 %, inv_long_complex_rot 9 %, §54; the FFT, 25 %,
   is on HIFIACC); no reference assembly exists in AOSP for this decoder.
-- MP3: the IMDCT on Imdct36 (§70), once its end flag is found; small expected gain (MP3 already
-  at 21-23 MHz).
+- MP3: the IMDCT on Imdct36 (§70): its end is now known (IRQ 7 pending, §116), but the gain
+  would be about 0.2 MHz (MP3 already at 21-23 MHz); not worth it for now.
 - AAC in ADTS (`.aac`), a distant prospect: pvaacdec already reads ADTS headers; an ADTS mode in
   codec_aac.c reading the file directly (frames found by their headers, as codec_mp3.c does),
   the `.aac` extension, ID3v2 tags, a length estimated from the bitrate, an approximate seek, no
@@ -336,8 +315,8 @@ One line per version; the measurements are in `ETUDE.md`.
   played.
 - Files of 4 GiB or more are not listed.
 - Tags placed after a large cover take longer to read: about 130 ms for an Opus with a 960 KB
-  picture before its title (Ogg pages of 4 KiB must all be crossed); tags beyond 16 MiB are not
-  read.
+  picture before its title (Ogg pages of 4 KiB must all be crossed); tags beyond 16 MiB (64 MiB
+  in Ogg) are not read.
 - Ogg Vorbis with floor 0 (libvorbis betas of 2000) or with blocks over 4096 samples (no current
   encoder makes them; Tremor lowmem decodes them wrongly) is refused (§62).
 

@@ -2,13 +2,17 @@
 """Emulator tests that need nothing but the build (for the CI): a disk with a synthetic boot area
 (mkdisk.py --synth-idb), generated test files, the emulator, the decoded log, then checks.
 
-  emutest.py IMG ELF [NAME ...]        (all the tests by default; exit code 1 when one fails)
+  emutest.py [-j N] IMG ELF [NAME ...]   (all the tests by default; exit code 1 when one fails)
+
+-j N: N tests at a time (default: the cores, at most 8; -j 1 one after the other); the results
+are printed in the order of the list. The test sets the tests need are made once, before.
 
 Each test: the files of the user volume, the keys, the simulated time, the patterns that must
 appear in the log and the emulator's output (in that order) and the ones that must not; an
 optional second boot on the disk the first run left, the image chosen as the stock loader does.
 Needs mtools, dosfstools and the unicorn module. The disks go to $TMPDIR and are deleted.
 """
+import concurrent.futures
 import json
 import math
 import os
@@ -287,7 +291,7 @@ def run_set(group, t, img, elf, tmp):
     held for each next one, open_ms() apart); each
     'ui: tags' line checked against the manifest, the format too (PCM, FLAC, ALAC: rate and
     bits; the others: the rate). EMUTEST_SET: a set already made, else one is made here."""
-    src = os.environ.get("EMUTEST_SET")
+    src = t.get("set_dir") or os.environ.get("EMUTEST_SET")
     if not src:
         src = os.path.join(tmp, "set")
         subprocess.run([sys.executable, MKSET, src, "--only", group, "--seconds",
@@ -502,23 +506,56 @@ def run(name, t, img, elf, tmp):
     return fails, whole
 
 
+def make_sets(names, tmp):
+    """The test sets of the tests named, made once (one per length of file, the groups of all
+    the tests of that length together), unless EMUTEST_SET gives one: {name: set folder}"""
+    if os.environ.get("EMUTEST_SET"):
+        return {}
+    by_len = {}
+    for n in names:
+        if "set" in TESTS[n]:
+            by_len.setdefault(TESTS[n].get("seconds", SET_SECONDS), set()).update(
+                TESTS[n]["set"].split(","))
+    dirs = {}
+    for sec, groups in by_len.items():
+        d = os.path.join(tmp, f"set{sec}")
+        subprocess.run([sys.executable, MKSET, d, "--only", ",".join(sorted(groups)),
+                        "--seconds", str(sec)], check=True, stdout=subprocess.DEVNULL)
+        dirs[sec] = d
+    return {n: dirs[TESTS[n].get("seconds", SET_SECONDS)] for n in names if "set" in TESTS[n]}
+
+
+def run_named(name, img, elf, set_dir):
+    t = dict(TESTS[name], set_dir=set_dir) if set_dir else TESTS[name]
+    with tempfile.TemporaryDirectory(prefix=f"emutest_{name}_") as tmp:
+        return run(name, t, img, elf, tmp)
+
+
 def main():
-    if len(sys.argv) < 3:
+    args = sys.argv[1:]
+    jobs = min(8, os.cpu_count() or 1)
+    if args[:1] == ["-j"] and len(args) > 1:
+        jobs, args = max(1, int(args[1])), args[2:]
+    if len(args) < 2:
         sys.exit(__doc__)
-    img, elf, names = sys.argv[1], sys.argv[2], sys.argv[3:] or [
-        n for n in TESTS if not TESTS[n].get("fault") and not TESTS[n].get("hwtest")]
+    img, elf = os.path.abspath(args[0]), os.path.abspath(args[1])
+    names = args[2:] or [n for n in TESTS if not TESTS[n].get("fault") and
+                         not TESTS[n].get("hwtest")]
     failed = 0
-    for name in names:
-        with tempfile.TemporaryDirectory(prefix=f"emutest_{name}_") as tmp:
-            fails, whole = run(name, TESTS[name], os.path.abspath(img), os.path.abspath(elf), tmp)
-        print(f"{name}: {'FAIL' if fails else 'PASS'}")
-        for f in fails:
-            print("  " + f[:300])
-        if os.environ.get("EMUTEST_DUMP"):
-            open(os.environ["EMUTEST_DUMP"], "w").write(whole)
-        if fails and os.environ.get("EMUTEST_VERBOSE"):
-            print(whole[-4000:])
-        failed += bool(fails)
+    with tempfile.TemporaryDirectory(prefix="emutest_sets_") as sets_tmp, \
+            concurrent.futures.ThreadPoolExecutor(jobs) as pool:
+        sets = make_sets(names, sets_tmp)       # (each test runs its emulator as a process)
+        futures = [pool.submit(run_named, n, img, elf, sets.get(n)) for n in names]
+        for name, fut in zip(names, futures):
+            fails, whole = fut.result()
+            print(f"{name}: {'FAIL' if fails else 'PASS'}", flush=True)
+            for f in fails:
+                print("  " + f[:300])
+            if os.environ.get("EMUTEST_DUMP"):
+                open(os.environ["EMUTEST_DUMP"], "w").write(whole)
+            if fails and os.environ.get("EMUTEST_VERBOSE"):
+                print(whole[-4000:])
+            failed += bool(fails)
     sys.exit(1 if failed else 0)
 
 
