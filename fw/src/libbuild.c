@@ -64,6 +64,20 @@ static uint16_t *const gen_name = (uint16_t *)(HR + 0x3c000);
 static uint32_t *const art_tab = (uint32_t *)(HR + 0x40000);      /* first << 16 | count */
 static uint32_t *const gen_tab = (uint32_t *)(HR + 0x54100);      /* (rank_p, after the sort) */
 #define MAX_GENRES 2048u                                          /* gen_tab: 16 KiB */
+/* during an update's scan, the index before: its old albums, genres and artists to the new
+ * names' ids (a track of an album already seen reads no name again), the CLUS fence, and the
+ * sectors cached (in order's SYSRAM, unused until the sort) */
+#define MAP_ALBUMS 12288u
+#define MAP_GENRES 2048u
+#define MAP_ARTISTS 512u
+#define FENCE      384u                         /* 24,576 tracks / 64 */
+static uint32_t *const amap = (uint32_t *)(HR + 0x50100);         /* aid << 16 | alid: 48 KiB */
+#define OLD_CACHE  0x9000u
+static uint32_t *const fence = (uint32_t *)(0x03020000u + OLD_CACHE);             /* 1.5 KiB */
+static uint16_t *const gmap = (uint16_t *)(0x03020000u + OLD_CACHE + 0x600);      /* 4 KiB */
+static uint32_t (*const amemo)[2] = (uint32_t (*)[2])(0x03020000u + OLD_CACHE + 0x1600);
+_Static_assert(OLD_CACHE + 0x1600 + 8 * MAP_ARTISTS <= 0xc000, "past order's 48 KiB");
+_Static_assert(0x50100 + 4 * MAP_ALBUMS <= 0x5c100, "amap past rank_a, rank_p, gidx");
 
 static struct {
     const struct lb_hooks *h;
@@ -114,6 +128,10 @@ static int prog(uint32_t done, uint32_t total)
 static struct ws { uint32_t sec; int on; } ws[3];
 static uint32_t tph[5];                         /* ticks at the start of each phase, the end */
 static struct io_count io_sd0, io_mmc0;         /* the reads counted at the start */
+/* the eMMC reads by where they go: the index before (its CRC, then the scan), the half written,
+ * in the count, scan, sort and write phases */
+static uint32_t rd_old_crc, rd_old, rd_half, ph_c[5];
+#define MARK(k) (tph[k] = ticks(), ph_c[k] = emmc_io.cmds)
 
 static int rd_sec(uint32_t s, uint8_t **p)
 {
@@ -125,6 +143,7 @@ static int rd_sec(uint32_t s, uint8_t **p)
     uint32_t c = s % CACHE;
     if (ctag[c] != s) {
         ctag[c] = 0xffffffff;
+        rd_half++;
         if (emmc_read(b.hb + s, 1, cache[c]))
             return -1;
         ctag[c] = s;
@@ -275,6 +294,7 @@ static void tags_wait(void)                     /* before each read of tags_read
 static int old_read(void *ctx, uint32_t off, void *buf, uint32_t n)
 {
     (void)ctx;
+    rd_old++;
     return emmc_read(b.file + off / 512, n / 512, buf) ? -1 : 0;
 }
 
@@ -294,29 +314,62 @@ static void copy(char *d, const char *s, int max)
     d[i] = 0;
 }
 
-/* the fields of a file: from the index before when unchanged (1), else from its tags (0) */
-static int fields(const struct fat_dirent *e, uint32_t codec, uint32_t *track, uint32_t *year,
-                  uint32_t *disc)
+/* A file unchanged since the index before: its title into sf, its names' ids from the maps (the
+ * index before read for those not seen yet). 1, or 0 (changed, not there, or a read failed) */
+static int reuse(const struct fat_dirent *e, uint32_t codec, uint32_t id[4], uint32_t *track,
+                 uint32_t *year, uint32_t *disc)
+{
+    uint32_t t;
+    struct lib_track o;
+    if (!b.old || lib_find(e->vol, e->cluster, &t) || lib_track(t, &o) || o.vol != e->vol ||
+        o.size != e->size || o.mtime != e->mtime || o.codec != codec ||
+        lib_str(o.title, sf->f_title, sizeof sf->f_title) < 0)
+        return 0;
+    uint32_t a = o.album < MAP_ALBUMS ? amap[o.album] : 0xffffffffu;
+    if (a == 0xffffffffu) {
+        struct lib_album al;
+        struct lib_artist ar;
+        if (lib_album(o.album, &al) || lib_artist(al.artist, &ar) ||
+            lib_str(al.name, sf->f_album, sizeof sf->f_album) < 0 ||
+            lib_str(ar.name, sf->f_aa, sizeof sf->f_aa) < 0)
+            return 0;
+        a = name_id(sf->f_aa) << 16 | name_id(sf->f_album);
+        if (o.album < MAP_ALBUMS)
+            amap[o.album] = a;
+    }
+    uint32_t g = o.genre < MAP_GENRES ? gmap[o.genre] : 0xffffu;
+    if (g == 0xffffu) {
+        struct lib_genre gn;
+        if (lib_genre(o.genre, &gn) || lib_str(gn.name, sf->f_genre, sizeof sf->f_genre) < 0)
+            return 0;
+        g = name_id(sf->f_genre);
+        if (o.genre < MAP_GENRES)
+            gmap[o.genre] = (uint16_t)g;
+    }
+    uint32_t *m = amemo[(o.artist * 2654435761u) >> 23 & (MAP_ARTISTS - 1)];
+    if (m[0] != o.artist + 1) {                 /* (the track's artist: a string of STRS) */
+        if (lib_str(o.artist, sf->f_artist, sizeof sf->f_artist) < 0)
+            return 0;
+        m[0] = o.artist + 1;
+        m[1] = name_id(sf->f_artist);
+    }
+    id[0] = a >> 16;
+    id[1] = a & 0xffff;
+    id[2] = g;
+    id[3] = m[1];
+    *track = o.track;
+    *year = o.year;
+    *disc = o.disc;
+    return !b.err;
+}
+
+/* the fields of a file from its tags */
+static void fields(const struct fat_dirent *e, uint32_t codec, uint32_t *track, uint32_t *year,
+                   uint32_t *disc)
 {
     struct tags *const tgp = &sf->f_tg;
     char *const title = sf->f_title, *const artist = sf->f_artist, *const album = sf->f_album,
          *const aa = sf->f_aa, *const genre = sf->f_genre;
-    uint32_t t;
-    struct lib_track o;
-    struct lib_album al;
-    struct lib_artist ar;
-    struct lib_genre g;
-    if (b.old && !lib_find(e->vol, e->cluster, &t) && !lib_track(t, &o) && o.vol == e->vol &&
-        o.size == e->size && o.mtime == e->mtime && o.codec == codec &&
-        !lib_album(o.album, &al) && !lib_artist(al.artist, &ar) && !lib_genre(o.genre, &g) &&
-        lib_str(o.title, title, sizeof sf->f_title) >= 0 && lib_str(o.artist, artist, sizeof sf->f_artist) >= 0 &&
-        lib_str(al.name, album, sizeof sf->f_album) >= 0 && lib_str(ar.name, aa, sizeof sf->f_aa) >= 0 &&
-        lib_str(g.name, genre, sizeof sf->f_genre) >= 0) {
-        *track = o.track;
-        *year = o.year;
-        *disc = o.disc;
-        return 1;
-    }
     struct fat_file f;
     fat_file_of(e, &f);
     uint32_t t0 = ticks(), s0 = sd_io.sectors + emmc_io.sectors;
@@ -343,7 +396,6 @@ static int fields(const struct fat_dirent *e, uint32_t codec, uint32_t *track, u
     *track = tgp->track;
     *year = tgp->year;
     *disc = tgp->disc > 255 ? 255 : tgp->disc;
-    return 0;
 }
 
 /* The fingerprint of the files (docs/LIBRARY.md): two sums of a hash of each file's volume (its
@@ -396,19 +448,27 @@ static int scan_cb(const struct fat_dirent *e, void *ctx)
     }
     const char *const title = sf->f_title, *const artist = sf->f_artist,
                *const album = sf->f_album, *const aa = sf->f_aa, *const genre = sf->f_genre;
-    uint32_t track, year, disc;
-    if (fields(e, codec, &track, &year, &disc))
+    uint32_t track, year, disc, id[4];
+    if (reuse(e, codec, id, &track, &year, &disc))
         b.reused++;
-    else
+    else {
+        if (b.err)
+            return 1;
+        fields(e, codec, &track, &year, &disc);
         b.read++;
+        id[0] = name_id(aa);
+        id[1] = name_id(album);
+        id[2] = name_id(genre);
+        id[3] = name_id(artist);
+    }
     uint8_t r[REC] = { 0 };
-    uint32_t aid = name_id(aa), alid = name_id(album), gid = name_id(genre);
+    uint32_t aid = id[0], alid = id[1], gid = id[2];
     put32(r, e->cluster);
     put32(r + 4, e->size);
     put32(r + 8, e->mtime);
     put32(r + 12, str_add(title));
     put32(r + 16, str_add(e->name));
-    put32(r + 20, noff[name_id(artist)]);
+    put32(r + 20, noff[id[3]]);
     put16(r + 24, gid);
     put16(r + 26, track);
     put16(r + 28, year);
@@ -670,7 +730,7 @@ static int write_index(struct lb_result *res)
 {
     uint32_t n = b.n;
     lib_cache(0, 0);                            /* (order: ours from now on) */
-    tph[LB_SORT] = ticks();
+    MARK(LB_SORT);
     if (flush(0) || flush(1) || flush(2))
         return LB_EIO;
     stage(LB_SORT, 0, 50);
@@ -702,7 +762,7 @@ static int write_index(struct lb_result *res)
             gen_name[gidx[id]] = (uint16_t)id;
     }
     /* TRKS, ALBS (written beside it), the artists' and the pairs' tables */
-    tph[LB_WRITE] = ticks();
+    MARK(LB_WRITE);
     stage(LB_WRITE, 0, 350);
     trks = (T0 + b.strs + 3) & ~3u;
     uint32_t albs = trks + 36 * n;
@@ -953,6 +1013,7 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
     b.half = act == 0 ? 1 : 0;
     b.hb = first + 1 + HALF_SEC * (uint32_t)b.half;
     struct lib_io io = { old_read, 0 };
+    rd_old = 0;
     b.old = act <= 1 && !lib_open(&io);
     hifi_prepare();                             /* PD_HIGH on, core B held: its RAM is ours */
     hifi_own_drop();
@@ -980,10 +1041,22 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
     for (uint32_t i = 0; i < sizeof *fst; i++)
         ((uint8_t *)fst)[i] = 0;
     tags_fields_only = 1;
-    tph[LB_COUNT] = ticks();
+    MARK(LB_COUNT);
     tph[LB_SORT] = tph[LB_WRITE] = 0;
-    if (b.old)                                  /* the index before: 64 sectors cached in */
-        lib_cache(order, 0xc000);               /* order's SYSRAM, unused until the sort */
+    ph_c[LB_SCAN] = ph_c[LB_SORT] = ph_c[LB_WRITE] = 0;
+    rd_old_crc = rd_old;
+    rd_half = 0;
+    if (b.old) {                                /* the index before: sectors cached and maps */
+        lib_cache(order, OLD_CACHE);            /* in order's SYSRAM, unused until the sort */
+        for (uint32_t i = 0; i < MAP_ALBUMS; i++)
+            amap[i] = 0xffffffffu;
+        for (uint32_t i = 0; i < MAP_GENRES; i++)
+            gmap[i] = 0xffff;
+        for (uint32_t i = 0; i < MAP_ARTISTS; i++)
+            amemo[i][0] = 0;
+        if (lib_fence(fence, FENCE))
+            log_printf("library: no CLUS fence (searched whole)");
+    }
     fp_a = fp_b = 0;
     if (!walk(1) && b.old && b.total == old_n && fp_a == old_a && fp_b == old_b &&
         (fp_a || fp_b)) {
@@ -995,7 +1068,7 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
         res->bytes = 0;
     } else if (!b.err) {
         b.phase = LB_SCAN;
-        tph[LB_SCAN] = ticks();
+        MARK(LB_SCAN);
         uint8_t z = 0;
         if (put(0, T0, &z, 1))                  /* STRS: offset 0, the empty string */
             b.err = LB_EIO;
@@ -1004,7 +1077,7 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
             b.err = write_index(res);
     }
     r = b.err;
-    tph[4] = ticks();
+    MARK(4);
     tags_fields_only = 0;
     lib_cache(0, 0);
     emmc_user_area(0, 0);                       /* the fence closed again */
@@ -1020,6 +1093,12 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
                    (tph[LB_SCAN] - tph[LB_COUNT]) / 1000, (tph[LB_SORT] - tph[LB_SCAN]) / 1000,
                    ((tph[LB_WRITE] ? tph[LB_WRITE] : tph[4]) - tph[LB_SORT]) / 1000,
                    tph[LB_WRITE] ? (tph[4] - tph[LB_WRITE]) / 1000 : 0);
+    log_printf("library: eMMC reads: the index before %u (its CRC %u), the half written %u; "
+               "by phase %u, %u, %u, %u", rd_old, rd_old_crc, rd_half,
+               (ph_c[LB_SCAN] ? ph_c[LB_SCAN] : ph_c[4]) - ph_c[LB_COUNT],
+               ph_c[LB_SCAN] ? (ph_c[LB_SORT] ? ph_c[LB_SORT] : ph_c[4]) - ph_c[LB_SCAN] : 0,
+               ph_c[LB_SORT] ? ph_c[LB_WRITE] - ph_c[LB_SORT] : 0,
+               ph_c[LB_WRITE] ? ph_c[4] - ph_c[LB_WRITE] : 0);
     log_printf("library: reads: card %u commands, %u sectors, %u ms; eMMC %u commands, %u "
                "sectors, %u ms", sd_io.cmds - io_sd0.cmds, sd_io.sectors - io_sd0.sectors,
                (sd_io.us - io_sd0.us) / 1000, emmc_io.cmds - io_mmc0.cmds,

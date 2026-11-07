@@ -142,15 +142,20 @@ int lib_file(struct fat_file *f)
 /* ---- opening ---- */
 void (*lib_yield)(void);
 
+/* the key of every 64th CLUS entry, in RAM (lib_fence): a search reads one or two sectors */
+static uint32_t *fence, nfence;
+
 void lib_close(void)
 {
     lib.open = 0;
+    fence = 0;
 }
 
 int lib_open(const struct lib_io *io)
 {
     uint8_t h[512];
     lib.open = 0;
+    fence = 0;
     lib.io = *io;
     cache_clear();
     if (rd(0, h, 512) || __builtin_memcmp(h, "NEWFWLIB", 8) || le32(h + 8) != 1)
@@ -303,9 +308,38 @@ int lib_clus(uint32_t i, uint32_t *key, uint32_t *track)
     return *track < lib.n[S_TRKS] ? 0 : -1;
 }
 
+int lib_fence(uint32_t *buf, uint32_t max)
+{
+    fence = 0;
+    uint32_t n = lib.open ? (lib.n[S_CLUS] + 63) / 64 : 0, t;
+    if (!buf || !n || n > max)
+        return -1;
+    for (uint32_t j = 0; j < n; j++)
+        if (lib_clus(64 * j, &buf[j], &t))
+            return -1;
+    fence = buf;
+    nfence = n;
+    return 0;
+}
+
 int lib_find(uint32_t volume, uint32_t cluster, uint32_t *track)
 {
     uint32_t want = volume << 31 | cluster, lo = 0, hi = lib.open ? lib.n[S_CLUS] : 0;
+    if (fence && hi) {                          /* the last 64 entries starting not above want */
+        uint32_t a = 0, z = nfence;
+        while (a < z) {
+            uint32_t m = (a + z) / 2;
+            if (fence[m] <= want)
+                a = m + 1;
+            else
+                z = m;
+        }
+        if (!a)
+            return -1;
+        lo = 64 * (a - 1);
+        if (hi > lo + 64)
+            hi = lo + 64;
+    }
     while (lo < hi) {                           /* the first entry not below want */
         uint32_t mid = (lo + hi) / 2, key, t;
         if (lib_clus(mid, &key, &t))

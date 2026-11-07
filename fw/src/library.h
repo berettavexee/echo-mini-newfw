@@ -41,6 +41,9 @@ int lib_volume(uint32_t i, uint32_t *volume, uint32_t *serial, uint32_t *tracks)
  * 0, or -1 (none) */
 int lib_clus(uint32_t i, uint32_t *key, uint32_t *track);
 int lib_find(uint32_t volume, uint32_t cluster, uint32_t *track);
+/* lib_find() helped by the key of every 64th entry, kept in buf (max words): 0, or -1 (too
+ * many, or a read: lib_find() then searches the whole section); until lib_close() */
+int lib_fence(uint32_t *buf, uint32_t max);
 /* A string into buf (max bytes, ended by 0, cut on a character boundary): its length, or < 0 */
 int lib_str(uint32_t ref, char *buf, uint32_t max);
 
