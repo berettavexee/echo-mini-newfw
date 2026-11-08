@@ -1,7 +1,7 @@
 /* Play queue (ETUDE §25, §79): the files of a folder, or all those under one (PLAY held), and the
  * play modes. The queue is a table of folders (in PMU-SRAM, up to Q_DIRS), each with its number
  * of tracks: track k is found by these counts, and its folder read again into the queue's own
- * listing (in .queuebuf) when needed, in the browser's order (folders first, natural order).
+ * listing (in .screenram) when needed, in the browser's order (folders first, natural order).
  * The tracks used lately (the one heard, the one decoded, the browser's) keep their entry and
  * name in a few slots. Shuffle is a permutation of all the tracks, without a table: a Feistel
  * network on the next power of 4, cycle walking down to [0, q_n). */
@@ -29,10 +29,11 @@ static struct {
     struct entry e[QL_MAX];
     uint16_t order[QL_MAX];
     char pool[0x8000 - QL_MAX * (sizeof(struct entry) + 2)];
-} ql_buf __attribute__((section(".queuebuf")));
+} ql_buf __attribute__((section(".screenram")));      /* (not loaded, not cleared) */
 static struct listing ql = { ql_buf.e, ql_buf.order, ql_buf.pool, QL_MAX, sizeof ql_buf.pool,
                              0, 0, 0, 1, 1 };
 static int ql_dir = -1;                         /* the qd[] in ql, -1: none */
+static struct { int on, kind, sd; uint32_t param; } qlib;     /* a library list (q_from_lib) */
 static int ql_files;                            /* ql's first file in its order (folders first) */
 
 static void qd_fat_dir(int f, struct fat_dir *d)
@@ -94,6 +95,17 @@ static int slot_of(int i)                       /* the slot of track i, read if 
         }
     if (i < 0 || i >= q_n)
         return -1;
+    if (qlib.on) {                              /* a library list: the track from the index */
+        for (s = 1; s < SLOTS; s++)
+            if (slot[s].used < slot[old].used)
+                old = s;
+        if (libv_track(qlib.kind, qlib.param, (uint32_t)i, &slot[old].e, slot[old].name,
+                       sizeof slot[old].name))
+            return -1;
+        slot[old].i = i;
+        slot[old].used = ++slot_clock;
+        return old;
+    }
     int f = 0, k = i;
     while (f < qd_n && k >= qd[f].count)
         k -= qd[f++].count;
@@ -131,11 +143,17 @@ void q_set_codec(int i, uint32_t codec)         /* M4A: AAC or ALAC, from its co
 
 int q_on_sd(void)
 {
-    return qd_n && qd[0].vol == FAT_VOL_SD;
+    return qlib.on ? qlib.sd : qd_n && qd[0].vol == FAT_VOL_SD;
+}
+
+int q_is_lib(void)
+{
+    return qlib.on;
 }
 
 void q_clear(void)
 {
+    qlib.on = 0;
     q_n = qd_n = 0;
     q_cur = 0;
     ql_dir = -1;
@@ -310,6 +328,25 @@ void q_from_dir(int start)
     const char *pp = perf_begin("queue");
     q_from_dir_do(start);
     perf_end(pp);
+}
+
+void q_from_lib(int kind, uint32_t param, int start, const char *name)
+{
+    uint32_t t0 = ticks();
+    q_clear();
+    q_tree = 0;
+    uint32_t n = libv_tracks(kind, param);
+    qlib.on = 1;
+    qlib.kind = kind;
+    qlib.param = param;
+    qlib.sd = libv_card_shown();
+    q_n = (int)n;
+    slots_clear();
+    q_cur = start >= 0 && start < q_n ? start : 0;
+    q_shuffle_new(play_mode == MODE_SHUFFLE ? q_cur : -1);
+    copy_name(q_folder, name, sizeof q_folder);
+    log_printf("ui: %d tracks of the library's list %d.%u, %u ms", q_n, kind, param,
+               (ticks() - t0) / 1000);
 }
 
 /* PLAY held on a folder: everything under it, the files of each folder in order, then its

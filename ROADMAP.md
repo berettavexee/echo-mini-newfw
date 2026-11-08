@@ -257,8 +257,11 @@ One line per version; the measurements are in `ETUDE.md`.
     with mklib.py in the emulator up to 18,162 tracks; an update with the same files ends after
     the count (a fingerprint, 3 s); on the device 18,003 tracks: 3 to 4 min built from the tags,
     165 s after 5,733 files changed, an update keeping them all 23 s (the index before's tables
-    in RAM, reads and writes in runs; done, §126); 4. the views (the same track on both memories shown
-    once); 5. playback and resume from a view; 6. the card. Favourites would build on it;
+    in RAM, reads and writes in runs; done, §126); 4. the views: Library first at the top level,
+    Artists, Albums, Years, Genres, All songs; the card's tracks hidden when another card or none
+    is in, a track on both memories shown once (the internal one's); PLAY on a track plays its
+    list, PLAY held on an album the album (done, §127); 5. the resume of a library list, PLAY
+    held on an artist, a year or a genre; 6. the card. Favourites would build on it;
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;
   - folder jumping: at the end of a folder, go on with the next one;

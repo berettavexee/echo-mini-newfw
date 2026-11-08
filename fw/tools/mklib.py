@@ -234,10 +234,72 @@ def expect_lines(t):
     for v in sorted(set(t["volumes"]) | {k["vol"] for k in t["tracks"]}):
         out.append(f"vol\t{v}\t{t['volumes'].get(v, 0)}\t"
                    f"{sum(1 for k in t['tracks'] if k['vol'] == v)}")
+    out += view_lines(t)
     names = sorted({k["artist"] for k in t["tracks"]} | {k["album"] for k in t["tracks"]} |
                    {k["title"] for k in t["tracks"]})
     out.append("order\t0\t" + "\t".join(sorted(names, key=str_order)))
     out.append("order\t1\t" + "\t".join(sorted(names, key=lambda s: str_order(s, True))))
+    return out
+
+
+# ---- the views (fw/src/libview.c, the same rules) ----
+LV_ARTISTS, LV_ARTIST_ALBUMS, LV_ALBUMS, LV_YEARS, LV_YEAR_ALBUMS, LV_GENRES, LV_GENRE_ALBUMS, \
+    LV_TRACKS, LV_SONGS = range(1, 10)
+
+
+def same_track(a, b, al_a, al_b):
+    """The same track on both volumes: album, disc, number, title (file names if one is empty)"""
+    if al_a != al_b or a["vol"] == b["vol"] or a["disc"] != b["disc"] or a["track"] != b["track"]:
+        return False
+    if a["title"] and b["title"]:
+        return a["title"] == b["title"]
+    return a["file"] == b["file"]
+
+
+def views(t, card_in):
+    """{(list, param): [ids]}: the lists libview.c shows, the card's tracks there or not"""
+    tr = t["tracks"]
+    al_of = [t["al_index"][(k["aa"], k["album"])] for k in tr]
+    hid = [k["vol"] == 1 and not card_in for k in tr]
+    if any(k["vol"] == 1 for k in tr):
+        for i in range(1, len(tr)):
+            if not (tr[i]["vol"] == 1 and not card_in) and same_track(tr[i - 1], tr[i], al_of[i - 1],
+                                                                      al_of[i]):
+                hid[i if tr[i]["vol"] == 1 else i - 1] = True
+    nal = len(t["albums"])
+    avis = [any(not hid[k] for k in range(t["al_first"][a], t["al_first"][a] + t["al_count"][a]))
+            for a in range(nal)]
+    year = [t["al_year"].get(a, 0) for a in range(nal)]
+    v = {}
+    v[(LV_ALBUMS, 0)] = [a for a in range(nal) if avis[a]]
+    v[(LV_ARTISTS, 0)] = []
+    for r in range(len(t["artists"])):
+        al = [a for a in range(t["ar_first"][r], t["ar_first"][r] + t["ar_count"][r]) if avis[a]]
+        v[(LV_ARTIST_ALBUMS, r)] = al
+        if al:
+            v[(LV_ARTISTS, 0)].append(r)
+    ys = sorted({year[a] for a in range(nal) if avis[a]}, key=lambda y: y or 0x10000)
+    v[(LV_YEARS, 0)] = ys
+    for y in ys:
+        v[(LV_YEAR_ALBUMS, y)] = [a for a in range(nal) if avis[a] and year[a] == y]
+    v[(LV_GENRES, 0)] = []
+    for g, name in enumerate(t["genres"]):
+        al = [a for a in t["g_albums"][name] if avis[a]]
+        v[(LV_GENRE_ALBUMS, g)] = al
+        if al:
+            v[(LV_GENRES, 0)].append(g)
+    for a in range(nal):
+        v[(LV_TRACKS, a)] = [k for k in range(t["al_first"][a], t["al_first"][a] + t["al_count"][a])
+                             if not hid[k]]
+    v[(LV_SONGS, 0)] = [k for k in t["song"] if not hid[k]]
+    return v
+
+
+def view_lines(t):
+    out = []
+    for card_in in (1, 0):
+        for (lst, param), ids in sorted(views(t, card_in).items()):
+            out.append(f"view\t{card_in}\t{lst}\t{param}\t" + ",".join(str(i) for i in ids))
     return out
 
 

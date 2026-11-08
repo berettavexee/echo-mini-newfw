@@ -728,3 +728,51 @@ msgstr "Bibliothèque (PLAY : mettre à jour)"
 #, c-format
 msgid "%u tracks"
 msgstr "%u morceaux"
+
+#: src/browser.c
+msgid "Library"
+msgstr "Bibliothèque"
+
+#: src/libbrowse.c
+msgid "Artists"
+msgstr "Artistes"
+
+#: src/libbrowse.c
+msgid "Albums"
+msgstr "Albums"
+
+#: src/libbrowse.c
+msgid "Years"
+msgstr "Années"
+
+#: src/libbrowse.c
+msgid "Genres"
+msgstr "Genres"
+
+#: src/libbrowse.c
+msgid "All songs"
+msgstr "Tous les morceaux"
+
+#: src/libbrowse.c
+msgid "nothing here"
+msgstr "rien ici"
+
+#: src/libbrowse.c
+msgid "No library yet: Settings, Library, PLAY"
+msgstr "Pas encore de bibliothèque : Réglages, Bibliothèque, PLAY"
+
+#: src/libbrowse.c
+msgid "Unknown album"
+msgstr "Album inconnu"
+
+#: src/libbrowse.c
+msgid "Unknown artist"
+msgstr "Artiste inconnu"
+
+#: src/libbrowse.c
+msgid "Unknown genre"
+msgstr "Genre inconnu"
+
+#: src/libbrowse.c
+msgid "Unknown year"
+msgstr "Année inconnue"

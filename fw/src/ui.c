@@ -301,6 +301,7 @@ static void menu_action(int m, int *scr)
         if (sd_present())
             sd_open();                          /* at once: the music stopped (§106) */
         if (m == M_USB_RW || m == M_INSTALL || m == M_USB_RO) {
+            libv_close();                       /* (NEWFWLIB.DAT too) */
             path_root(FAT_VOL_INT);             /* the volume may have changed */
             dir_load(&path[1].dir);
             q_clear();

@@ -112,6 +112,7 @@ int lib_update(void)
 {
     storage_drain();
     play_stop(STOP_NOW);                        /* core B's memory is the work memory */
+    libv_close();                               /* the index changes: shown again from it */
     sys_screen_set(1);
     draw_frame();
     t_start = millis();

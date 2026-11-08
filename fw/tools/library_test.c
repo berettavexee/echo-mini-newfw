@@ -10,6 +10,7 @@
 #include <string.h>
 #define LIBRARY_HOST                            /* (lib_file: the device's) */
 #include "../src/library.c"
+#include "../src/libview.c"
 
 static uint8_t *img;
 static long img_n;
@@ -183,6 +184,26 @@ int main(int argc, char **argv)
                     ok = se == strtoul(v[2], 0, 10) && n == strtoul(v[3], 0, 10);
             }
             check(ok, "volume", copy);
+        } else if (!strcmp(v[0], "view")) {    /* libview.c's lists, the card in or not */
+            static int card = -1;
+            int c = atoi(v[1]), kind = atoi(v[2]);
+            uint32_t param = strtoul(v[3], 0, 10);
+            if (c != card) {
+                card = c;
+                check(!lv_setup(c), "lv_setup", copy);
+            }
+            char got[8192] = "";
+            uint32_t m = lv_count(kind, param);
+            for (uint32_t i = 0; i < m; i++) {
+                uint32_t id = 0xffffffff;
+                lv_item(kind, param, i, &id);
+                sprintf(got + strlen(got), i ? ",%u" : "%u", id);
+            }
+            uint32_t extra;
+            check(!strcmp(got, n > 4 ? v[4] : "") && lv_item(kind, param, m, &extra) < 0, "view",
+                  copy);
+            if (strcmp(got, n > 4 ? v[4] : ""))
+                printf("  got %s\n", got);
         } else if (!strcmp(v[0], "order")) {    /* Python's order: lib_cmp gives the same */
             cmp_artist = atoi(v[1]);
             int m = n - 2;

@@ -77,14 +77,15 @@ static void resume_save_do(void)
     struct resume *r = (struct resume *)rs_buf;
     for (int i = 0; i < 128; i++)
         rs_buf[i] = 0x20202020;                 /* spaces: the log reader shows nothing */
-    __builtin_memcpy(r->magic, "NEWFWSTATE 3", 12);
+    __builtin_memcpy(r->magic, "NEWFWSTATE 4", 12);     /* 4: the library first (§127) */
     r->depth = (uint32_t)depth | (depth ? (uint32_t)path[1].dir.vol << 8 : 0);
     for (int i = 0; i < DEPTH_MAX; i++) {
         r->cluster[i] = i <= depth ? path[i].dir.cluster : 0;
         r->sel[i] = (uint16_t)(i <= depth ? path[i].sel : 0);
         r->top[i] = (uint16_t)(i <= depth ? path[i].top : 0);
     }
-    const struct entry *qe = (q_playing || parked) && q_cur < q_n ? q_ent(q_cur) : 0;
+    const struct entry *qe = (q_playing || parked) && q_cur < q_n && !q_is_lib() ?
+                             q_ent(q_cur) : 0;  /* (a library list: not resumed yet, step 5) */
     r->track = qe ? qe->cluster : 0;
     r->playing = (uint32_t)(q_playing && !audio_paused);
     r->level = (uint32_t)play_level;
@@ -229,7 +230,8 @@ void resume_load(void)
     int bad = log_state_read(rs_buf);
     settings_get(rs_buf + 64);                  /* the defaults when there are none */
     if (bad || r->sum != rs_sum(r) ||
-        (__builtin_memcmp(r->magic, "NEWFWSTATE 3", 12) &&
+        (__builtin_memcmp(r->magic, "NEWFWSTATE 4", 12) &&
+         __builtin_memcmp(r->magic, "NEWFWSTATE 3", 12) &&
          __builtin_memcmp(r->magic, "NEWFWSTATE 2", 12)) || (r->depth & 0xff) >= DEPTH_MAX - 1)
         return;
     /* state 2 (before 0.58): no top level, index 0 was the internal root */
@@ -249,7 +251,8 @@ void resume_load(void)
         v = FAT_VOL_INT;
     if (!saved || v > FAT_VOL_SD || (v == FAT_VOL_SD && sd_open())) {
         depth = 0;                              /* the top level (or the card is gone) */
-        path[0].sel = old ? 0 : r->sel[0];
+        path[0].sel = old ? 1 : r->sel[0] + (r->magic[11] == '3');   /* (before 4: no
+                                                                         * library line) */
         dir_load(&path[0].dir);
         if (path[0].sel >= dir_n)
             path[0].sel = 0;

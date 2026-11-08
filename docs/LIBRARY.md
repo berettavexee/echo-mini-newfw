@@ -159,6 +159,25 @@ title, its title is empty (the screens show the file name).
 The tables of the folding are in `fw/tools/mklib.py` and `fw/src/library.c`; the host test
 (`fw/tools/library_test.c`, in `make check`) checks that both sort alike.
 
+## The views
+
+The screens (`fw/src/libview.c`, `fw/src/libbrowse.c`) show lists made from the sections, without
+what cannot be played:
+
+- **A track is hidden** when it is on the card and the card in is not the one of `VOLS` (its
+  serial), or when it is the card's copy of the track just before or after it in `TRKS`: the
+  same album, disc and number, on the other volume, with the same title (the same file name when
+  a title is empty). The internal memory's copy shows.
+- **An album shows** when one of its tracks does; **an artist** or **a genre** when one of its
+  albums does; **a year** when one of the albums shown has it (the album's year: the lowest of
+  its tracks'; 0, no year, comes last).
+- The lists: the artists (`ARTS`), an artist's albums, all the albums (`ALBS`), the years, a
+  year's albums (in `ALBS` order), the genres (`GENS`), a genre's albums (`GALB`), an album's
+  tracks (`TRKS`), all the tracks (`SONG`).
+
+`mklib.py --expect` writes these lists too, with the card in and out (`view` lines), and the
+host test compares them with `libview.c`'s.
+
 ## Tools
 
 - `fw/tools/mklib.py DISK.IMG [--sd CARD.IMG] -o NEWFWLIB.DAT`: the index of the volumes of a disk

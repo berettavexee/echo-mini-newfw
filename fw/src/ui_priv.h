@@ -88,6 +88,9 @@ int dir_load(const struct fat_dir *d);
 void dir_of_entry(const struct entry *e, struct fat_dir *d);
 
 #define VOL_TOP   2                             /* fat_dir.vol of the top level */
+#define VOL_LIB   3                             /* of a library list (libbrowse.c) */
+#define F_LIB     0x0001                        /* with F_DIR: a library list (cluster: its
+                                                 * kind, size: its param) */
 #define DEPTH_MAX 16
 struct path_level {
     struct fat_dir dir;         /* path[0]: the top level (VOL_TOP), path[1]: a volume's root */
@@ -120,6 +123,17 @@ int browser_walk_resume(const struct fat_dir *d, const char *nm, const struct q_
                         uint32_t track);        /* a resume: its track plays meanwhile */
 int browser_key(const struct key_ev *e);
 
+/* ---- libbrowse.c: the library's lists as the browser's folders (ETUDE §127) ---- */
+int libv_load(int kind, uint32_t param);        /* a list shown: its rows */
+const char *libv_name(int i);
+const struct entry *libv_ent(int i);
+const char *libv_empty(void);                   /* what an empty list shows */
+void libv_close(void);                          /* the index changed: opened again when used */
+void libv_card_changed(void);                   /* the card in or out: the views set up again */
+uint32_t libv_tracks(int kind, uint32_t param);
+int libv_track(int kind, uint32_t param, uint32_t i, struct entry *e, char *name, int max);
+int libv_card_shown(void);
+
 /* ---- queue.c ---- */
 #define Q_DIRS 4000                             /* folders with tracks in the queue (§79) */
 extern int q_n, q_cur, q_playing, q_errors;
@@ -146,6 +160,9 @@ void q_from_tree_keep(const struct fat_dir *top, const char *name);  /* that tra
 int q_resume_fix(const struct q_state *s, uint32_t track);     /* its index found again, or -1 */
 void q_clear(void);
 int q_on_sd(void);                              /* the queue is on the card */
+/* A library list from its i-th track (a simple queue: no resume of it yet, step 5) */
+void q_from_lib(int kind, uint32_t param, int start, const char *name);
+int q_is_lib(void);
 /* Track i: its entry and name (read again from its folder when needed; 0 / "" if unreadable) */
 const struct entry *q_ent(int i);
 const char *q_name(int i);

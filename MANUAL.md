@@ -129,8 +129,8 @@ page), after a short silence: about 0.2 s (Vorbis) or 0.3 s (Opus).
 
 ## The folder browser
 
-The top level lists **Internal** (the internal memory) and **SD card** (the microSD card, when
-one is inserted). In a folder, the subfolders come first, then the playable files. Names are
+The top level lists **Library** (the music by its tags, below), **Internal** (the internal
+memory) and **SD card** (the microSD card, when one is inserted). In a folder, the subfolders come first, then the playable files. Names are
 sorted in natural order, ignoring case, so "track 2" comes before "track 10". Empty files
 (0 bytes) are greyed and never played.
 
@@ -156,6 +156,30 @@ plays, the browser shows its progress bar at the bottom.
 PLAY held takes the whole tree, up to 4,000 folders with tracks and 8 levels of folders (a
 folder of more than about 550 tracks is cut). After a power off, the player resumes a track
 played from a folder (PLAY on a file), not a queue made by PLAY held.
+
+## The library
+
+**Library**, the first line of the top level, browses the music by its tags rather than by
+its folders. It reads the library's index (Settings, Library: built there, and at once after a
+USB session in which the computer wrote); with no index yet, it says so.
+
+| List | What it shows |
+|---|---|
+| Artists | the album artists (the artist when an album has none), then their albums (with their year), then the tracks |
+| Albums | all the albums, "album - artist", then the tracks |
+| Years | the years of the albums ("Unknown year" last), then their albums, then the tracks |
+| Genres | the genres, then their albums, then the tracks |
+| All songs | every track by its title, "title - artist" |
+
+The keys are those of the folder browser: VOL+ / VOL- move, PLAY opens, BACK goes up, MENU to
+the play screen and back. **PLAY on a track** plays the list it is in (the album, or all the
+songs) from that track; **PLAY held on an album** plays it from its first track. A library
+list played is not resumed after a power off yet (the next step).
+
+- The tracks of the microSD card show only when the card the library was built with is in.
+- A track on both the internal memory and the card (the same album, disc, number and title) is
+  shown once: the internal memory's.
+- Names sort without regard to case and accents, "The" left out of the artists.
 
 ## The main menu (MENU held)
 
@@ -250,7 +274,7 @@ power off (except the sleep timer).
 | Library (PLAY: update) | the tracks in the library's index, or **none**; PLAY updates it (below) | |
 | Restore the defaults | PLAY puts back all the defaults above, except the language | |
 
-**Library** (being written: the screens to browse it come next): an index of the tags of the
+**Library** (browsed from the top level, above): an index of the tags of the
 music on the internal memory and the card, in the file NEWFWLIB.DAT at the root of the internal
 memory (created by the player, 8 MiB). The update stops the music and shows its progress:
 looking for the music, reading the tags, sorting, writing. Files not changed since the last

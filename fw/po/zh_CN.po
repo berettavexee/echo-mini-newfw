@@ -796,3 +796,51 @@ msgstr ""
 #, c-format
 msgid "%u tracks"
 msgstr ""
+
+#: src/browser.c
+msgid "Library"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Artists"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Albums"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Years"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Genres"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "All songs"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "nothing here"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "No library yet: Settings, Library, PLAY"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown album"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown artist"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown genre"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown year"
+msgstr ""

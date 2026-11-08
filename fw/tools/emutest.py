@@ -451,7 +451,7 @@ def read_log(dump):
     return subprocess.run([sys.executable, READLOG, raw], capture_output=True, text=True).stdout
 
 
-# The resume state (resume.c): the last sector of NEWFWLOG.TXT, "NEWFWSTATE 3", then depth, the
+# The resume state (resume.c): the last sector of NEWFWLOG.TXT, "NEWFWSTATE 4", then depth, the
 # path (DEPTH_MAX 16 clusters, sel and top), track, playing, level, mode, pos_ms and the sum
 STATE_FIELDS = dict(track=144, playing=148, level=152, mode=156, pos_ms=160)
 STATE_SUM = 164
@@ -463,9 +463,9 @@ def patch_state(disk, fields):
     keys cannot reach in a short run (a track paused before any of it was heard, say)"""
     with open(disk, "r+b") as f:
         d = f.read()
-        at = d.find(b"NEWFWSTATE 3")
+        at = d.find(b"NEWFWSTATE 4")
         while at >= 0 and at % 512:             # the firmware's own copy of the string first
-            at = d.find(b"NEWFWSTATE 3", at + 1)
+            at = d.find(b"NEWFWSTATE 4", at + 1)
         if at < 0:
             raise RuntimeError("no resume state on the disk")
         s = bytearray(d[at:at + 512])
@@ -833,6 +833,58 @@ def lib_settings(img, elf, tmp):
 
 
 TESTS["lib-settings"] = dict(custom=lib_settings)
+
+
+def lib_views(img, elf, tmp):
+    """The library's lists (ETUDE §127): the index made by mklib.py put on the disk; BACK to the
+    top level (the boot shows the internal root), Library (its first line), Artists, the first artist, its first album, its first track played;
+    then BACK to the top of the library, All songs, its third track played. The views' count of
+    songs is mklib.py's (the card in)"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dat, exp = os.path.join(tmp, "NEWFWLIB.DAT"), os.path.join(tmp, "exp.txt")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "--sd", card, "-o",
+                    dat, "--expect", exp], check=True, capture_output=True)
+    mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
+    songs = next(len(ln.split("\t")[4].split(",")) for ln in open(exp, encoding="utf-8")
+                 if ln.startswith("view\t1\t9\t0\t"))
+    dump = os.path.join(tmp, "after.img")
+    k = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"), (3400, "PLAY"), (4000, "PLAY"),
+             (4600, "PLAY"), (5200, "PLAY"), (6800, "MENU"), (7400, "BACK"), (7800, "BACK"),
+             (8200, "BACK"), (8600, "VOL-"), (8900, "VOL-"), (9200, "VOL-"), (9500, "VOL-"),
+             (9800, "PLAY"), (10400, "VOL-"), (10700, "VOL-"), (11000, "PLAY"))
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "13000", "--steps", "30000000000", "--dump-disk", dump,
+                          "--keys", k], capture_output=True, text=True).stdout
+    text = read_log(dump)
+    if os.environ.get("EMUTEST_LOG"):           # (the log kept, to look into a failure)
+        open(os.environ["EMUTEST_LOG"], "w").write(text + "\n" + out)
+    fails = []
+    m = re.search(r"library: views of (\d+) tracks, the card's in, in \d+ ms: (\d+) shown", text)
+    if not m or int(m.group(2)) != songs:
+        fails.append(f"views: {m.group(0) if m else 'not set up'} (mklib.py: {songs} shown)")
+    lists = re.findall(r"ui: (\d+) tracks of the library's list (\d+)\.(\d+)", text)
+    if len(lists) < 2 or lists[0][1] != "8" or lists[1][1] != "9" or int(lists[1][0]) != songs:
+        fails.append(f"queues from the library: {lists}")
+    # the first track of each queue: the album's first; in All songs, one down per VOL- logged
+    # between the PLAY that opened it and the PLAY that played (a key may be lost in a load)
+    lines = text.splitlines()
+    starts = [i for i, ln in enumerate(lines) if "tracks of the library's list" in ln]
+    firsts = []
+    for i in starts:
+        q = next((re.search(r"ui: queue (\d+)/\d+: .* \((-?\d+)\)", ln) for ln in lines[i:]
+                  if "ui: queue " in ln), None)
+        firsts.append((int(q.group(1)), q.group(2)) if q else None)
+    plays = [i for i, ln in enumerate(lines) if "keys: play" in ln and i < starts[-1]] \
+        if starts else []
+    downs = sum(1 for ln in lines[plays[-2]:plays[-1]] if "keys: vol-" in ln) \
+        if len(plays) >= 2 else -1
+    if len(firsts) < 2 or firsts[0] != (1, "0") or firsts[1] != (1 + downs, "0"):
+        fails.append(f"first tracks played: {firsts} ({downs} VOL- in All songs)")
+    return fails, text + "\n" + out
+
+
+TESTS["lib-views"] = dict(custom=lib_views)
 
 TESTS.update({
     # built from the tags, compared with mklib.py's answers (content: STRS's order differs)

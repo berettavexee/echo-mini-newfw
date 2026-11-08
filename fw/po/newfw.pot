@@ -12,6 +12,10 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 #: src/browser.c
+msgid "Library"
+msgstr ""
+
+#: src/browser.c
 msgid "Internal"
 msgstr ""
 
@@ -126,6 +130,50 @@ msgstr ""
 #. TRANSLATORS: the name of this language, written in it (Français, 简体中文, 日本語): shown by the Language setting
 #: src/lang.c
 msgid "English"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Artists"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Albums"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Years"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Genres"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "All songs"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "nothing here"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "No library yet: Settings, Library, PLAY"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown album"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown artist"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown genre"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown year"
 msgstr ""
 
 #: src/libui.c
