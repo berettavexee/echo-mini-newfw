@@ -260,8 +260,10 @@ One line per version; the measurements are in `ETUDE.md`.
     in RAM, reads and writes in runs; done, §126); 4. the views: Library first at the top level,
     Artists, Albums, Years, Genres, All songs; the card's tracks hidden when another card or none
     is in, a track on both memories shown once (the internal one's); PLAY on a track plays its
-    list, PLAY held on an album the album (done, §127); 5. the resume of a library list, PLAY
-    held on an artist, a year or a genre; 6. the card. Favourites would build on it;
+    list, PLAY held on an album the album (done, §127); 5. the play queue kept in NEWFWQ.DAT
+    (resumed from it), PLAY held on every library line, the queue mode (VOL+ and VOL-: PLAY puts
+    next, MENU adds), the queue's screen (main menu), the card's tracks passed over when it is
+    out (done, §128; folders played with PLAY held could use the file too); 6. the card. Favourites would build on it;
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;
   - folder jumping: at the end of a folder, go on with the next one;

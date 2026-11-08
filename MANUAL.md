@@ -173,13 +173,41 @@ USB session in which the computer wrote); with no index yet, it says so.
 
 The keys are those of the folder browser: VOL+ / VOL- move, PLAY opens, BACK goes up, MENU to
 the play screen and back. **PLAY on a track** plays the list it is in (the album, or all the
-songs) from that track; **PLAY held on an album** plays it from its first track. A library
-list played is not resumed after a power off yet (the next step).
+songs) from that track. **PLAY held** on any other line plays all its tracks: an album, an
+artist (all their albums), a year, a genre (the albums of that genre), or a line of the top of
+the library (Artists, Albums, Years and Genres: the whole library in that order; All songs: by
+title); in order, or anywhere in it when shuffle is on. After a power off, the player resumes
+the track, and the browser shows the library's list again.
 
 - The tracks of the microSD card show only when the card the library was built with is in.
 - A track on both the internal memory and the card (the same album, disc, number and title) is
   shown once: the internal memory's.
 - Names sort without regard to case and accents, "The" left out of the artists.
+
+## The play queue
+
+What plays is kept on the internal memory, in NEWFWQ.DAT (made by the player, 3 MiB): after a
+power off it resumes at once, and tracks can be added while the music plays.
+
+**The queue mode**: in the folder browser or the library, press **VOL+ and VOL- together**. The
+title shows "Queue: PLAY next, MENU add".
+
+| Key | Action |
+|---|---|
+| **PLAY** | the line goes next: right after the track playing (in shuffle too) |
+| **MENU** | the line goes at the end of the queue |
+| **PLAY held** on a folder or a list | opens it (the mode stays) |
+| **BACK** | leaves the queue mode |
+
+A line is a track, a folder (its files), or a list of the library (an album, an artist...). The
+title says what was done ("Next: 12 tracks"). With nothing queued, the line plays at once.
+
+**The queue's screen**: main menu, **Play queue**. The tracks in the queue's order, the one
+playing marked; PLAY plays the one chosen. Its first line, **Empty the queue**, keeps only the
+track playing; **PLAY held** on any line does the same (a long queue: the first line is far up).
+
+Tracks of the microSD card are passed over while the card is out (the queue goes on with the
+others). A queue holds up to 24,576 tracks.
 
 ## The main menu (MENU held)
 
@@ -192,6 +220,7 @@ is open, except for the USB and system entries, which stop it.
 |---|---|
 | Files | the folder browser |
 | Now playing | the play screen |
+| Play queue | the play queue: its tracks, PLAY plays one, the first line empties it |
 | Settings | the settings screen (below) |
 | USB disk, read only | the internal memory as a USB disk; the computer can read it but not write to it |
 | USB disk, read/write | the same, and the computer can write to it (copy music, firmware images) |

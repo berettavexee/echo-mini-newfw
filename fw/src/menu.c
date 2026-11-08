@@ -3,7 +3,7 @@
 
 /* ---- main menu ---- */
 static const char *const m_names[M_COUNT] = {
-    N_("Files"), N_("Now playing"), N_("Settings"), N_("USB disk, read only"),
+    N_("Files"), N_("Now playing"), N_("Play queue"), N_("Settings"), N_("USB disk, read only"),
     N_("USB disk, read/write"), N_("USB sound card"), N_("Install a firmware (.IMG)"),
     N_("System screen"), N_("USB loader mode (exit: RST)"),
 };
@@ -110,7 +110,8 @@ static int clock_draw(void)
             lcd_text(8, 60, c_msg, c_msg_fg, BG);
             c_dirty = 0;
         }
-        return millis() - c_msg_at >= c_msg_ms ? SCR_POP : SCR_STAY;
+        /* (signed: c_msg_at may be 1 ms ahead, millis() | 1) */
+        return (int32_t)(millis() - c_msg_at) >= (int32_t)c_msg_ms ? SCR_POP : SCR_STAY;
     }
     if (!c_dirty)
         return SCR_STAY;

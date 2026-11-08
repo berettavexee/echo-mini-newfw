@@ -6,6 +6,8 @@
  * name in a few slots. Shuffle is a permutation of all the tracks, without a table: a Feistel
  * network on the next power of 4, cycle walking down to [0, q_n). */
 #include "ui_priv.h"
+#include "qfile.h"
+#include "storage.h"
 
 int q_n, q_cur = -1, q_playing, q_errors;
 int q_dec;                                      /* the track core B decodes; q_cur: the one heard */
@@ -33,7 +35,19 @@ static struct {
 static struct listing ql = { ql_buf.e, ql_buf.order, ql_buf.pool, QL_MAX, sizeof ql_buf.pool,
                              0, 0, 0, 1, 1 };
 static int ql_dir = -1;                         /* the qd[] in ql, -1: none */
-static struct { int on, kind, sd; uint32_t param; } qlib;     /* a library list (q_from_lib) */
+/* Where the tracks come from (ETUDE §128): folders (qd, read again into ql), a library list
+ * (the index's track numbers in ids, over qd: it is not used then), or NEWFWQ.DAT (qfile.c).
+ * A library list is written into the file by the storage task while it plays; once written, the
+ * queue is the file's (the same order). Tracks added or put next make it the file's first. */
+enum { QM_DIRS, QM_IDS, QM_FILE };
+static int q_mode;
+static int q_sd;                                /* QM_IDS, QM_FILE: tracks on the card */
+static uint16_t *const ids = (uint16_t *)(void *)qd;
+#define IDS_MAX (int)(sizeof(qd) / (sizeof(uint16_t)))
+static struct { int state; uint32_t token; } qw; /* the file being written (the storage task) */
+enum { QW_NONE, QW_RUNNING, QW_DONE, QW_FAILED };
+static uint32_t q_token;                        /* one more at each queue made */
+static int un_anchor, un_at, un_n;              /* put next in shuffle: q_next_index() */
 static int ql_files;                            /* ql's first file in its order (folders first) */
 
 static void qd_fat_dir(int f, struct fat_dir *d)
@@ -95,12 +109,16 @@ static int slot_of(int i)                       /* the slot of track i, read if 
         }
     if (i < 0 || i >= q_n)
         return -1;
-    if (qlib.on) {                              /* a library list: the track from the index */
+    if (q_mode == QM_IDS && qw.state == QW_DONE && qw.token == q_token)
+        q_mode = QM_FILE;                       /* written: the file's from now on */
+    if (q_mode != QM_DIRS) {                    /* a library list, or the file */
         for (s = 1; s < SLOTS; s++)
             if (slot[s].used < slot[old].used)
                 old = s;
-        if (libv_track(qlib.kind, qlib.param, (uint32_t)i, &slot[old].e, slot[old].name,
-                       sizeof slot[old].name))
+        int r = q_mode == QM_FILE ?
+                qf_get((uint32_t)i, &slot[old].e, slot[old].name, sizeof slot[old].name) :
+                libv_track_id(ids[i], &slot[old].e, slot[old].name, sizeof slot[old].name);
+        if (r)
             return -1;
         slot[old].i = i;
         slot[old].used = ++slot_clock;
@@ -143,17 +161,26 @@ void q_set_codec(int i, uint32_t codec)         /* M4A: AAC or ALAC, from its co
 
 int q_on_sd(void)
 {
-    return qlib.on ? qlib.sd : qd_n && qd[0].vol == FAT_VOL_SD;
+    return q_mode != QM_DIRS ? q_sd : qd_n && qd[0].vol == FAT_VOL_SD;
 }
 
 int q_is_lib(void)
 {
-    return qlib.on;
+    return q_mode == QM_IDS;
+}
+
+int q_is_file(void)
+{
+    if (q_mode == QM_IDS && qw.state == QW_DONE && qw.token == q_token)
+        q_mode = QM_FILE;
+    return q_mode == QM_FILE;
 }
 
 void q_clear(void)
 {
-    qlib.on = 0;
+    q_mode = QM_DIRS;
+    q_token++;
+    un_n = 0;
     q_n = qd_n = 0;
     q_cur = 0;
     ql_dir = -1;
@@ -233,12 +260,23 @@ void q_shuffle_new(int from)                    /* another shuffled order, from 
     q_base = from >= 0 && from < q_n ? perm(from, 1) : 0;
 }
 
+/* Tracks put next in shuffle (q_add): the range [un_at, un_at + un_n) right after un_anchor,
+ * then the shuffled order goes on from un_anchor (declared above) */
+
 int q_next_index(int i, int user)        /* the track after i, or -1: end of the queue */
 {
     if (!q_n)
         return -1;
     if (play_mode == MODE_REPEAT_ONE && !user)
         return i;
+    if (play_mode == MODE_SHUFFLE && un_n > 0) {
+        if (i == un_anchor)
+            return un_at;
+        if (i >= un_at && i < un_at + un_n - 1)
+            return i + 1;
+        if (i == un_at + un_n - 1)
+            i = un_anchor;
+    }
     if (play_mode == MODE_SHUFFLE && q_n > 1) {
         int p = shuf_pos(i) + 1;
         if (p < q_n)
@@ -330,23 +368,243 @@ void q_from_dir(int start)
     perf_end(pp);
 }
 
+/* The library list written into NEWFWQ.DAT by the storage task, while it plays */
+static void write_job(void *arg)
+{
+    uint32_t token = (uint32_t)(uintptr_t)arg;
+    int n = q_n;
+    if (qf_begin()) {
+        qw.state = QW_FAILED;
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        struct entry e;
+        char name[NAME_KEEP + 1];
+        if (q_token != token || libv_track_id(ids[i], &e, name, sizeof name) || qf_put(&e, name)) {
+            qf_end(0);
+            qw.state = QW_FAILED;
+            return;
+        }
+        if (i % 8 == 7)
+            storage_yield();
+    }
+    qw.state = q_token == token && !qf_end(1) ? QW_DONE : QW_FAILED;
+    log_printf("queue: %d tracks written into NEWFWQ.DAT (%s)", n,
+               qw.state == QW_DONE ? "in use" : "dropped");
+}
+
+/* A library list (libbrowse.c collects its tracks): from its track 'start', or -1 (PLAY held:
+ * the first, or anywhere in shuffle) */
 void q_from_lib(int kind, uint32_t param, int start, const char *name)
 {
     uint32_t t0 = ticks();
-    q_clear();
+    q_clear();                                  /* (a list being written: its token is old, */
+    storage_drain();                            /* it stops at its next track) */
     q_tree = 0;
-    uint32_t n = libv_tracks(kind, param);
-    qlib.on = 1;
-    qlib.kind = kind;
-    qlib.param = param;
-    qlib.sd = libv_card_shown();
-    q_n = (int)n;
+    int on_sd = 0;
+    int n = (int)libv_collect(kind, param, ids, IDS_MAX, &on_sd);
+    if (n <= 0)
+        return;
+    q_mode = QM_IDS;
+    q_sd = on_sd;
+    q_n = n;
     slots_clear();
-    q_cur = start >= 0 && start < q_n ? start : 0;
-    q_shuffle_new(play_mode == MODE_SHUFFLE ? q_cur : -1);
+    q_shuffle_new(-1);
+    q_cur = start >= 0 && start < q_n ? start : play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;
+    if (play_mode == MODE_SHUFFLE && start >= 0)
+        q_shuffle_new(q_cur);
     copy_name(q_folder, name, sizeof q_folder);
     log_printf("ui: %d tracks of the library's list %d.%u, %u ms", q_n, kind, param,
                (ticks() - t0) / 1000);
+    qw.state = QW_RUNNING;
+    qw.token = q_token;
+    if (storage_submit(write_job, (void *)(uintptr_t)q_token))
+        qw.state = QW_FAILED;
+}
+
+/* ---- tracks added (MENU) or put next (PLAY) in the queue mode (ETUDE §128) ---- */
+static const struct q_src *add_src;
+static struct entry add_e __attribute__((section(".screenram")));     /* (not the BSS) */
+static char add_name[NAME_KEEP + 1] __attribute__((section(".screenram")));
+
+/* item k of the source: an entry and its name */
+static int src_item(uint32_t k, struct entry *e, char *name)
+{
+    const struct q_src *s = add_src;
+    if (s->type == QS_ONE) {
+        *e = s->e;
+        copy_name(name, s->name, NAME_KEEP + 1);
+        return 0;
+    }
+    if (s->type == QS_FOLDER) {
+        const struct entry *f = &ql.e[ql.order[ql_files + (int)k]];
+        *e = *f;
+        copy_name(name, ql.pool + f->name, NAME_KEEP + 1);
+        return 0;
+    }
+    return libv_track_id(ids[k], e, name, NAME_KEEP + 1);
+}
+
+static int src_put(uint32_t k, void *ctx)
+{
+    (void)ctx;
+    return src_item(k, &add_e, add_name) ? -1 : qf_put(&add_e, add_name);
+}
+
+/* The queue made the file's (the same tracks, the same order): 0, or -1 */
+static int to_file(void)
+{
+    if (q_is_file() || !q_n)
+        return 0;
+    if (q_mode == QM_IDS && qw.state == QW_RUNNING) {
+        storage_drain();                        /* being written: to its end */
+        if (q_is_file())
+            return 0;
+    }
+    if (qf_begin())
+        return -1;
+    for (int i = 0; i < q_n; i++) {             /* (folders: each read once, in order) */
+        const struct entry *e = q_ent(i);
+        if (!e || qf_put(e, q_name(i))) {
+            qf_end(0);
+            return -1;
+        }
+        if (i % 32 == 31)
+            ui_background();
+    }
+    if (qf_end(1))
+        return -1;
+    q_mode = QM_FILE;
+    q_tree = 0;
+    log_printf("queue: %d tracks of the queue written into NEWFWQ.DAT", q_n);
+    return 0;
+}
+
+int q_add(const struct q_src *s, int next)
+{
+    storage_drain();
+    if (to_file())
+        return Q_ENOFILE;
+    uint32_t n = 1;                             /* the source's tracks */
+    int on_sd = 0;
+    if (s->type == QS_FOLDER) {
+        struct fat_dir d = s->d;
+        ql_dir = -1;
+        if (list_load(&ql, &d) < 0)
+            return Q_ENOFILE;
+        ql_files = 0;
+        while (ql_files < ql.n && (ql.e[ql.order[ql_files]].flags & F_DIR))
+            ql_files++;
+        n = (uint32_t)(ql.n - ql_files);
+        on_sd = s->d.vol == FAT_VOL_SD;
+    } else if (s->type == QS_LIB)
+        n = libv_collect(s->kind, s->param, ids, IDS_MAX, &on_sd);
+    else
+        on_sd = (s->e.flags & F_SD) != 0;
+    if (!n)
+        return 0;
+    if ((uint32_t)q_n + n > QF_MAX)
+        return Q_EFULL;
+    add_src = s;
+    int empty = !q_n, r;
+    uint32_t at = next && !empty ? (uint32_t)(q_dec > q_cur ? q_dec : q_cur) + 1 : (uint32_t)q_n;
+    if (at > (uint32_t)q_n)
+        at = (uint32_t)q_n;
+    if (empty) {
+        r = qf_begin();
+        for (uint32_t k = 0; !r && k < n; k++)
+            r = src_put(k, 0);
+        r = r ? (qf_end(0), -1) : qf_end(1);
+    } else if (at == (uint32_t)q_n) {
+        r = qf_append();
+        for (uint32_t k = 0; !r && k < n; k++)
+            r = src_put(k, 0);
+        r = r ? (qf_end(0), -1) : qf_end(1);
+    } else
+        r = qf_insert(at, n, src_put, 0);
+    if (r)
+        return Q_ENOFILE;
+    slots_clear();
+    q_mode = QM_FILE;
+    q_tree = 0;
+    q_sd |= on_sd;
+    q_n += (int)n;
+    if (empty) {
+        q_cur = q_dec = 0;
+        copy_name(q_folder, s->type == QS_ONE ? s->name : T("Queue"), sizeof q_folder);
+    } else if (q_dec >= (int)at)
+        q_dec += (int)n;                        /* (the next one already open: after it) */
+    if (play_mode == MODE_SHUFFLE && q_n > 1) { /* the order made again from the track heard */
+        q_shuffle_new(q_cur);
+        if (next) {
+            un_anchor = q_cur;
+            un_at = (int)at;
+            un_n = (int)n;
+        }
+    }
+    log_printf("queue: %u tracks %s at %u (%d now)", n, next ? "put next" : "added", at, q_n);
+    return (int)n;
+}
+
+/* The queue emptied, the track playing kept */
+void q_clear_keep(void)
+{
+    storage_drain();
+    const struct entry *e = (q_playing || parked) && q_cur < q_n ? q_ent(q_cur) : 0;
+    if (!e) {
+        q_clear();
+        if (!qf_begin())
+            qf_end(1);                          /* (an empty queue in the file) */
+        return;
+    }
+    struct entry keep = *e;
+    char name[NAME_KEEP + 1];
+    copy_name(name, q_name(q_cur), sizeof name);
+    if (qf_begin() || qf_put(&keep, name) || qf_end(1))
+        return;
+    q_mode = QM_FILE;
+    q_tree = 0;
+    q_sd = (keep.flags & F_SD) != 0;
+    q_n = 1;
+    q_cur = q_dec = 0;
+    un_n = 0;
+    slots_clear();
+    q_shuffle_new(0);
+    log_printf("queue: cleared, the track playing kept");
+}
+
+/* ---- the resume of a file queue (resume.c) ---- */
+void q_file_state(struct q_fstate *s)
+{
+    s->gen = qf_gen();
+    s->cur = q_cur;
+    s->n = q_n;
+    s->seed = q_seed;
+    s->base = (uint32_t)q_base;
+    s->un_anchor = un_anchor;
+    s->un_at = un_at;
+    s->un_n = un_n;
+}
+
+int q_file_resume(const struct q_fstate *s, const char *name)
+{
+    q_clear();
+    if (qf_open() || qf_gen() != s->gen || (int)qf_count() != s->n || s->n <= 0 ||
+        s->cur < 0 || s->cur >= s->n)
+        return -1;
+    q_mode = QM_FILE;
+    q_tree = 0;
+    q_n = s->n;
+    q_cur = q_dec = s->cur;
+    q_seed = s->seed;
+    q_base = (int)s->base;
+    un_anchor = s->un_anchor;
+    un_at = s->un_at;
+    un_n = s->un_n;
+    q_sd = 1;                                   /* (not known: the card's way, at worst) */
+    slots_clear();
+    copy_name(q_folder, name, sizeof q_folder);
+    return 0;
 }
 
 /* PLAY held on a folder: everything under it, the files of each folder in order, then its

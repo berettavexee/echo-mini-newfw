@@ -55,7 +55,7 @@ def wav(path, seconds=3, rate=44100):
 
 
 _LINE, _SKIP = r"^[^\n]*", r"(?:[^\n]*\n)*?[^\n]*"   # a line's start; lines between
-_INST = [(2000, "MENU", 1500)] + [(4000 + 300 * i, "VOL-") for i in range(6)] + \
+_INST = [(2000, "MENU", 1500)] + [(4000 + 300 * i, "VOL-") for i in range(7)] + \
         [(6300, "PLAY"), (7600, "PLAY")]
 TESTS = {
     "boot": dict(files={"A.WAV": "wav"}, keys="", ms=7000,          # the log: every 5 s
@@ -84,7 +84,7 @@ TESTS = {
                       emu_args=["--vbus", "1", "--power", "1",
                                 "--gpio-at", "1500:2:5:0,7000:2:5:1,7200:2:5:0,"
                                              "9000:2:5:1,11500:2:5:0"],
-                      keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(5)],
+                      keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(6)],
                                 (6000, "PLAY")),
                       expect=[r"uac: start", r"screen off", r"uac: exit \(Power 2 s\)",
                               r"power off \(Power 2 s\)"]),
@@ -189,8 +189,8 @@ TESTS = {
     # the interface's language (ETUDE §112): Settings, Language (its first line) set to the
     # first catalogue (Français), back; after the reboot the setting read, the catalogue loaded
     "lang": dict(files={"A.WAV": "wav"}, ms=8000,
-                 keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "PLAY"),
-                           (5200, "PLAY"), (5800, "BACK")),
+                 keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "VOL-"),
+                           (4900, "PLAY"), (5500, "PLAY"), (6100, "BACK")),
                  expect=[r"lang: 3 catalogue\(s\) in FW1", r"lang: fr \(Français\), \d+ strings",
                          r"ui: language fr", r"ui: settings 3: .*language fr",
                          r"lang: fr \(Français\)"],
@@ -199,8 +199,8 @@ TESTS = {
     # setting read (ETUDE §120; the clock itself is not set in the emulator: nothing drawn)
     "clock-hide": dict(files={"A.WAV": "wav"}, ms=8000,
                        keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"),
-                                 (4600, "PLAY"), (5000, "VOL-"), (5300, "VOL-"), (5600, "PLAY"),
-                                 (6200, "BACK")),
+                                 (4600, "VOL-"), (4900, "PLAY"), (5300, "VOL-"), (5600, "VOL-"),
+                                 (5900, "PLAY"), (6500, "BACK")),
                        expect=[r"ui: clock hidden", r"ui: settings 3: .*clock hidden"],
                        forbid=[r"ui: settings 3: .*clock shown"],
                        reboot=dict(ms=8000)),
@@ -815,7 +815,8 @@ def lib_build_test(variant):
     return go
 
 
-LIB_KEYS = keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "PLAY"),
+LIB_KEYS = keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "VOL-"),
+                (4900, "PLAY"),
                *[(5200 + 250 * i, "VOL-") for i in range(12)], (8800, "PLAY"))
 
 
@@ -885,6 +886,59 @@ def lib_views(img, elf, tmp):
 
 
 TESTS["lib-views"] = dict(custom=lib_views)
+
+
+def queue_file(img, elf, tmp):
+    """The play queue in NEWFWQ.DAT (ETUDE §128): a library album's track played (its list
+    written into the file meanwhile); the queue mode (VOL+ and VOL- together): an album added
+    (MENU), another put next (PLAY); the queue's screen from the main menu; then a boot: the
+    queue read again from the file, its track resumed"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dat = os.path.join(tmp, "NEWFWLIB.DAT")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "--sd", card, "-o",
+                    dat], check=True, capture_output=True)
+    mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
+    dump = os.path.join(tmp, "after.img")
+    k = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"), (3400, "VOL-"), (3800, "PLAY"),
+             (4400, "PLAY"), (5000, "PLAY"), (7000, "MENU"), (7600, "BACK")) + \
+        ",8400:VOL+,8600:VOL-,8900:NONE," + \
+        keys((9400, "VOL-"), (9800, "MENU"), (10400, "VOL-"), (10800, "PLAY"), (11400, "BACK"),
+             (12000, "MENU", 1500), (14000, "VOL-"), (14400, "VOL-"), (14800, "PLAY"),
+             (16000, "BACK"))
+    shots = os.environ.get("EMUTEST_SHOTS")
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "17000", "--steps", "30000000000", "--dump-disk", dump,
+                          "--keys", k] + (["--shots", shots] if shots else []),
+                         capture_output=True, text=True).stdout
+    shutil.move(dump, disk)
+    out += "\n-- reboot\n" + subprocess.run(
+        [sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card, "--boot-disk",
+         "--ms", "6000", "--steps", "30000000000", "--dump-disk", dump],
+        capture_output=True, text=True).stdout
+    text = read_log(dump)
+    if os.environ.get("EMUTEST_LOG"):
+        open(os.environ["EMUTEST_LOG"], "w").write(text + "\n" + out)
+    fails = []
+    pos = 0
+    for pat in (r"ui: (\d+) tracks of the library's list 8\.",
+                r"queue: NEWFWQ\.DAT created",
+                r"queue: \d+ tracks written into NEWFWQ\.DAT \(in use\)",
+                r"keys: chord vol\+-",
+                r"queue: \d+ tracks added at \d+",
+                r"queue: \d+ tracks put next at \d+",
+                r"=== boot",
+                r"ui: resume: NEWFWQ\.DAT's queue, track \d+/\d+",
+                r"ui: queue \d+/\d+: .* \(0\)"):
+        m = re.compile(pat).search(text, pos)
+        if not m:
+            fails.append(f"missing: {pat}")
+        else:
+            pos = m.end()
+    return fails, text + "\n" + out
+
+
+TESTS["queue-file"] = dict(custom=queue_file)
 
 TESTS.update({
     # built from the tags, compared with mklib.py's answers (content: STRS's order differs)

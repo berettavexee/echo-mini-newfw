@@ -87,6 +87,10 @@ static struct {
 } browser_mq = { .index = UINT16_MAX };     /* the selected row's name scrolled (a file or a folder) */
 int dir_n;
 static int dir_full;
+static int qmode;                               /* the queue mode (below) */
+static char qmsg[48] __attribute__((section(".screenram")));     /* what it did, shown 2 s */
+static uint32_t qmsg_at;
+static int qmsg_on;
 
 static int lib_shown;                           /* the listing is a library list */
 
@@ -475,8 +479,23 @@ void browser_marquee_tick(void)
                     browser_mq.fg, SEL_BG);
 }
 
+static void lib_restored(void)                  /* a resume in the library: its list loaded */
+{
+    if (libv_restore_now()) {
+        dir_load(&path[depth].dir);
+        if (path[depth].sel >= dir_n)
+            path[depth].sel = path[depth].top = 0;
+        b_dirty = 1;
+    }
+}
+
 static void draw_browser_do(void)
 {
+    lib_restored();
+    if (qmsg_on && millis() - qmsg_at >= 2000) {        /* the message's time over: the title */
+        qmsg_on = 0;
+        b_dirty = 1;
+    }
     int sel = path[depth].sel, top = path[depth].top, mark = playing_index();
     if (!b_dirty && top == b_top) {
         /* the same page: only the rows whose look changed (selection, playing mark) */
@@ -497,7 +516,13 @@ static void draw_browser_do(void)
     }
     if (b_dirty) {                              /* every band once, nothing cleared first */
         lcd_fill(0, 0, 4, 16, BG);
-        lcd_text_clip(4, 0, depth ? path[depth].name : T("Storage"), LCD_W - 114, TITLE_FG, BG);
+        const char *title = depth ? path[depth].name : T("Storage");
+        uint16_t tfg = TITLE_FG;
+        if (qmsg_on)
+            title = qmsg, tfg = SK_FG;
+        else if (qmode)
+            title = T("Queue: PLAY next, MENU add"), tfg = SK_FG;
+        lcd_text_clip(4, 0, title, LCD_W - 114, tfg, BG);
         draw_clock(LCD_W - 114, LCD_W - 70, 1);
         lcd_fill(LCD_W - 4, 0, 4, 16, BG);
         lcd_fill(0, 16, LCD_W, ROW_Y0 - 16, BG);
@@ -667,7 +692,17 @@ int sd_watch(void)
         sd_open();                              /* nothing heard: mounted at once (§106); */
                                                 /* while music plays: at its first use */
     int stopped = 0;
-    if (!in && q_on_sd()) {
+    if (!in && q_on_sd() && q_is_file()) {      /* a file queue (§128): its card's tracks */
+        const struct entry *ce = q_cur < q_n ? q_ent(q_cur) : 0;      /* passed over */
+        if (ce && (ce->flags & F_SD) && (q_playing || player_is_open())) {
+            play_stop(STOP_NOW);
+            parked = 0;
+            int nx = q_next_index(q_cur, 1);
+            if (nx >= 0)
+                play_index(nx);
+            stopped = !q_playing;
+        }
+    } else if (!in && q_on_sd()) {
         if (q_playing || player_is_open())
             play_stop(STOP_NOW);
         parked = 0;
@@ -695,9 +730,85 @@ static void move(int d)
 
 /* A key on the browser: VOL+/VOL- move, BACK goes up, PLAY opens a folder or plays the file and
  * those after it, PLAY held on a folder plays all that is under it. Returns UI_* (ui_priv.h). */
+/* ---- the queue mode (ETUDE §128): VOL+ and VOL- together; PLAY puts the row next, MENU adds it
+ * at the end, PLAY held opens a folder or a list, BACK leaves the mode ---- */
+int browser_qmode(void)
+{
+    return qmode;
+}
+
+int browser_chord(void)
+{
+    qmode = !qmode && depth > 0;                /* (not at the top level) */
+    b_dirty = 1;
+    return UI_FULL;
+}
+
+static void queue_row(int sel, int next)
+{
+    static struct q_src s __attribute__((section(".screenram")));  /* (not the BSS) */
+    const struct entry *e = ent(sel);
+    if (e->flags & F_VOLROOT)
+        return;
+    if (e->flags & F_DIR) {
+        if (lib_shown) {
+            s.type = QS_LIB;
+            s.kind = (int)e->cluster;
+            s.param = e->size;
+        } else {
+            s.type = QS_FOLDER;
+            dir_of_entry(e, &s.d);
+            if (s.d.vol == FAT_VOL_SD && sd_open())
+                return;
+        }
+    } else {
+        if (!e->size)
+            return;
+        s.type = QS_ONE;
+        s.e = *e;
+        copy_name(s.name, ent_name(sel), sizeof s.name);   /* (a library row: its title) */
+    }
+    int was = q_n;
+    int r = q_add(&s, next);
+    char *p = r == Q_EFULL ? log_format(qmsg, qmsg + sizeof qmsg - 1, "%s", T("The queue is full")) :
+              r < 0 ? log_format(qmsg, qmsg + sizeof qmsg - 1, "%s", T("No room for NEWFWQ.DAT")) :
+              log_format(qmsg, qmsg + sizeof qmsg - 1, next ? T("Next: %d tracks") :
+                         T("Added: %d tracks"), r);
+    *p = 0;
+    qmsg_at = millis();
+    qmsg_on = 1;
+    b_dirty = 1;
+    if (r > 0 && !was) {                        /* nothing queued before: it plays */
+        play_index(0);
+    }
+    resume_save_later();
+}
+
 int browser_key(const struct key_ev *e)
 {
     int k = e->key, ev = e->type;
+    lib_restored();
+    if (qmode) {
+        if (k == KEY_BACK && ev == EV_PRESS) {
+            qmode = 0;
+            b_dirty = 1;
+            return UI_FULL;
+        }
+        if (dir_n && k == KEY_PLAY && ev == EV_PRESS) {
+            queue_row(path[depth].sel, 1);
+            return UI_FULL;
+        }
+        if (dir_n && k == KEY_MENU && ev == EV_PRESS) {
+            queue_row(path[depth].sel, 0);
+            return UI_FULL;
+        }
+        if (dir_n && k == KEY_PLAY && ev == EV_LONG && (ent(path[depth].sel)->flags & F_DIR)) {
+            enter(path[depth].sel);             /* held: open it (the mode kept) */
+            return UI_FULL;
+        }
+        if (k != KEY_VOLUP && k != KEY_VOLDOWN)
+            return UI_FULL;
+    }
     if (k == KEY_VOLUP)
         move(-1);
     else if (k == KEY_VOLDOWN)
@@ -709,10 +820,10 @@ int browser_key(const struct key_ev *e)
         const struct entry *le = ent(sel);
         if ((le->flags & F_DIR) && ev == EV_PRESS)
             enter(sel);
-        else if ((le->flags & F_DIR) && ev == EV_LONG && le->cluster == LIB_TRACKS_LIST) {
-            char nm[64];                        /* held on an album: its tracks */
+        else if ((le->flags & F_DIR) && ev == EV_LONG) {
+            char nm[64];                        /* held on a list: all its tracks (§128) */
             copy_name(nm, ent_name(sel), sizeof nm);
-            q_from_lib(LIB_TRACKS_LIST, le->size, 0, nm);
+            q_from_lib((int)le->cluster, le->size, -1, nm);
             if (q_n) {
                 play_index(q_cur);
                 return UI_FULL | UI_TO_PLAYING;

@@ -11,7 +11,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/browser.c
+#: src/browser.c src/libbrowse.c
 msgid "Library"
 msgstr ""
 
@@ -41,6 +41,28 @@ msgstr ""
 
 #: src/browser.c src/ui.c
 msgid "Storage"
+msgstr ""
+
+#: src/browser.c
+msgid "Queue: PLAY next, MENU add"
+msgstr ""
+
+#: src/browser.c
+msgid "The queue is full"
+msgstr ""
+
+#: src/browser.c
+msgid "No room for NEWFWQ.DAT"
+msgstr ""
+
+#: src/browser.c
+#, c-format
+msgid "Next: %d tracks"
+msgstr ""
+
+#: src/browser.c
+#, c-format
+msgid "Added: %d tracks"
 msgstr ""
 
 #: src/charge.c
@@ -270,6 +292,10 @@ msgstr ""
 msgid "Now playing"
 msgstr ""
 
+#: src/menu.c src/qscreen.c
+msgid "Play queue"
+msgstr ""
+
 #: src/menu.c src/settings.c
 msgid "Settings"
 msgstr ""
@@ -484,6 +510,18 @@ msgstr ""
 
 #: src/playscreen.c src/settings.c
 msgid "none"
+msgstr ""
+
+#: src/qscreen.c
+msgid "Queue emptied"
+msgstr ""
+
+#: src/qscreen.c
+msgid "Empty the queue (the track playing kept)"
+msgstr ""
+
+#: src/queue.c
+msgid "Queue"
 msgstr ""
 
 #. TRANSLATORS: the time shown at the top of the play screen and the browser

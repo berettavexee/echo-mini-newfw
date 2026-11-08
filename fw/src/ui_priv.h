@@ -122,6 +122,8 @@ struct q_state;
 int browser_walk_resume(const struct fat_dir *d, const char *nm, const struct q_state *qs,
                         uint32_t track);        /* a resume: its track plays meanwhile */
 int browser_key(const struct key_ev *e);
+int browser_qmode(void);                        /* the queue mode is on (§128) */
+int browser_chord(void);                        /* VOL+ and VOL- together: the mode on or off */
 
 /* ---- libbrowse.c: the library's lists as the browser's folders (ETUDE §127) ---- */
 int libv_load(int kind, uint32_t param);        /* a list shown: its rows */
@@ -130,9 +132,12 @@ const struct entry *libv_ent(int i);
 const char *libv_empty(void);                   /* what an empty list shows */
 void libv_close(void);                          /* the index changed: opened again when used */
 void libv_card_changed(void);                   /* the card in or out: the views set up again */
-uint32_t libv_tracks(int kind, uint32_t param);
-int libv_track(int kind, uint32_t param, uint32_t i, struct entry *e, char *name, int max);
-int libv_card_shown(void);
+void libv_restore(void);                        /* a resume in the library: its lists' names */
+int libv_restore_now(void);                     /* ...done now (the browser's first use): 1 */
+/* The tracks of a list (or of all the lists a row opens: an artist's albums...) into ids: their
+ * count; *sd: some on the card */
+uint32_t libv_collect(int kind, uint32_t param, uint16_t *ids, int max, int *on_sd);
+int libv_track_id(uint32_t id, struct entry *e, char *name, int max);  /* a track: 0, or -1 */
 
 /* ---- queue.c ---- */
 #define Q_DIRS 4000                             /* folders with tracks in the queue (§79) */
@@ -160,9 +165,31 @@ void q_from_tree_keep(const struct fat_dir *top, const char *name);  /* that tra
 int q_resume_fix(const struct q_state *s, uint32_t track);     /* its index found again, or -1 */
 void q_clear(void);
 int q_on_sd(void);                              /* the queue is on the card */
-/* A library list from its i-th track (a simple queue: no resume of it yet, step 5) */
+/* A library list from its track 'start' (-1: PLAY held, the first or anywhere in shuffle); kept
+ * in NEWFWQ.DAT once written there (the storage task) */
 void q_from_lib(int kind, uint32_t param, int start, const char *name);
-int q_is_lib(void);
+int q_is_lib(void);                             /* a library list not yet in the file */
+int q_is_file(void);                            /* the queue is NEWFWQ.DAT's */
+/* The queue mode (ETUDE §128): tracks added at the end, or put next */
+enum { QS_ONE, QS_FOLDER, QS_LIB };
+struct q_src {
+    int type;
+    struct entry e;                             /* QS_ONE: the track */
+    char name[NAME_KEEP + 1];
+    struct fat_dir d;                           /* QS_FOLDER: its files */
+    int kind;                                   /* QS_LIB: a list (libbrowse.c) */
+    uint32_t param;
+};
+#define Q_ENOFILE (-61)                         /* NEWFWQ.DAT not usable */
+#define Q_EFULL   (-62)                         /* more than QF_MAX tracks */
+int q_add(const struct q_src *s, int next);     /* the tracks added, or Q_E* */
+void q_clear_keep(void);                        /* emptied, the track playing kept */
+struct q_fstate {
+    uint32_t gen, seed, base;
+    int32_t cur, n, un_anchor, un_at, un_n;
+};
+void q_file_state(struct q_fstate *s);
+int q_file_resume(const struct q_fstate *s, const char *name);    /* 0, or -1: not that queue */
 /* Track i: its entry and name (read again from its folder when needed; 0 / "" if unreadable) */
 const struct entry *q_ent(int i);
 const char *q_name(int i);
@@ -184,6 +211,7 @@ void play_stop(int how);
 void play_index(int i);
 void play_step(int i, int step);
 #define Q_EEMPTY (-60)                          /* an empty file (0 bytes) */
+#define Q_EABSENT (-63)                         /* on a card that is not in: passed over */
 extern char fail_name[64];                      /* nothing could be played: the banner */
 extern int fail_code, fail_due;
 extern uint32_t fail_why;
@@ -209,9 +237,9 @@ int play_key(const struct key_ev *e);
 int seek_key(const struct key_ev *e);
 
 /* ---- menu.c ---- */
-enum { M_FILES, M_PLAYING, M_SETTINGS, M_USB_RO, M_USB_RW, M_USB_DAC, M_INSTALL, M_SYSTEM,
+enum { M_FILES, M_PLAYING, M_QUEUE, M_SETTINGS, M_USB_RO, M_USB_RW, M_USB_DAC, M_INSTALL, M_SYSTEM,
        M_LOADER, M_COUNT };
-extern const struct screen menu_screen, clock_screen;
+extern const struct screen menu_screen, clock_screen, queue_screen;
 extern int menu_choice;              /* the main menu's choice once closed, -1: none */
 
 /* ---- uac.c ---- */

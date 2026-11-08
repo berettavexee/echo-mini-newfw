@@ -844,3 +844,41 @@ msgstr ""
 #: src/libbrowse.c
 msgid "Unknown year"
 msgstr ""
+
+#: src/browser.c
+msgid "Queue: PLAY next, MENU add"
+msgstr ""
+
+#: src/browser.c
+msgid "The queue is full"
+msgstr ""
+
+#: src/browser.c
+msgid "No room for NEWFWQ.DAT"
+msgstr ""
+
+#: src/browser.c
+#, c-format
+msgid "Next: %d tracks"
+msgstr ""
+
+#: src/browser.c
+#, c-format
+msgid "Added: %d tracks"
+msgstr ""
+
+#: src/menu.c src/qscreen.c
+msgid "Play queue"
+msgstr ""
+
+#: src/qscreen.c
+msgid "Empty the queue (the track playing kept)"
+msgstr ""
+
+#: src/queue.c
+msgid "Queue"
+msgstr ""
+
+#: src/qscreen.c
+msgid "Queue emptied"
+msgstr ""

@@ -28,6 +28,13 @@ static int card_in(void)
     return serial && sd_present() && !sd_open() && sdvol.serial == serial;
 }
 
+/* while the index is read: the watchdog, and the music (a queue of the file needs no index) */
+static void bg(void)
+{
+    wdt_kick();
+    ui_background();
+}
+
 /* The index opened and the views set up, if not yet: 0, or -1 (none, or unusable) */
 static int ready(void)
 {
@@ -45,7 +52,7 @@ static int ready(void)
             fat_extent(&f, &file_first, &count))
             return -1;
         lib_cache(lcache, sizeof lcache);
-        lib_yield = wdt_kick;                   /* (the CRC: the whole half read) */
+        lib_yield = bg;                         /* (the CRC: the whole half read) */
         int r = lib_open(&io);
         lib_yield = 0;
         if (r) {
@@ -55,7 +62,7 @@ static int ready(void)
         state = LB_OPEN;
     }
     int c = card_in();
-    lv_yield = wdt_kick;
+    lv_yield = bg;
     int r = lv_setup(c);
     lv_yield = 0;
     log_printf("library: views of %u tracks, the card's %s, in %u ms: %u shown", lib_count(LIB_TRACKS),
@@ -78,6 +85,31 @@ void libv_close(void)
         dir_load(&path[0].dir);                 /* (no disk read) */
         b_dirty = 1;
     }
+}
+
+/* A resume in the library (resume.c): the lists' names taken from their parents' rows, and
+ * the list shown loaded, at the browser's first use (the index read then, not at boot) */
+static int restore_due;
+
+void libv_restore(void)
+{
+    restore_due = 1;
+    copy_name(path[1].name, T("Library"), sizeof path[1].name);
+    dir_n = 0;
+}
+
+int libv_restore_now(void)
+{
+    if (!restore_due)
+        return 0;
+    restore_due = 0;
+    for (int i = 2; i <= depth; i++) {
+        int n = libv_load((int)path[i - 1].dir.cluster, path[i - 1].dir.size);
+        path[i].name[0] = 0;
+        if (path[i - 1].sel < n)
+            copy_name(path[i].name, libv_name(path[i - 1].sel), sizeof path[i].name);
+    }
+    return 1;
 }
 
 void libv_card_changed(void)
@@ -295,25 +327,76 @@ const struct entry *libv_ent(int i)
     return &slot[slot_of(i)].e;
 }
 
-/* The tracks of a list for the queue (queue.c): their count, track i's entry and file name */
-uint32_t libv_tracks(int kind, uint32_t param)
+/* ---- the tracks of a list for the queue (queue.c, ETUDE §128) ---- */
+static uint16_t *c_ids;
+static uint32_t c_n;
+static int c_max;
+
+static void collect_album(uint32_t al)
 {
-    return ready() ? 0 : lv_count(kind, param);
+    uint32_t m = lv_count(LV_TRACKS, al), id;
+    for (uint32_t i = 0; i < m && c_n < (uint32_t)c_max; i++)
+        if (!lv_item(LV_TRACKS, al, i, &id))
+            c_ids[c_n++] = (uint16_t)id;
+    if (c_n % 1024 < m)
+        wdt_kick();
 }
 
-int libv_track(int kind, uint32_t param, uint32_t i, struct entry *e, char *name, int max)
+static void collect_albums(int kind, uint32_t param)
 {
-    uint32_t id;
+    uint32_t m = lv_count(kind, param), al;
+    for (uint32_t i = 0; i < m; i++)
+        if (!lv_item(kind, param, i, &al))
+            collect_album(al);
+}
+
+uint32_t libv_collect(int kind, uint32_t param, uint16_t *ids, int max, int *on_sd)
+{
+    *on_sd = 0;
+    if (ready())
+        return 0;
+    c_ids = ids;
+    c_n = 0;
+    c_max = max;
+    uint32_t m, id;
+    switch (kind) {
+    case LV_TRACKS:
+    case LV_SONGS:
+        m = lv_count(kind, param);
+        for (uint32_t i = 0; i < m && c_n < (uint32_t)max; i++) {
+            if (!lv_item(kind, param, i, &id))
+                ids[c_n++] = (uint16_t)id;
+            if (i % 1024 == 0)
+                wdt_kick();
+        }
+        break;
+    case LV_ARTIST_ALBUMS:
+    case LV_ALBUMS:
+    case LV_YEAR_ALBUMS:
+    case LV_GENRE_ALBUMS:
+        collect_albums(kind, param);
+        break;
+    case LV_ARTISTS:                            /* every album, in the artists' order */
+        collect_albums(LV_ALBUMS, 0);
+        break;
+    case LV_YEARS:
+    case LV_GENRES:                             /* year by year, genre by genre */
+        m = lv_count(kind, 0);
+        for (uint32_t i = 0; i < m; i++)
+            if (!lv_item(kind, 0, i, &id))
+                collect_albums(kind == LV_YEARS ? LV_YEAR_ALBUMS : LV_GENRE_ALBUMS, id);
+        break;
+    }
+    *on_sd = lv_card_serial() && card_in();        /* (the card's tracks shown: some may be) */
+    return c_n;
+}
+
+int libv_track_id(uint32_t id, struct entry *e, char *name, int max)
+{
     struct lib_track t;
-    if (ready() || lv_item(kind, param, i, &id) || track_entry(id, e, &t))
+    if (ready() || track_entry(id, e, &t))
         return -1;
     if (lib_str(t.file, name, (uint32_t)max) < 0)
         name[0] = 0;
     return 0;
-}
-
-/* The queue may hold the card's tracks (the card's tracks shown) */
-int libv_card_shown(void)
-{
-    return !ready() && lv_card_serial() && card_in();
 }

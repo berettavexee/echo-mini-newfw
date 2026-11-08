@@ -212,6 +212,8 @@ static int q_open(int i, int chain)
         return HIFI_EREAD;                      /* its folder not readable (or changed) */
     if (!e->size)
         return Q_EEMPTY;                        /* not queued since 0.65; kept for safety */
+    if ((e->flags & F_SD) && !sd_present())
+        return Q_EABSENT;                       /* the card is not in: passed over (§128) */
     if ((e->flags & F_SD) && sd_open())
         return HIFI_EREAD;                      /* the card forgotten (USB) and not readable */
     uint16_t flags = e->flags;
@@ -311,9 +313,17 @@ void play_step(int i, int step)
         q_playing = 0;
         return;
     }
-    int r, r0 = 0;
+    int r, r0 = 0, absent = 0;
     uint32_t why0 = 0;
     while ((r = q_open(q_dec, keep)) < 0) {
+        if (r == Q_EABSENT && ++absent <= q_n) {        /* a card not in: not a failure */
+            q_dec += step;
+            if (q_dec >= 0 && q_dec < q_n)
+                continue;
+            play_stop(STOP_NOW);
+            q_cur = q_dec = i;
+            return;
+        }
         if (q_dec == i) {                       /* the screen tells why the one chosen failed */
             r0 = r;
             why0 = player.why;
@@ -394,11 +404,17 @@ void ui_background(void)
     if (r == 1 || player.time_ms > 10000)
         q_errors = 0;                           /* it played: only failures in a row stop */
     int first = q_dec, err = r < 0 ? r : 0;     /* the first that failed, why */
+    int absent = 0;
     for (int n = q_next_index(q_dec, 0); n >= 0; n = q_next_index(n, 0)) {
         q_dec = n;
         int o = q_open(q_dec, 2);
         if (o == 0)
             return;                             /* the next one, gapless when it can */
+        if (o == Q_EABSENT) {                   /* on a card that is not in: passed over */
+            if (++absent > q_n)
+                break;
+            continue;
+        }
         if (!err) {
             first = q_dec;
             err = o;

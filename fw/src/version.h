@@ -16,7 +16,7 @@
 #elif defined(ECHO_HWTEST)
 #define FW_VERSION "0.102hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.102b9"           /* test build: the library views (§127) */
+#define FW_VERSION "0.102b11"          /* test build: the play queue (§128) */
 #endif
 #define FW_DATE    "2026-11-07"
 

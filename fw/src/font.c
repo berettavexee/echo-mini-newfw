@@ -53,7 +53,7 @@ static int blob_read(uint32_t base, uint32_t off, void *dst, uint32_t n)
 
 int font_init(void)
 {
-    static uint32_t h[128];
+    static uint32_t h[128] __attribute__((section(".screenram")));  /* (read once: not the BSS) */
     for (int k = 0; k < 2; k++) {
         uint32_t img = EMMC_FW1 + (k ? emmc.r : 0);     /* FW1, then FW2 */
         const uint8_t *hb = (const uint8_t *)h;

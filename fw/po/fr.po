@@ -776,3 +776,41 @@ msgstr "Genre inconnu"
 #: src/libbrowse.c
 msgid "Unknown year"
 msgstr "Année inconnue"
+
+#: src/browser.c
+msgid "Queue: PLAY next, MENU add"
+msgstr "File : PLAY ensuite, MENU ajoute"
+
+#: src/browser.c
+msgid "The queue is full"
+msgstr "La file est pleine"
+
+#: src/browser.c
+msgid "No room for NEWFWQ.DAT"
+msgstr "Pas de place pour NEWFWQ.DAT"
+
+#: src/browser.c
+#, c-format
+msgid "Next: %d tracks"
+msgstr "Ensuite : %d morceaux"
+
+#: src/browser.c
+#, c-format
+msgid "Added: %d tracks"
+msgstr "Ajoutés : %d morceaux"
+
+#: src/menu.c src/qscreen.c
+msgid "Play queue"
+msgstr "File de lecture"
+
+#: src/qscreen.c
+msgid "Empty the queue (the track playing kept)"
+msgstr "Vider la file (le morceau en cours gardé)"
+
+#: src/queue.c
+msgid "Queue"
+msgstr "File"
+
+#: src/qscreen.c
+msgid "Queue emptied"
+msgstr "File vidée"

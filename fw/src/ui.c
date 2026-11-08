@@ -5,6 +5,7 @@
  * runs in the background: the main loop services the player between two key polls. */
 #include "crash.h"
 #include "ui_priv.h"
+#include "qfile.h"
 #include "storage.h"
 #include "msc.h"
 #ifdef ECHO_LIBBUILD
@@ -279,6 +280,8 @@ static void menu_action(int m, int *scr)
         *scr = SCR_BROWSER;
     else if (m == M_SETTINGS)
         scr_push(&settings_screen);
+    else if (m == M_QUEUE)
+        scr_push(&queue_screen);
     else if (m == M_PLAYING)
         *scr = SCR_PLAYING;
     else if (m >= M_USB_RO) {
@@ -302,6 +305,7 @@ static void menu_action(int m, int *scr)
             sd_open();                          /* at once: the music stopped (§106) */
         if (m == M_USB_RW || m == M_INSTALL || m == M_USB_RO) {
             libv_close();                       /* (NEWFWLIB.DAT too) */
+            qf_forget();                        /* (and NEWFWQ.DAT) */
             path_root(FAT_VOL_INT);             /* the volume may have changed */
             dir_load(&path[1].dir);
             q_clear();
@@ -479,7 +483,9 @@ void ui_main(void)
             if (ev != EV_NONE && ev != EV_CHORD && scr_stack[scr_n - 1]->key(&e) == SCR_POP)
                 r = scr_pop(&scr);
         } else if (ev == EV_CHORD) {
-            if (scr == SCR_PLAYING && !sk_on) {
+            if (scr == SCR_BROWSER && !browser_walking())
+                r = browser_chord();            /* the queue mode (§128) */
+            else if (scr == SCR_PLAYING && !sk_on) {
                 play_level = lvl_key;           /* the steps of a VOL key held before it undone */
                 volume(0);
                 seek_begin();
@@ -492,6 +498,8 @@ void ui_main(void)
                 seek_end(0);
             if (k == KEY_MENU && ev == EV_LONG)
                 scr_push(&menu_screen);         /* drawn by the loop, acted on when closed */
+            else if (k == KEY_MENU && ev == EV_PRESS && scr == SCR_BROWSER && browser_qmode())
+                r = browser_key(&e);            /* the queue mode: MENU adds */
             else if (k == KEY_MENU && ev == EV_PRESS) {
                 scr = scr == SCR_BROWSER ? SCR_PLAYING : SCR_BROWSER;
                 r = UI_FULL;
