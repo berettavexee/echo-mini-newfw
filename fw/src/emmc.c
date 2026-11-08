@@ -96,12 +96,19 @@ int emmc_user_area(uint32_t base, uint32_t count)
     return 0;
 }
 
+struct io_count emmc_wio;
+
 int emmc_write_user(uint32_t sector, uint32_t count, const void *buf)
 {
     if (user_hi <= user_lo || user_lo < EMMC_FW1 + emmc.p || sector < user_lo ||
         sector + count > user_hi || sector + count < sector)
         return EMMC_EPROTECT;
-    return write_run(sector, count, buf);
+    uint32_t t0 = ticks();
+    int r = write_run(sector, count, buf);
+    emmc_wio.cmds++;
+    emmc_wio.sectors += count;
+    emmc_wio.us += ticks() - t0;
+    return r;
 }
 
 /* IDB: 5 copies, sector 64 + 1024 * i. Sector 0 of a copy starts with 0xfcdc8c3b, sector 1 has

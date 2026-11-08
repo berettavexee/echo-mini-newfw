@@ -49,7 +49,8 @@ static int lib_progress(int phase, uint32_t done, uint32_t total)
     int force = 0;
     struct key_ev e;
     while (key_poll(&e))
-        if (e.key == KEY_BACK && e.type == EV_PRESS) {
+        if (e.key == KEY_BACK && (e.type == EV_PRESS || e.type == EV_LONG)) {   /* (held too: 0.102b6
+                                                                                 * ignored it) */
             log_printf("library: stopped by BACK (%s, %u of %u)", what[phase & 3], done, total);
             return 1;
         }

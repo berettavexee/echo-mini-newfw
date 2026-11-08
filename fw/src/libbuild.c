@@ -52,7 +52,6 @@ static uint16_t *const gidx = (uint16_t *)(HR + 0x58100);         /* genre name:
 static uint8_t *const written = (uint8_t *)(HR + 0x5c100);        /* sectors written: 1 KiB */
 static uint8_t *const gmark = (uint8_t *)(HR + 0x5c500);          /* genre names used: 1 KiB */
 static uint8_t (*const sbuf)[512] = (uint8_t (*)[512])(HR + 0x5c900);   /* 2 string buffers */
-static uint8_t (*const wbuf)[512] = (uint8_t (*)[512])(HR + 0x5cd00);   /* 3 write streams */
 static uint8_t *const mark = (uint8_t *)(HR + 0x5d300);           /* names used: 1 KiB */
 static uint16_t *const order = (uint16_t *)0x03020000u;           /* SYSRAM: 48 KiB */
 static struct bdir *const dirs = (struct bdir *)0x0302c000u;      /* 48 KiB */
@@ -92,8 +91,13 @@ static struct {
 static uint32_t st_base, st_span, st_last;
 static int prog(uint32_t done, uint32_t total);
 
+/* the eMMC reads at each stage's start (the log: where the sort and the write read) */
+static uint32_t st_rd[16], st_n;
+
 static void stage(int phase, uint32_t base, uint32_t span)
 {
+    if (st_n < 16)
+        st_rd[st_n++] = emmc_io.cmds;
     if (phase != b.phase)
         st_last = 0;
     b.phase = phase;
@@ -124,10 +128,16 @@ static int prog(uint32_t done, uint32_t total)
     return 0;
 }
 
-/* ---- the half written: sectors cached, three write streams ---- */
-static struct ws { uint32_t sec; int on; } ws[3];
+/* ---- the half written: sectors cached, three write streams ----
+ * A stream holds a run of up to RUN consecutive sectors (going up or down), sector s in slot
+ * s % RUN, written in one command (or two, the run wrapping in its buffer) when it moves away:
+ * the eMMC programs a run much faster than its sectors one by one (0.102b7) */
+#define RUN 8u
+static struct ws { uint32_t lo, hi; int on; } ws[3];          /* the run: lo..hi */
+static uint8_t wrun[3][RUN][512] __attribute__((section(".screenram")));  /* (not the BSS) */
+static int in_run(int w, uint32_t s) { return ws[w].on && s >= ws[w].lo && s <= ws[w].hi; }
 static uint32_t tph[5];                         /* ticks at the start of each phase, the end */
-static struct io_count io_sd0, io_mmc0;         /* the reads counted at the start */
+static struct io_count io_sd0, io_mmc0, io_w0;  /* the reads, the writes counted at the start */
 /* the eMMC reads by where they go: the index before (its CRC, then the scan), the half written,
  * in the count, scan, sort and write phases */
 static uint32_t rd_old_crc, rd_old, rd_half, ph_c[5];
@@ -136,8 +146,8 @@ static uint32_t rd_old_crc, rd_old, rd_half, ph_c[5];
 static int rd_sec(uint32_t s, uint8_t **p)
 {
     for (int w = 0; w < 3; w++)                 /* a sector not written yet: its stream's */
-        if (ws[w].on && ws[w].sec == s) {
-            *p = wbuf[w];
+        if (in_run(w, s)) {
+            *p = wrun[w][s % RUN];
             return 0;
         }
     uint32_t c = s % CACHE;
@@ -172,14 +182,50 @@ static int flush(int w)
 {
     if (!ws[w].on)
         return 0;
-    uint32_t s = ws[w].sec;
-    if (emmc_write_user(b.hb + s, 1, wbuf[w]))
-        return -1;
-    written[s / 8] |= (uint8_t)(1 << (s % 8));
-    if (ctag[s % CACHE] == s)                   /* the cache follows */
-        for (int i = 0; i < 512; i++)
-            cache[s % CACHE][i] = wbuf[w][i];
     ws[w].on = 0;
+    for (uint32_t s = ws[w].lo; s <= ws[w].hi;) {      /* up to the buffer's end: one command */
+        uint32_t m = RUN - s % RUN;
+        if (m > ws[w].hi - s + 1)
+            m = ws[w].hi - s + 1;
+        if (emmc_write_user(b.hb + s, m, wrun[w][s % RUN]))
+            return -1;
+        for (uint32_t k = s; k < s + m; k++) {
+            written[k / 8] |= (uint8_t)(1 << (k % 8));
+            if (ctag[k % CACHE] == k)           /* the cache follows */
+                for (int i = 0; i < 512; i++)
+                    cache[k % CACHE][i] = wrun[w][k % RUN][i];
+        }
+        s += m;
+    }
+    return 0;
+}
+
+/* sector s into stream w's run: the run extended by it, or written and a new one started */
+static int ws_take(int w, uint32_t s)
+{
+    int grow = ws[w].on && ws[w].hi - ws[w].lo + 1 < RUN &&
+               (s == ws[w].hi + 1 || (s + 1 == ws[w].lo));
+    if (!grow && flush(w))
+        return -1;
+    for (int i = 0; i < 3; i++)                 /* another stream holding that sector: written */
+        if (i != w && in_run(i, s) && flush(i))
+            return -1;
+    uint8_t *d = wrun[w][s % RUN];
+    if (written[s / 8] & (1 << (s % 8))) {      /* read straight into the stream: the cache */
+        ctag[s % CACHE] = 0xffffffff;           /* untouched (the TRKS windows) */
+        rd_half++;
+        if (emmc_read(b.hb + s, 1, d))
+            return -1;
+    } else
+        for (int i = 0; i < 512; i++)
+            d[i] = 0;
+    if (!grow) {
+        ws[w].lo = ws[w].hi = s;
+        ws[w].on = 1;
+    } else if (s > ws[w].hi)
+        ws[w].hi = s;
+    else
+        ws[w].lo = s;
     return 0;
 }
 
@@ -189,27 +235,11 @@ static int put(int w, uint32_t off, const void *src, uint32_t n)
     const uint8_t *q = src;
     while (n) {
         uint32_t s = off / 512, o = off % 512, k = 512 - o < n ? 512 - o : n;
-        if (!ws[w].on || ws[w].sec != s) {
-            if (flush(w))
-                return -1;
-            for (int i = 0; i < 3; i++)         /* another stream on that sector: its bytes */
-                if (i != w && ws[i].on && ws[i].sec == s && flush(i))
-                    return -1;
-            if (written[s / 8] & (1 << (s % 8))) {
-                uint8_t *p;
-                ctag[s % CACHE] = 0xffffffff;
-                if (rd_sec(s, &p))
-                    return -1;
-                for (int i = 0; i < 512; i++)
-                    wbuf[w][i] = p[i];
-            } else
-                for (int i = 0; i < 512; i++)
-                    wbuf[w][i] = 0;
-            ws[w].sec = s;
-            ws[w].on = 1;
-        }
+        if (!in_run(w, s) && ws_take(w, s))
+            return -1;
+        uint8_t *d = wrun[w][s % RUN];
         for (uint32_t i = 0; i < k; i++)
-            wbuf[w][o + i] = q[i];
+            d[o + i] = q[i];
         q += k;
         off += k;
         n -= k;
@@ -681,20 +711,54 @@ static void ties_of(uint32_t s, uint32_t e)
     }
 }
 
+/* the places still tied at a round (one bit each), and the records' places in TRKS (pos, set by
+ * write_index): their next keys are taken in one pass over the records in their order (the
+ * records and their titles read going one way: never more reads than one title at a time) */
+static uint8_t *const need = (uint8_t *)(HR + 0x56100);          /* 3 KiB, after tie */
+static const uint16_t *pos;
+
 static int song_sort(uint32_t n)
 {
     hsort(order, n, cmp_song);
     tie[0] = 0;
     ties_of(0, n);
+    for (uint32_t k = 0; k < (n + 7) / 8; k++)
+        need[k] = 0;
     for (int depth = 1, more = 1; more && depth < 24 && !b.err; depth++) {
         more = 0;
         for (uint32_t s = 0; s < n;) {
             uint32_t e = s + 1;
             while (e < n && tie[e] == 1)
                 e++;
+            if (e - s > 1)
+                for (uint32_t k = s; k < e; k++)
+                    need[order[k] / 8] |= (uint8_t)(1 << (order[k] % 8));
+            s = e;
+        }
+        {                                       /* one pass over the records */
+            for (uint32_t i = 0; i < n; i++) {
+                uint32_t k = pos[i];
+                if (!(need[k / 8] & (1 << (k % 8))))
+                    continue;
+                uint8_t r[8];
+                const char *t = "";
+                if (!rd(HALF - REC * (i + 1) + 12, r, 8)) {
+                    t = str_at(get32(r), 0);
+                    if (!*t)
+                        t = str_at(get32(r + 4), 0);
+                }
+                lib_key(t, 0, tkey[k], TKEY, depth * TKEY);
+                if (i % 1024 == 0)
+                    wdt_kick();
+            }
+        }
+        for (uint32_t s = 0; s < n;) {
+            uint32_t e = s + 1;
+            while (e < n && tie[e] == 1)
+                e++;
             if (e - s > 1) {
                 for (uint32_t k = s; k < e; k++)
-                    lib_key(song_title(order[k], -1), 0, tkey[order[k]], TKEY, depth * TKEY);
+                    need[order[k] / 8] = 0;
                 hsort(order + s, e - s, cmp_song);
                 ties_of(s, e);
                 more = 1;
@@ -720,9 +784,44 @@ static int cmp_clus(uint32_t x, uint32_t y)
     return ckey[x] != ckey[y] ? (ckey[x] < ckey[y] ? -1 : 1) : x < y ? -1 : x > y;
 }
 
-static int cmp_pair(uint32_t x, uint32_t y)    /* (pairs, through order) */
+/* the TRKS windows, in the 64 sectors cached: TW entries, their records and places, 17 sectors */
+#define TW  600u
+#define TRB 17u
+static uint8_t *const tw = (uint8_t *)(HR + 0x48000);
+static uint32_t *const twi = (uint32_t *)(HR + 0x48000 + 36 * TW);
+static uint8_t *const trb = (uint8_t *)(HR + 0x48000 + 40 * TW);
+_Static_assert(40 * TW + 512 * TRB <= 512 * CACHE, "the TRKS window past the cache");
+_Static_assert(512 * TRB >= 16 * 512 + REC, "a run of records shorter than 16 sectors");
+
+static void sort_u32(uint32_t *a, uint32_t n)  /* (heapsort) */
 {
-    return pairs[x] < pairs[y] ? -1 : pairs[x] > pairs[y];
+    for (uint32_t s = n / 2; s-- > 0;) {
+        for (uint32_t i = s;;) {
+            uint32_t c = 2 * i + 1;
+            if (c >= n)
+                break;
+            if (c + 1 < n && a[c + 1] > a[c])
+                c++;
+            if (a[i] >= a[c])
+                break;
+            uint32_t t = a[i]; a[i] = a[c]; a[c] = t;
+            i = c;
+        }
+    }
+    for (uint32_t m = n; m > 1; m--) {
+        uint32_t t = a[0]; a[0] = a[m - 1]; a[m - 1] = t;
+        for (uint32_t i = 0;;) {
+            uint32_t c = 2 * i + 1;
+            if (c >= m - 1)
+                break;
+            if (c + 1 < m - 1 && a[c + 1] > a[c])
+                c++;
+            if (a[i] >= a[c])
+                break;
+            uint32_t u = a[i]; a[i] = a[c]; a[c] = u;
+            i = c;
+        }
+    }
 }
 
 /* ---- writing the index ---- */
@@ -771,73 +870,101 @@ static int write_index(struct lb_result *res)
     uint32_t nalb = 0, first = 0, year = 0, npairs = 0, gseen[16], ng = 0;
     for (uint32_t i = 0; i < nart; i++)
         art_tab[i] = 0;
-    for (uint32_t k = 0; k <= n; k++) {
-        uint32_t i = k < n ? order[k] : 0, j = k ? order[k - 1] : 0;
-        int newalb = k == n || !k || trk[i].aa != trk[j].aa || trk[i].album != trk[j].album;
-        if (newalb && k) {                              /* the album before: closed */
-            uint8_t a[16] = { 0 };
-            put32(a, noff[trk[j].album]);
-            put32(a + 4, first);
-            put16(a + 8, k - first);
-            put16(a + 10, rank_a[trk[j].aa]);
-            put16(a + 12, year);
-            if (put(2, albs + 16 * nalb, a, 16))
-                return LB_EIO;
-            uint32_t ar = rank_a[trk[j].aa];
-            if (!(art_tab[ar] & 0xffff))
-                art_tab[ar] = nalb << 16;
-            art_tab[ar]++;
-            for (uint32_t g = 0; g < ng; g++) {
-                if (npairs >= MAX_PAIRS)
-                    return LB_ENAMES;
-                pairs[npairs++] = gseen[g] << 16 | nalb;
+    /* TRKS in windows of TW places: the window's records read in their order on the eMMC, a
+     * run of 17 sectors at a time (records in album order are scattered: one read each, 0.102b6),
+     * then the albums closed in album order and the window written. In the 64 sectors cached
+     * (rd() unused meanwhile) */
+    for (uint32_t c = 0; c < CACHE; c++)
+        ctag[c] = 0xffffffff;
+    for (uint32_t k0 = 0; k0 < n; k0 += TW) {
+        uint32_t m = n - k0 < TW ? n - k0 : TW, cs = 0, ce = 0;
+        for (uint32_t j = 0; j < m; j++)
+            twi[j] = (uint32_t)order[k0 + j] << 16 | j;
+        sort_u32(twi, m);
+        for (uint32_t j = 0; j < m; j++) {
+            uint32_t i = twi[j] >> 16, off = HALF - REC * (i + 1);
+            uint32_t s0 = off / 512, s1 = (off + REC - 1) / 512;
+            if (s0 < cs || s1 >= ce) {          /* records going down: the run ending at s1 */
+                ce = s1 + 1;
+                cs = ce > TRB ? ce - TRB : 0;
+                rd_half++;
+                if (emmc_read(b.hb + cs, ce - cs, trb))
+                    return LB_EIO;
             }
-            nalb++;
-            if (nalb > 0xffff)
-                return LB_ENAMES;
+            const uint8_t *r = trb + (off - 512 * cs);
+            uint8_t *t = tw + 36 * (twi[j] & 0xffff);
+            for (int q = 0; q < 24; q++)                /* cluster, size, mtime, 3 strings */
+                t[q] = r[q];
+            put16(t + 24, 0);                           /* (the album: below) */
+            put16(t + 26, gidx[get16(r + 24)]);
+            put16(t + 28, get16(r + 26));
+            put16(t + 30, get16(r + 28));
+            t[32] = r[30];
+            t[33] = r[31];
+            t[34] = r[32];
+            t[35] = r[33] & 1;
         }
-        if (k == n)
-            break;
-        if (newalb) {
-            first = k;
-            year = 0;
-            ng = 0;
-        }
-        uint8_t r[REC], t[36];
-        if (rec_read(i, r))
-            return LB_EIO;
-        uint32_t gi = gidx[get16(r + 24)], y = get16(r + 28);
-        if (y && (!year || y < year))
-            year = y;
-        uint32_t g = 0;
-        while (g < ng && gseen[g] != gi)
-            g++;
-        if (g == ng) {
-            if (ng == 16) {                     /* full: into the pairs (the sort removes */
-                for (uint32_t q = 0; q < ng; q++) {     /* the duplicates) */
+        for (uint32_t k = k0; k <= k0 + m; k++) {
+            if (k == k0 + m && k != n)
+                break;
+            uint32_t i = k < n ? order[k] : 0, j = k ? order[k - 1] : 0;
+            int newalb = k == n || !k || trk[i].aa != trk[j].aa || trk[i].album != trk[j].album;
+            if (newalb && k) {                          /* the album before: closed */
+                uint8_t a[16] = { 0 };
+                put32(a, noff[trk[j].album]);
+                put32(a + 4, first);
+                put16(a + 8, k - first);
+                put16(a + 10, rank_a[trk[j].aa]);
+                put16(a + 12, year);
+                if (put(2, albs + 16 * nalb, a, 16))
+                    return LB_EIO;
+                uint32_t ar = rank_a[trk[j].aa];
+                if (!(art_tab[ar] & 0xffff))
+                    art_tab[ar] = nalb << 16;
+                art_tab[ar]++;
+                for (uint32_t g = 0; g < ng; g++) {
                     if (npairs >= MAX_PAIRS)
                         return LB_ENAMES;
-                    pairs[npairs++] = gseen[q] << 16 | nalb;
+                    pairs[npairs++] = gseen[g] << 16 | nalb;
                 }
+                nalb++;
+                if (nalb > 0xffff)
+                    return LB_ENAMES;
+            }
+            if (k == n)
+                break;
+            if (newalb) {
+                first = k;
+                year = 0;
                 ng = 0;
             }
-            gseen[ng++] = gi;
+            uint8_t *t = tw + 36 * (k - k0);
+            uint32_t gi = get16(t + 26), y = get16(t + 30);
+            if (y && (!year || y < year))
+                year = y;
+            uint32_t g = 0;
+            while (g < ng && gseen[g] != gi)
+                g++;
+            if (g == ng) {
+                if (ng == 16) {                 /* full: into the pairs (the sort removes */
+                    for (uint32_t q = 0; q < ng; q++) {     /* the duplicates) */
+                        if (npairs >= MAX_PAIRS)
+                            return LB_ENAMES;
+                        pairs[npairs++] = gseen[q] << 16 | nalb;
+                    }
+                    ng = 0;
+                }
+                gseen[ng++] = gi;
+            }
+            put16(t + 24, nalb);
         }
-        for (int q = 0; q < 24; q++)                    /* cluster, size, mtime, 3 strings */
-            t[q] = r[q];
-        put16(t + 24, nalb);
-        put16(t + 26, gi);
-        put16(t + 28, get16(r + 26));
-        put16(t + 30, y);
-        t[32] = r[30];
-        t[33] = r[31];
-        t[34] = r[32];
-        t[35] = r[33] & 1;
-        if (put(1, trks + 36 * k, t, 36))
+        if (put(1, trks + 36 * k0, tw, 36 * m))
             return LB_EIO;
-        if (sprog(k, n))
+        if (sprog(k0 + m, n))
             return b.err;
     }
+    for (uint32_t c = 0; c < CACHE; c++)
+        ctag[c] = 0xffffffff;
     uint32_t arts = albs + 16 * nalb, gens = arts + 8 * nart, galb = gens + 12 * ngen;
     for (uint32_t i = 0; i < nart; i++) {
         uint8_t a[8];
@@ -848,17 +975,14 @@ static int write_index(struct lb_result *res)
             return LB_EIO;
     }
     stage(LB_WRITE, 350, 30);
-    for (uint32_t i = 0; i < npairs; i++)               /* GALB: by genre, then album */
-        order[i] = (uint16_t)i;
-    hsort(order, npairs, cmp_pair);
-    if (b.err)
-        return b.err;
+    sort_u32(pairs, npairs);                            /* GALB: by genre, then album (in
+                                                         * place: order kept for SONG) */
     for (uint32_t g = 0; g < ngen; g++)
         gen_tab[2 * g] = gen_tab[2 * g + 1] = 0;
     uint32_t ngalb = 0;
     for (uint32_t k = 0; k < npairs; k++) {
-        uint32_t p = pairs[order[k]];
-        if (k && p == pairs[order[k - 1]])
+        uint32_t p = pairs[k];
+        if (k && p == pairs[k - 1])
             continue;
         if (!gen_tab[2 * (p >> 16) + 1])
             gen_tab[2 * (p >> 16)] = ngalb;
@@ -883,12 +1007,24 @@ static int write_index(struct lb_result *res)
     stage(LB_WRITE, 380, 200);
     for (int k = 0; k < TCACHE; k++)
         tc[k].i = 0xffffffff;
-    for (uint32_t i = 0; i < n; i++) {
-        lib_key(song_title(i, -1), 0, tkey[i], TKEY, 0);
-        order[i] = (uint16_t)i;
-        if (sprog(i, n))
+    uint16_t *const ps = (uint16_t *)pairs;             /* a record's place in TRKS (pairs: */
+    for (uint32_t k = 0; k < n; k++)                    /* free since GALB) */
+        ps[order[k]] = (uint16_t)k;
+    pos = ps;
+    for (uint32_t i = 0; i < n; i++) {                  /* the titles in the records' order: */
+        uint8_t r[8];                                   /* both read going one way */
+        const char *t = "";
+        if (!rd(HALF - REC * (i + 1) + 12, r, 8)) {
+            t = str_at(get32(r), 0);
+            if (!*t)
+                t = str_at(get32(r + 4), 0);
+        }
+        lib_key(t, 0, tkey[ps[i]], TKEY, 0);
+        if (i % 64 == 0 && sprog(i, n))
             return b.err;
     }
+    for (uint32_t k = 0; k < n; k++)
+        order[k] = (uint16_t)k;
     stage(LB_WRITE, 580, 250);
     if (song_sort(n))
         return b.err;
@@ -959,10 +1095,15 @@ static int write_index(struct lb_result *res)
     /* the CRC, read back from the eMMC; then the header */
     stage(LB_WRITE, 950, 50);
     uint32_t crc = 0xffffffffu;
+    for (uint32_t c = 0; c < CACHE; c++)
+        ctag[c] = 0xffffffff;
     for (uint32_t at = 0; at < len; at += 512) {
-        if (emmc_read(b.hb + at / 512, 1, cache[0]))
-            return LB_EIO;
-        crc = lib_crc(crc, cache[0], len - at < 512 ? len - at : 512);
+        if (at % (512 * CACHE) == 0) {          /* 64 sectors a read */
+            uint32_t m = (len - at + 511) / 512;
+            if (emmc_read(b.hb + at / 512, m < CACHE ? m : CACHE, cache[0]))
+                return LB_EIO;
+        }
+        crc = lib_crc(crc, cache[at / 512 % CACHE], len - at < 512 ? len - at : 512);
         if (at % (64 * 512) == 0)
             sprog(at, len);
     }
@@ -1038,6 +1179,8 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
     b.phase = LB_COUNT;
     io_sd0 = sd_io;
     io_mmc0 = emmc_io;
+    io_w0 = emmc_wio;
+    st_n = 0;
     for (uint32_t i = 0; i < sizeof *fst; i++)
         ((uint8_t *)fst)[i] = 0;
     tags_fields_only = 1;
@@ -1099,6 +1242,16 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
                ph_c[LB_SCAN] ? (ph_c[LB_SORT] ? ph_c[LB_SORT] : ph_c[4]) - ph_c[LB_SCAN] : 0,
                ph_c[LB_SORT] ? ph_c[LB_WRITE] - ph_c[LB_SORT] : 0,
                ph_c[LB_WRITE] ? ph_c[4] - ph_c[LB_WRITE] : 0);
+    if (st_n) {
+        char sb[96], *sp = sb;
+        st_rd[st_n < 16 ? st_n : 15] = emmc_io.cmds;
+        for (uint32_t k = 0; k < st_n && k < 15; k++)
+            sp = log_format(sp, sb + sizeof sb - 1, " %u", st_rd[k + 1] - st_rd[k]);
+        *sp = 0;
+        log_printf("library: eMMC reads by stage of the sort and the write:%s", sb);
+    }
+    log_printf("library: eMMC writes: %u commands, %u sectors, %u ms", emmc_wio.cmds - io_w0.cmds,
+               emmc_wio.sectors - io_w0.sectors, (emmc_wio.us - io_w0.us) / 1000);
     log_printf("library: reads: card %u commands, %u sectors, %u ms; eMMC %u commands, %u "
                "sectors, %u ms", sd_io.cmds - io_sd0.cmds, sd_io.sectors - io_sd0.sectors,
                (sd_io.us - io_sd0.us) / 1000, emmc_io.cmds - io_mmc0.cmds,

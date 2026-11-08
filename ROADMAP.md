@@ -256,8 +256,8 @@ One line per version; the measurements are in `ETUDE.md`.
     Library; at once after a USB session that wrote; files unchanged not read again), compared
     with mklib.py in the emulator up to 18,162 tracks; an update with the same files ends after
     the count (a fingerprint, 3 s); on the device 18,003 tracks: 3 to 4 min built from the tags,
-    165 s after 5,733 files changed (done, §126; next: the old index's tables in RAM during an
-    update, 37 s of single-sector reads); 4. the views (the same track on both memories shown
+    165 s after 5,733 files changed, an update keeping them all 23 s (the index before's tables
+    in RAM, reads and writes in runs; done, §126); 4. the views (the same track on both memories shown
     once); 5. playback and resume from a view; 6. the card. Favourites would build on it;
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;

@@ -35,5 +35,6 @@ int emmc_write_log(uint32_t sector, uint32_t count, const void *buf);
  * microseconds in the reads; the card's in sd.c */
 struct io_count { uint32_t cmds, sectors, us; };
 extern struct io_count emmc_io;
+extern struct io_count emmc_wio;                /* the writes of the user area */
 
 #endif
