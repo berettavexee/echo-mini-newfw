@@ -40,6 +40,7 @@ static int boot_sector(struct fat_vol *v, uint32_t lba)
     v->data = v->fat + b[16] * fatsz;
     v->clusters = (total - (v->data - lba)) / v->spc;
     v->root = le32(b + 44);
+    v->serial = le32(b + 67);
     v->exfat = 0;
     return v->clusters >= 65525 && v->root >= 2;
 }
@@ -53,7 +54,8 @@ static int exfat_boot(struct fat_vol *v, uint32_t lba)
         __builtin_memcmp(b + 3, "EXFAT   ", 8) || b[108] != 9 || b[109] > 16 || !b[110])
         return 0;
     uint32_t fat_off = le32(b + 80), fat_len = le32(b + 84), heap = le32(b + 88),
-             count = le32(b + 92), root = le32(b + 96), shift = b[109], second = b[106] & 1;
+             count = le32(b + 92), root = le32(b + 96), shift = b[109], second = b[106] & 1,
+             serial = le32(b + 100);
     uint32_t sum = 0;
     for (uint32_t s = 0; s < 11; s++) {
         if (s && dev_read(v, lba + s, 1, sec))
@@ -72,6 +74,7 @@ static int exfat_boot(struct fat_vol *v, uint32_t lba)
     v->data = lba + heap;
     v->clusters = count;
     v->root = root;
+    v->serial = serial;
     v->exfat = 1;
     return 1;
 }

@@ -3,8 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-07, version 0.102 (pause when the headphones are unplugged, the clock shown
-or hidden, more tags read for the library to come).
+Last update: 2026-11-10, version 0.103 (the music library: built on the player, its views, the
+play queue on the internal memory, the microSD card in the library).
 
 ## Done, validated on the device
 
@@ -55,6 +55,8 @@ or hidden, more tags read for the library to come).
 | The clock shown or hidden (Settings, the line Clock) | 0.102 | §120 |
 | Pause when the headphones are unplugged (the last plug out; plugging back does not play; checked with a 3.5 mm plug) | 0.102 | §119 |
 | Steady battery percent (the mean of a minute of readings; checked over a 14.6 h session to an empty battery) | 0.97, 0.102 | §82, §115 |
+| Music library: the index built on the player (18,003 tracks in 3 to 4 min, "no change" in 3 s), Library first at the top level (Artists, Albums, Years, Genres, All songs), the card's tracks with the card that was read, kept when it cannot be read at an update | 0.103 | §126-§127, §129 |
+| Play queue on the internal memory (NEWFWQ.DAT, 24,576 tracks): resumed at once, the queue mode (VOL+ and VOL-: PLAY next, MENU add), the Play queue screen; a card's tracks never read on another card | 0.103 | §128-§129 |
 | Interface languages (gettext PO files, catalogues in the image, the Language setting): English, French, Japanese and Simplified Chinese (partial) | 0.101 | §112 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
@@ -157,6 +159,11 @@ One line per version; the measurements are in `ETUDE.md`.
   library's index format, PC tool and reader, and the creation of its file by the firmware,
   tested but not used yet (§123-§124); the emulator's tests in parallel (§118); a double press
   of BACK documented.
+- 0.103: the music library (§126-§129): the index built on the player (the index before in RAM,
+  reads and writes in runs, BACK held stops it), the views (Library first: Artists, Albums,
+  Years, Genres, All songs), the play queue kept in NEWFWQ.DAT (the queue mode, the Play queue
+  screen, resumed at once), the microSD card (its serial in the queue and the index, the update
+  offered for another card, an unreadable card's tracks kept); read errors logged once.
 
 ## To do
 
@@ -248,11 +255,25 @@ One line per version; the measurements are in `ETUDE.md`.
     genres, all songs), separate from the file browser, from an index of the tags in one
     contiguous file on the internal memory (NEWFWLIB.DAT, created by the firmware: its first
     file creation, FAT32 only), the card's tracks keyed by its serial; built in the storage
-    task, updated on demand and proposed after a USB session. Steps: 1. genre, album artist,
+    in a screen of its own. Steps: 1. genre, album artist,
     year and disc in the tag readers (done, §122); 2. the index format (docs/LIBRARY.md), a PC
     tool (`mklib.py`), the reader (`library.c`) and its host test (done, §123); then the file
-    creation (`fatwrite.c`, tested in the emulator with power cuts, §124); 3. the scan on the device; 4. the views; 5. playback and resume from a
-    view; 6. the card. Favourites would build on it;
+    creation (`fatwrite.c`, tested in the emulator with power cuts, §124); 3. the index built on
+    the device in a screen of its own with core B's memory, nothing playing (Settings, the line
+    Library; at once after a USB session that wrote; files unchanged not read again), compared
+    with mklib.py in the emulator up to 18,162 tracks; an update with the same files ends after
+    the count (a fingerprint, 3 s); on the device 18,003 tracks: 3 to 4 min built from the tags,
+    165 s after 5,733 files changed, an update keeping them all 23 s (the index before's tables
+    in RAM, reads and writes in runs; done, §126); 4. the views: Library first at the top level,
+    Artists, Albums, Years, Genres, All songs; the card's tracks hidden when another card or none
+    is in, a track on both memories shown once (the internal one's); PLAY on a track plays its
+    list, PLAY held on an album the album (done, §127); 5. the play queue kept in NEWFWQ.DAT
+    (resumed from it), PLAY held on every library line, the queue mode (VOL+ and VOL-: PLAY puts
+    next, MENU adds), the queue's screen (main menu), the card's tracks passed over when it is
+    out (done, §128; folders played with PLAY held could use the file too); 6. the card: a
+    track never read on another card (the queue keeps the card's serial; the index's tracks
+    kept only from the same card), the library's top says when the card in is not in it and
+    offers the update, a last line updates it (done, §129; one card at a time). Favourites would build on it;
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;
   - folder jumping: at the end of a folder, go on with the next one;

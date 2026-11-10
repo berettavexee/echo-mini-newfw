@@ -116,18 +116,26 @@ fail:
     return r;
 }
 
+struct io_count sd_io;
+
 int sd_read(uint32_t sector, uint32_t count, void *buf)
 {
     if (!sd.ready)
         return EMMC_EBUSY;
+    uint32_t t0 = ticks();
     while (count) {
         uint32_t n = count > 64 ? 64 : count;
         int r = mshc_data(B, n > 1 ? 18 : 17, sd.hc ? sector : sector * 512, n, buf, 0);
-        if (r)
+        sd_io.cmds++;
+        sd_io.sectors += n;
+        if (r) {
+            sd_io.us += ticks() - t0;
             return r;
+        }
         sector += n;
         count -= n;
         buf = (uint8_t *)buf + 512 * n;
     }
+    sd_io.us += ticks() - t0;
     return 0;
 }

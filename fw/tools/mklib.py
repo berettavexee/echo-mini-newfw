@@ -176,13 +176,15 @@ def build(tracks, volumes):
     song = sorted(range(len(tracks)), key=lambda i: (str_order(tracks[i]["title"] or
                                                                tracks[i]["file"]), i))
     songs = b"".join(struct.pack("<I", i) for i in song)
+    clus = sorted(range(len(tracks)), key=lambda i: (tracks[i]["vol"] << 31 | tracks[i]["cluster"], i))
+    clu = b"".join(struct.pack("<II", tracks[i]["vol"] << 31 | tracks[i]["cluster"], i) for i in clus)
     vols = b"".join(struct.pack("<B3xII", v, volumes.get(v, 0),
                                 sum(1 for t in tracks if t["vol"] == v))
                     for v in sorted(set(volumes) | {t["vol"] for t in tracks}))
 
     sections = [(b"VOLS", vols, 12), (b"STRS", bytes(st.blob), 0), (b"TRKS", trks, 36),
                 (b"ARTS", arts, 8), (b"ALBS", albs, 16), (b"GENS", gens, 12),
-                (b"GALB", galb, 2), (b"SONG", songs, 4)]
+                (b"GALB", galb, 2), (b"SONG", songs, 4), (b"CLUS", clu, 8)]
     at = 16 + 16 * len(sections)
     table, body = b"", b""
     for sid, data, size in sections:
@@ -194,7 +196,7 @@ def build(tracks, volumes):
     if len(half) > HALF:
         raise ValueError(f"the index takes {len(half)} bytes: more than {HALF}")
     return half, dict(tracks=tracks, artists=artists, albums=albums, genres=genres,
-                      g_albums=g_albums, song=song, al_first=al_first, al_count=al_count,
+                      g_albums=g_albums, song=song, clus=clus, volumes=volumes, al_first=al_first, al_count=al_count,
                       al_year=al_year, ar_first=ar_first, ar_count=ar_count, a_index=a_index,
                       g_index=g_index, al_index=al_index)
 
@@ -202,7 +204,8 @@ def build(tracks, volumes):
 def index_file(half, generation=1):
     """The whole file: header, half A in use, half B empty"""
     crc = zlib.crc32(half)
-    h = b"NEWFWLIB" + struct.pack("<IIIIIII", 1, 0, generation, len(half), crc, 0, 0)
+    tracks = struct.unpack_from("<I", half, 16 + 16 * 2 + 12)[0]       # TRKS's count
+    h = b"NEWFWLIB" + struct.pack("<IIIIIIII", 1, 0, generation, len(half), crc, 0, 0, tracks)
     h += bytes(508 - len(h))
     h += struct.pack("<I", zlib.crc32(h))
     return h + half + bytes(HALF - len(half)) + bytes(HALF)
@@ -226,10 +229,77 @@ def expect_lines(t):
             k["contig"], k["cluster"], k["size"], k["mtime"])))
     for i, k in enumerate(t["song"]):
         out.append(f"song\t{i}\t{k}")
+    for i, k in enumerate(t["clus"]):
+        out.append(f"clus\t{i}\t{t['tracks'][k]['vol']}\t{t['tracks'][k]['cluster']}\t{k}")
+    for v in sorted(set(t["volumes"]) | {k["vol"] for k in t["tracks"]}):
+        out.append(f"vol\t{v}\t{t['volumes'].get(v, 0)}\t"
+                   f"{sum(1 for k in t['tracks'] if k['vol'] == v)}")
+    out += view_lines(t)
     names = sorted({k["artist"] for k in t["tracks"]} | {k["album"] for k in t["tracks"]} |
                    {k["title"] for k in t["tracks"]})
     out.append("order\t0\t" + "\t".join(sorted(names, key=str_order)))
     out.append("order\t1\t" + "\t".join(sorted(names, key=lambda s: str_order(s, True))))
+    return out
+
+
+# ---- the views (fw/src/libview.c, the same rules) ----
+LV_ARTISTS, LV_ARTIST_ALBUMS, LV_ALBUMS, LV_YEARS, LV_YEAR_ALBUMS, LV_GENRES, LV_GENRE_ALBUMS, \
+    LV_TRACKS, LV_SONGS = range(1, 10)
+
+
+def same_track(a, b, al_a, al_b):
+    """The same track on both volumes: album, disc, number, title (file names if one is empty)"""
+    if al_a != al_b or a["vol"] == b["vol"] or a["disc"] != b["disc"] or a["track"] != b["track"]:
+        return False
+    if a["title"] and b["title"]:
+        return a["title"] == b["title"]
+    return a["file"] == b["file"]
+
+
+def views(t, card_in):
+    """{(list, param): [ids]}: the lists libview.c shows, the card's tracks there or not"""
+    tr = t["tracks"]
+    al_of = [t["al_index"][(k["aa"], k["album"])] for k in tr]
+    hid = [k["vol"] == 1 and not card_in for k in tr]
+    if any(k["vol"] == 1 for k in tr):
+        for i in range(1, len(tr)):
+            if not (tr[i]["vol"] == 1 and not card_in) and same_track(tr[i - 1], tr[i], al_of[i - 1],
+                                                                      al_of[i]):
+                hid[i if tr[i]["vol"] == 1 else i - 1] = True
+    nal = len(t["albums"])
+    avis = [any(not hid[k] for k in range(t["al_first"][a], t["al_first"][a] + t["al_count"][a]))
+            for a in range(nal)]
+    year = [t["al_year"].get(a, 0) for a in range(nal)]
+    v = {}
+    v[(LV_ALBUMS, 0)] = [a for a in range(nal) if avis[a]]
+    v[(LV_ARTISTS, 0)] = []
+    for r in range(len(t["artists"])):
+        al = [a for a in range(t["ar_first"][r], t["ar_first"][r] + t["ar_count"][r]) if avis[a]]
+        v[(LV_ARTIST_ALBUMS, r)] = al
+        if al:
+            v[(LV_ARTISTS, 0)].append(r)
+    ys = sorted({year[a] for a in range(nal) if avis[a]}, key=lambda y: y or 0x10000)
+    v[(LV_YEARS, 0)] = ys
+    for y in ys:
+        v[(LV_YEAR_ALBUMS, y)] = [a for a in range(nal) if avis[a] and year[a] == y]
+    v[(LV_GENRES, 0)] = []
+    for g, name in enumerate(t["genres"]):
+        al = [a for a in t["g_albums"][name] if avis[a]]
+        v[(LV_GENRE_ALBUMS, g)] = al
+        if al:
+            v[(LV_GENRES, 0)].append(g)
+    for a in range(nal):
+        v[(LV_TRACKS, a)] = [k for k in range(t["al_first"][a], t["al_first"][a] + t["al_count"][a])
+                             if not hid[k]]
+    v[(LV_SONGS, 0)] = [k for k in t["song"] if not hid[k]]
+    return v
+
+
+def view_lines(t):
+    out = []
+    for card_in in (1, 0):
+        for (lst, param), ids in sorted(views(t, card_in).items()):
+            out.append(f"view\t{card_in}\t{lst}\t{param}\t" + ",".join(str(i) for i in ids))
     return out
 
 
@@ -363,10 +433,8 @@ def image_tracks(path, sector, vol):
         ext = e.name.rsplit(".", 1)[-1].lower() if "." in e.name else ""
         if ext not in CODECS or not e.size:
             continue
-        codec = CODECS[ext]
+        codec = CODECS[ext]                     # (M4A: 7, AAC or ALAC: the player's open says)
         data = v.read(e)
-        if codec == 7 and b"alac" in data[:1 << 20]:     # M4A: ALAC or AAC (mp4.c decides)
-            codec = 8
         out.append(track_of(dict(file_fields(e.name, data), vol=vol, contig=e.contig,
                                  cluster=e.cluster, size=e.size, mtime=e.mtime, codec=codec,
                                  file=e.name)))
@@ -388,11 +456,12 @@ def main():
     elif a.image:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         sector = VOL_SECTOR if os.path.getsize(a.image) > VOL_SECTOR * 512 else 0
+        from fatimg import Volume
         tracks = image_tracks(a.image, sector, 0)
         volumes = {0: 0}
         if a.sd:
             tracks += image_tracks(a.sd, 0, 1)
-            volumes[1] = 0                      # the card's serial: step 6 (ETUDE §121)
+            volumes[1] = Volume(a.sd, 0).serial     # the card's volume serial
     else:
         sys.exit(__doc__)
     half, tables = build(tracks, volumes)

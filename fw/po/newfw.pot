@@ -11,6 +11,10 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
+#: src/browser.c src/libbrowse.c
+msgid "Library"
+msgstr ""
+
 #: src/browser.c
 msgid "Internal"
 msgstr ""
@@ -37,6 +41,28 @@ msgstr ""
 
 #: src/browser.c src/ui.c
 msgid "Storage"
+msgstr ""
+
+#: src/browser.c
+msgid "Queue: PLAY next, MENU add"
+msgstr ""
+
+#: src/browser.c
+msgid "The queue is full"
+msgstr ""
+
+#: src/browser.c
+msgid "No room for NEWFWQ.DAT"
+msgstr ""
+
+#: src/browser.c
+#, c-format
+msgid "Next: %d tracks"
+msgstr ""
+
+#: src/browser.c
+#, c-format
+msgid "Added: %d tracks"
 msgstr ""
 
 #: src/charge.c
@@ -128,6 +154,128 @@ msgstr ""
 msgid "English"
 msgstr ""
 
+#: src/libbrowse.c
+msgid "Artists"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Albums"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Years"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Genres"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "All songs"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "nothing here"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "No library yet: Settings, Library, PLAY"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown album"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "SD card not readable (FAT32 or exFAT only)"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "SD card not in the library: PLAY to update"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Update the library"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown artist"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown genre"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Unknown year"
+msgstr ""
+
+#: src/libui.c
+msgid "Updating the library"
+msgstr ""
+
+#: src/libui.c
+msgid "BACK: stop (the library before is kept)"
+msgstr ""
+
+#: src/libui.c
+msgid "Looking for the music"
+msgstr ""
+
+#: src/libui.c
+msgid "Reading the tags"
+msgstr ""
+
+#: src/libui.c
+msgid "Sorting"
+msgstr ""
+
+#: src/libui.c
+msgid "Writing the library"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "%u files"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "%u of %u"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "about %u min left"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "about %u s left"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "Library updated: %u tracks"
+msgstr ""
+
+#: src/libui.c
+msgid "Stopped: the library before is kept"
+msgstr ""
+
+#: src/libui.c
+msgid "No room for NEWFWLIB.DAT"
+msgstr ""
+
+#: src/libui.c
+msgid "Too much music for the library"
+msgstr ""
+
+#: src/libui.c
+#, c-format
+msgid "The library could not be updated (%d)"
+msgstr ""
+
 #: src/main.c
 msgid "any key: back"
 msgstr ""
@@ -154,6 +302,10 @@ msgstr ""
 
 #: src/menu.c
 msgid "Now playing"
+msgstr ""
+
+#: src/menu.c src/qscreen.c
+msgid "Play queue"
 msgstr ""
 
 #: src/menu.c src/settings.c
@@ -368,8 +520,20 @@ msgstr ""
 msgid "VOL+/- move  PLAY go  BACK cancel"
 msgstr ""
 
-#: src/playscreen.c
+#: src/playscreen.c src/settings.c
 msgid "none"
+msgstr ""
+
+#: src/qscreen.c
+msgid "Queue emptied"
+msgstr ""
+
+#: src/qscreen.c
+msgid "Empty the queue (the track playing kept)"
+msgstr ""
+
+#: src/queue.c
+msgid "Queue"
 msgstr ""
 
 #. TRANSLATORS: the time shown at the top of the play screen and the browser
@@ -416,6 +580,12 @@ msgstr ""
 msgid "Swap VOL+ and VOL-"
 msgstr ""
 
+#. TRANSLATORS: the music library (artists, albums...): its index, PLAY updates it
+#: src/settings.c
+msgid "Library (PLAY: update)"
+msgstr ""
+
+#. TRANSLATORS: the music library (artists, albums...): its index, PLAY updates it
 #: src/settings.c
 msgid "Restore the defaults (PLAY)"
 msgstr ""
@@ -486,6 +656,11 @@ msgstr ""
 
 #: src/settings.c
 msgid "no"
+msgstr ""
+
+#: src/settings.c
+#, c-format
+msgid "%u tracks"
 msgstr ""
 
 #: src/uac.c src/usbmode.c

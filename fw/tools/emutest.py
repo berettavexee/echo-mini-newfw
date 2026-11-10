@@ -55,7 +55,7 @@ def wav(path, seconds=3, rate=44100):
 
 
 _LINE, _SKIP = r"^[^\n]*", r"(?:[^\n]*\n)*?[^\n]*"   # a line's start; lines between
-_INST = [(2000, "MENU", 1500)] + [(4000 + 300 * i, "VOL-") for i in range(6)] + \
+_INST = [(2000, "MENU", 1500)] + [(4000 + 300 * i, "VOL-") for i in range(7)] + \
         [(6300, "PLAY"), (7600, "PLAY")]
 TESTS = {
     "boot": dict(files={"A.WAV": "wav"}, keys="", ms=7000,          # the log: every 5 s
@@ -84,7 +84,7 @@ TESTS = {
                       emu_args=["--vbus", "1", "--power", "1",
                                 "--gpio-at", "1500:2:5:0,7000:2:5:1,7200:2:5:0,"
                                              "9000:2:5:1,11500:2:5:0"],
-                      keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(5)],
+                      keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(6)],
                                 (6000, "PLAY")),
                       expect=[r"uac: start", r"screen off", r"uac: exit \(Power 2 s\)",
                               r"power off \(Power 2 s\)"]),
@@ -189,8 +189,8 @@ TESTS = {
     # the interface's language (ETUDE §112): Settings, Language (its first line) set to the
     # first catalogue (Français), back; after the reboot the setting read, the catalogue loaded
     "lang": dict(files={"A.WAV": "wav"}, ms=8000,
-                 keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "PLAY"),
-                           (5200, "PLAY"), (5800, "BACK")),
+                 keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "VOL-"),
+                           (4900, "PLAY"), (5500, "PLAY"), (6100, "BACK")),
                  expect=[r"lang: 3 catalogue\(s\) in FW1", r"lang: fr \(Français\), \d+ strings",
                          r"ui: language fr", r"ui: settings 3: .*language fr",
                          r"lang: fr \(Français\)"],
@@ -199,8 +199,8 @@ TESTS = {
     # setting read (ETUDE §120; the clock itself is not set in the emulator: nothing drawn)
     "clock-hide": dict(files={"A.WAV": "wav"}, ms=8000,
                        keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"),
-                                 (4600, "PLAY"), (5000, "VOL-"), (5300, "VOL-"), (5600, "PLAY"),
-                                 (6200, "BACK")),
+                                 (4600, "VOL-"), (4900, "PLAY"), (5300, "VOL-"), (5600, "VOL-"),
+                                 (5900, "PLAY"), (6500, "BACK")),
                        expect=[r"ui: clock hidden", r"ui: settings 3: .*clock hidden"],
                        forbid=[r"ui: settings 3: .*clock shown"],
                        reboot=dict(ms=8000)),
@@ -451,7 +451,7 @@ def read_log(dump):
     return subprocess.run([sys.executable, READLOG, raw], capture_output=True, text=True).stdout
 
 
-# The resume state (resume.c): the last sector of NEWFWLOG.TXT, "NEWFWSTATE 3", then depth, the
+# The resume state (resume.c): the last sector of NEWFWLOG.TXT, "NEWFWSTATE 4", then depth, the
 # path (DEPTH_MAX 16 clusters, sel and top), track, playing, level, mode, pos_ms and the sum
 STATE_FIELDS = dict(track=144, playing=148, level=152, mode=156, pos_ms=160)
 STATE_SUM = 164
@@ -463,9 +463,9 @@ def patch_state(disk, fields):
     keys cannot reach in a short run (a track paused before any of it was heard, say)"""
     with open(disk, "r+b") as f:
         d = f.read()
-        at = d.find(b"NEWFWSTATE 3")
-        while at >= 0 and at % 512:             # the firmware's own copy of the string first
-            at = d.find(b"NEWFWSTATE 3", at + 1)
+        at = d.find(b"NEWFWSTATE 4", VOL_SECTOR * 512)    # in the volume: the firmware's own
+        while at >= 0 and at % 512:             # copies before it (its strings may fall on a
+            at = d.find(b"NEWFWSTATE 4", at + 1)    # sector's start: 0.102b15)
         if at < 0:
             raise RuntimeError("no resume state on the disk")
         s = bytearray(d[at:at + 512])
@@ -484,6 +484,8 @@ def patch_state(disk, fields):
 
 
 def run(name, t, img, elf, tmp):
+    if "custom" in t:
+        return t["custom"](img, elf, tmp)
     if "set" in t:
         return run_set(t["set"], t, img, elf, tmp)
     disk, dump = os.path.join(tmp, "disk.img"), os.path.join(tmp, "after.img")
@@ -529,6 +531,8 @@ def run(name, t, img, elf, tmp):
             capture_output=True, text=True).stdout
     text = read_log(dump) if os.path.exists(dump) else ""
     whole = text + "\n" + out
+    if os.environ.get("EMUTEST_LOG"):           # (the run kept, to look into a failure)
+        open(os.environ["EMUTEST_LOG"], "w").write(whole)
     fails, pos = [], 0
     for pat in t.get("expect", []):
         m = re.compile(pat, re.M).search(whole, pos)
@@ -699,6 +703,398 @@ TESTS.update({
     # a power cut after 0 to 36 sectors written (among them: within the FATs, between the two
     # copies, after the directory entry): a consistent volume, then the file at the next boot
     **{f"lib-cut{n}": lib_cut(n) for n in (0, 1, 2, 17, 18, 34, 35, 36)},
+})
+
+
+# ---- the library's index built by the firmware (ETUDE §125): ECHO_LIBBUILD images only ----
+def lib_disks(tmp):
+    """A disk with the test set's tags, containers and formats files, and an exFAT card with
+    12 of them (some fragmented)"""
+    src = os.path.join(tmp, "set")
+    subprocess.run([sys.executable, MKSET, src, "--only", "tags,containers,formats", "--seconds",
+                    "1"], check=True, stdout=subprocess.DEVNULL)
+    log0 = os.path.join(tmp, "NEWFWLOG.TXT")
+    open(log0, "wb").write(bytes(256 * 1024))
+    files = [f"{log0}=NEWFWLOG.TXT"]
+    for root, _, names in os.walk(src):
+        for n in sorted(names):
+            if n != "manifest.json":
+                p = os.path.join(root, n)
+                files.append(f"{p}={os.path.relpath(p, src)}")
+    disk, card = os.path.join(tmp, "disk.img"), os.path.join(tmp, "card.img")
+    subprocess.run([sys.executable, MKDISK, disk, IMG_FOR_DISK[0], "--synth-idb", "--size-mb",
+                    "300"] + files, check=True, stdout=subprocess.DEVNULL)
+    with open(card, "wb") as f:
+        f.truncate(64 << 20)
+    subprocess.run(["/usr/sbin/mkfs.exfat", card], check=True, stdout=subprocess.DEVNULL)
+    tags = sorted(os.listdir(os.path.join(src, "tags")))[:12]
+    spec = [{"path": "Card", "dir": True}] + [
+        dict(path=f"Card/{n}", src=os.path.join(src, "tags", n), **({"fragmented": True} if
+                                                                    i % 4 == 1 else {}))
+        for i, n in enumerate(tags)]
+    json.dump(spec, open(os.path.join(tmp, "spec.json"), "w"))
+    subprocess.run([sys.executable, os.path.join(TOOLS, "exfat_add.py"), card,
+                    os.path.join(tmp, "spec.json")], check=True, stdout=subprocess.DEVNULL)
+    return disk, card, src
+
+
+IMG_FOR_DISK = [None]
+
+
+def lib_boot(img, elf, disk, card, dump, extra=()):
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "16000", "--steps", "30000000000", "--dump-disk", dump] +
+                         list(extra), capture_output=True, text=True).stdout
+    return out
+
+
+def lib_compare(dump, disk, card, tmp, tag):
+    """NEWFWLIB.DAT of the disk after the run against mklib.py's answers for disk and card"""
+    from fatimg import Volume
+    v = Volume(dump, VOL_SECTOR)
+    e = next((e for e in v.list() if e.name == "NEWFWLIB.DAT"), None)
+    if not e:
+        return [f"{tag}: no NEWFWLIB.DAT"]
+    dev = os.path.join(tmp, f"dev_{tag}.dat")
+    open(dev, "wb").write(v.read(e))
+    exp = os.path.join(tmp, f"exp_{tag}.txt")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "--sd", card, "-o",
+                    os.path.join(tmp, "pc.dat"), "--expect", exp], check=True,
+                   capture_output=True)
+    lt = os.path.join(tmp, "library_test")
+    if not os.path.exists(lt):
+        subprocess.run(["cc", "-O1", "-w", "-I", os.path.join(TOOLS, "..", "src"), "-o", lt,
+                        os.path.join(TOOLS, "library_test.c")], check=True)
+    r = subprocess.run([lt, dev, exp], capture_output=True, text=True)
+    return [] if r.returncode == 0 else [f"{tag}: " + ln for ln in r.stdout.splitlines()[-4:]]
+
+
+def lib_build_test(variant):
+    def go(img, elf, tmp):
+        IMG_FOR_DISK[0] = img
+        disk, card, src = lib_disks(tmp)
+        dump = os.path.join(tmp, "after.img")
+        whole = lib_boot(img, elf, disk, card, dump)
+        text = read_log(dump)
+        fails = [] if re.search(r"library: 89 tracks \(89 read, 0 from the index before\)",
+                                text) else ["first build: not 89 tracks read"]
+        fails += lib_compare(dump, disk, card, tmp, "first")
+        if variant == "update":                 # one file deleted, one added, one changed
+            shutil.move(dump, disk)
+            mtools(disk, "mdel", "::tags/flac-ascii.flac")
+            mtools(disk, "mcopy", os.path.join(src, "tags", "mp3-ascii.mp3"), "::new.mp3")
+            mtools(disk, "mcopy", "-o", os.path.join(src, "tags", "opus-unicode.opus"),
+                   "::tags/opus-ascii.opus")
+            whole += lib_boot(img, elf, disk, card, dump)
+            text = read_log(dump)
+            if not re.search(r"building into half B \(the index before reused\)", text) or \
+                    not re.search(r"library: 89 tracks \(2 read, 87 from the index before\)",
+                                  text):
+                fails.append("update: not 2 read and 87 reused into half B")
+            fails += lib_compare(dump, disk, card, tmp, "update")
+        if variant == "nochange":               # the same files: the update stops after the count
+            shutil.move(dump, disk)
+            whole += lib_boot(img, elf, disk, card, dump)
+            text = read_log(dump)
+            if not re.search(r"library: no change \(89 tracks, the same fingerprint\)", text):
+                fails.append("no change: not seen")
+            fails += lib_compare(dump, disk, card, tmp, "no change")
+        if variant.startswith("cut"):           # a cut during a second build: the first kept
+            shutil.move(dump, disk)
+            first = os.path.join(tmp, "first.img")
+            shutil.copy(disk, first)
+            mtools(disk, "mdel", "::tags/flac-ascii.flac")     # (a change: the build writes)
+            whole += lib_boot(img, elf, disk, card, dump,
+                              ["--cut-user-after", variant[3:]])
+            if "POWER CUT" not in whole:
+                fails.append("no power cut")
+            fails += fsck(dump, tmp)
+            fails += lib_compare(dump, first, card, tmp, "after the cut")
+            shutil.move(dump, disk)
+            whole += lib_boot(img, elf, disk, card, dump)
+            fails += lib_compare(dump, disk, card, tmp, "rebuilt")
+        return fails, text + "\n" + whole
+    return go
+
+
+LIB_KEYS = keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "VOL-"),
+                (4900, "PLAY"),
+               *[(5200 + 250 * i, "VOL-") for i in range(12)], (8800, "PLAY"))
+
+
+def lib_settings(img, elf, tmp):
+    """Settings, the line Library (the 13th), PLAY: the update screen; the index compared with
+    mklib.py's answers (the production image: the path the user takes)"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dump = os.path.join(tmp, "after.img")
+    whole = lib_boot(img, elf, disk, card, dump, ["--keys", LIB_KEYS])
+    text = read_log(dump)
+    fails = [] if re.search(r"library: 89 tracks \(89 read, 0 from the index before\)", text) \
+        else ["not 89 tracks read"]
+    return fails + lib_compare(dump, disk, card, tmp, "settings"), text + "\n" + whole
+
+
+TESTS["lib-settings"] = dict(custom=lib_settings)
+
+
+def lib_views(img, elf, tmp):
+    """The library's lists (ETUDE §127): the index made by mklib.py put on the disk; BACK to the
+    top level (the boot shows the internal root), Library (its first line), Artists, the first artist, its first album, its first track played;
+    then BACK to the top of the library, All songs, its third track played. The views' count of
+    songs is mklib.py's (the card in)"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dat, exp = os.path.join(tmp, "NEWFWLIB.DAT"), os.path.join(tmp, "exp.txt")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "--sd", card, "-o",
+                    dat, "--expect", exp], check=True, capture_output=True)
+    mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
+    songs = next(len(ln.split("\t")[4].split(",")) for ln in open(exp, encoding="utf-8")
+                 if ln.startswith("view\t1\t9\t0\t"))
+    dump = os.path.join(tmp, "after.img")
+    k = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"), (3400, "PLAY"), (4000, "PLAY"),
+             (4600, "PLAY"), (5200, "PLAY"), (6800, "MENU"), (7400, "BACK"), (7800, "BACK"),
+             (8200, "BACK"), (8600, "VOL-"), (8900, "VOL-"), (9200, "VOL-"), (9500, "VOL-"),
+             (9800, "PLAY"), (10400, "VOL-"), (10700, "VOL-"), (11000, "PLAY"))
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "13000", "--steps", "30000000000", "--dump-disk", dump,
+                          "--keys", k], capture_output=True, text=True).stdout
+    text = read_log(dump)
+    if os.environ.get("EMUTEST_LOG"):           # (the log kept, to look into a failure)
+        open(os.environ["EMUTEST_LOG"], "w").write(text + "\n" + out)
+    fails = []
+    m = re.search(r"library: views of (\d+) tracks, the card's in, in \d+ ms: (\d+) shown", text)
+    if not m or int(m.group(2)) != songs:
+        fails.append(f"views: {m.group(0) if m else 'not set up'} (mklib.py: {songs} shown)")
+    lists = re.findall(r"ui: (\d+) tracks of the library's list (\d+)\.(\d+)", text)
+    if len(lists) < 2 or lists[0][1] != "8" or lists[1][1] != "9" or int(lists[1][0]) != songs:
+        fails.append(f"queues from the library: {lists}")
+    # the first track of each queue: the album's first; in All songs, one down per VOL- logged
+    # between the PLAY that opened it and the PLAY that played (a key may be lost in a load)
+    lines = text.splitlines()
+    starts = [i for i, ln in enumerate(lines) if "tracks of the library's list" in ln]
+    firsts = []
+    for i in starts:
+        q = next((re.search(r"ui: queue (\d+)/\d+: .* \((-?\d+)\)", ln) for ln in lines[i:]
+                  if "ui: queue " in ln), None)
+        firsts.append((int(q.group(1)), q.group(2)) if q else None)
+    plays = [i for i, ln in enumerate(lines) if "keys: play" in ln and i < starts[-1]] \
+        if starts else []
+    downs = sum(1 for ln in lines[plays[-2]:plays[-1]] if "keys: vol-" in ln) \
+        if len(plays) >= 2 else -1
+    if len(firsts) < 2 or firsts[0] != (1, "0") or firsts[1] != (1 + downs, "0"):
+        fails.append(f"first tracks played: {firsts} ({downs} VOL- in All songs)")
+    return fails, text + "\n" + out
+
+
+TESTS["lib-views"] = dict(custom=lib_views)
+
+
+def queue_file(img, elf, tmp):
+    """The play queue in NEWFWQ.DAT (ETUDE §128): a library album's track played (its list
+    written into the file meanwhile); the queue mode (VOL+ and VOL- together): an album added
+    (MENU), another put next (PLAY); the queue's screen from the main menu; then a boot: the
+    queue read again from the file, its track resumed"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dat = os.path.join(tmp, "NEWFWLIB.DAT")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "--sd", card, "-o",
+                    dat], check=True, capture_output=True)
+    mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
+    dump = os.path.join(tmp, "after.img")
+    k = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"), (3400, "VOL-"), (3800, "PLAY"),
+             (4400, "PLAY"), (5000, "PLAY"), (7000, "MENU"), (7600, "BACK")) + \
+        ",8400:VOL+,8600:VOL-,8900:NONE," + \
+        keys((9400, "VOL-"), (9800, "MENU"), (10400, "VOL-"), (10800, "PLAY"), (11400, "BACK"),
+             (12000, "MENU", 1500), (14000, "VOL-"), (14400, "VOL-"), (14800, "PLAY"),
+             (16000, "BACK"))
+    shots = os.environ.get("EMUTEST_SHOTS")
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "17000", "--steps", "30000000000", "--dump-disk", dump,
+                          "--keys", k] + (["--shots", shots] if shots else []),
+                         capture_output=True, text=True).stdout
+    shutil.move(dump, disk)
+    out += "\n-- reboot\n" + subprocess.run(
+        [sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card, "--boot-disk",
+         "--ms", "6000", "--steps", "30000000000", "--dump-disk", dump],
+        capture_output=True, text=True).stdout
+    text = read_log(dump)
+    if os.environ.get("EMUTEST_LOG"):
+        open(os.environ["EMUTEST_LOG"], "w").write(text + "\n" + out)
+    fails = []
+    pos = 0
+    for pat in (r"ui: (\d+) tracks of the library's list 8\.",
+                r"queue: NEWFWQ\.DAT created",
+                r"queue: \d+ tracks written into NEWFWQ\.DAT \(in use\)",
+                r"keys: chord vol\+-",
+                r"queue: \d+ tracks added at \d+",
+                r"queue: \d+ tracks put next at \d+",
+                r"=== boot",
+                r"ui: resume: NEWFWQ\.DAT's queue, track \d+/\d+",
+                r"ui: queue \d+/\d+: .* \(0\)"):
+        m = re.compile(pat).search(text, pos)
+        if not m:
+            fails.append(f"missing: {pat}")
+        else:
+            pos = m.end()
+    return fails, text + "\n" + out
+
+
+TESTS["queue-file"] = dict(custom=queue_file)
+
+
+def queue_card(img, elf, tmp):
+    """A file queue of the card's tracks (§129): a folder of the card played, made the file's by
+    an add in the queue mode; then a boot with the same card (it resumes) and one with another
+    card holding the same files at the same clusters (another serial): its tracks passed over,
+    never read at their clusters"""
+    IMG_FOR_DISK[0] = img
+    disk, card, src = lib_disks(tmp)
+    card2 = os.path.join(tmp, "card2.img")
+    with open(card2, "wb") as f:
+        f.truncate(64 << 20)
+    subprocess.run(["/usr/sbin/mkfs.exfat", card2], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([sys.executable, os.path.join(TOOLS, "exfat_add.py"), card2,
+                    os.path.join(tmp, "spec.json")], check=True, stdout=subprocess.DEVNULL)
+    from fatimg import Volume
+    fails = [] if Volume(card, 0).serial != Volume(card2, 0).serial else ["the same serial"]
+    dump = os.path.join(tmp, "after.img")
+    k = keys((2000, "BACK"), (2400, "VOL-"), (2800, "PLAY"), (3400, "PLAY"), (4000, "PLAY"),
+             (5000, "MENU")) + ",5600:VOL+,5800:VOL-,6100:NONE," + \
+        keys((6600, "VOL-"), (7000, "MENU"), (7600, "BACK"))
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "9000", "--steps", "30000000000", "--dump-disk", dump,
+                          "--keys", k], capture_output=True, text=True).stdout
+    shutil.move(dump, disk)
+    first = os.path.join(tmp, "first.img")
+    shutil.copy(disk, first)
+    text1 = read_log(disk)
+    for c, tag in ((card, "same card"), (card2, "another card")):
+        shutil.copy(first, disk)
+        out += f"\n-- reboot, {tag}\n" + subprocess.run(
+            [sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", c, "--boot-disk",
+             "--ms", "8000", "--steps", "30000000000", "--dump-disk", dump],
+            capture_output=True, text=True).stdout
+        text = read_log(dump)
+        boot = text[text.rfind("=== boot"):]
+        played = re.search(r"ui: queue \d+/\d+: .* \(0\)", boot)
+        if "NEWFWQ.DAT's queue" not in boot:
+            fails.append(f"{tag}: not resumed from the file")
+        elif tag == "same card" and not played:
+            fails.append("same card: nothing played")
+        elif tag == "another card" and (played or "its card is not in, passed over" not in boot):
+            fails.append(f"another card: {played.group(0) if played else 'no track passed over'}")
+        text1 += "\n" + boot
+    for pat in (r"queue: \d+ tracks of the queue written into NEWFWQ\.DAT",
+                r"queue: 1 tracks added"):
+        if not re.search(pat, text1):
+            fails.append(f"missing: {pat}")
+    if os.environ.get("EMUTEST_LOG"):
+        open(os.environ["EMUTEST_LOG"], "w").write(text1 + "\n" + out)
+    return fails, text1 + "\n" + out
+
+
+TESTS["queue-card"] = dict(custom=queue_card)
+
+
+def lib_card(img, elf, tmp):
+    """The card not in the index (§129): an index made by mklib.py without the card; the
+    library's top has "SD card not in the library" first; PLAY on it updates the library (the
+    card's files read), the views then hold the card's tracks; the update compared with
+    mklib.py's answers for disk and card"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dat = os.path.join(tmp, "NEWFWLIB.DAT")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "-o", dat],
+                   check=True, capture_output=True)
+    mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
+    dump = os.path.join(tmp, "after.img")
+    k = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"), (4000, "PLAY"))
+    shots = os.environ.get("EMUTEST_SHOTS")
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "16000", "--steps", "30000000000", "--dump-disk", dump,
+                          "--keys", k] + (["--shots", shots] if shots else []),
+                         capture_output=True, text=True).stdout
+    text = read_log(dump)
+    if os.environ.get("EMUTEST_LOG"):
+        open(os.environ["EMUTEST_LOG"], "w").write(text + "\n" + out)
+    fails = []
+    pos = 0
+    for pat in (r"library: views of \d+ tracks, the card's none",
+                r"library: NEWFWLIB\.DAT found",
+                r"library: \d+ tracks \(\d+ read, \d+ from the index before\)",
+                r"library: views of \d+ tracks, the card's in"):
+        m = re.compile(pat).search(text, pos)
+        if not m:
+            fails.append(f"missing: {pat}")
+        else:
+            pos = m.end()
+    return fails + lib_compare(dump, disk, card, tmp, "card"), text + "\n" + out
+
+
+TESTS["lib-card"] = dict(custom=lib_card)
+
+
+def lib_keep(img, elf, tmp):
+    """No card readable at an update (§129): the index made with the card (by mklib.py: no
+    fingerprint); boots without the card, "Update the library" (the last line of the library's
+    top): the card's tracks kept as they are (first a build from the index before, then with
+    the same files "no change"); then a file of the internal memory deleted: an update, the
+    card's tracks still in it (the index compared with mklib.py's for the disk and the card);
+    the card in again: "no change" (nothing read)"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dat = os.path.join(tmp, "NEWFWLIB.DAT")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "--sd", card, "-o",
+                    dat], check=True, capture_output=True)
+    mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
+    first = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"),
+                 *[(3300 + 300 * i, "VOL-") for i in range(5)], (5200, "PLAY"))
+    again = keys(*[(2000 + 300 * i, "VOL-") for i in range(5)], (4000, "PLAY"))  # (resumed
+    dump = os.path.join(tmp, "after.img")                                       # on Artists)
+    fails, whole = [], ""
+    for step in ("build", "same", "changed", "back"):
+        if step != "build":
+            shutil.move(dump, disk)
+        if step == "changed":
+            mtools(disk, "mdel", "::tags/flac-ascii.flac")
+        out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--ms",
+                              "8000", "--steps", "30000000000", "--dump-disk", dump, "--keys",
+                              first if step == "build" else again] +
+                             (["--sd", card] if step == "back" else []),
+                             capture_output=True, text=True).stdout
+        text = read_log(dump)
+        boot = text[text.rfind("=== boot"):]
+        whole += boot + "\n" + out
+        if step == "back":                      # the card in again: its tracks as they were
+            if "library: no change" not in boot:
+                fails.append("back: the card in again, not \"no change\"")
+            continue
+        if "not readable: its tracks kept as they are" not in boot:
+            fails.append(f"{step}: the card's tracks not kept")
+        built = re.search(r"library: (\d+) tracks \(0 read, \d+ from the index before\)", boot)
+        if step == "same" and "library: no change" not in boot:
+            fails.append("same: not \"no change\"")
+        if step != "same" and (not built or "no change" in boot):
+            fails.append(f"{step}: not built from the index before")
+    if os.environ.get("EMUTEST_LOG"):
+        open(os.environ["EMUTEST_LOG"], "w").write(whole)
+    return fails + lib_compare(dump, disk, card, tmp, "kept"), whole
+
+
+TESTS["lib-keep"] = dict(custom=lib_keep)
+
+TESTS.update({
+    # built from the tags, compared with mklib.py's answers (content: STRS's order differs)
+    "libb-build": dict(custom=lib_build_test("build"), libcreate=True),
+    # then one file deleted, one added, one changed: 2 read, 87 from the index before, half B
+    "libb-update": dict(custom=lib_build_test("update"), libcreate=True),
+    # then the same files again: nothing read nor written (the fingerprint)
+    "libb-nochange": dict(custom=lib_build_test("nochange"), libcreate=True),
+    # a cut during the second build (early, in the strings, late): the first index intact,
+    # the volume clean; the next boot builds it
+    **{f"libb-cut{n}": dict(custom=lib_build_test(f"cut{n}"), libcreate=True)
+       for n in (3, 12, 30)},
 })
 
 

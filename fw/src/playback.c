@@ -185,7 +185,7 @@ static void prep_next(void)
         return;                                 /* (the queue is being rebuilt by a walk) */
     int n = q_next_index(q_dec, 0);
     const struct entry *e = n >= 0 ? q_ent(n) : 0;
-    if (!e || !e->size || ((e->flags & F_SD) && !sdvol.mounted))
+    if (!e || !e->size || (e->flags & F_OTHER) || ((e->flags & F_SD) && !sdvol.mounted))
         return;                                 /* (never a card mounted from here) */
     copy_name(prep.f.name, q_name(n), sizeof prep.f.name);
     prep.f.vol = e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT;
@@ -203,6 +203,8 @@ static void prep_next(void)
 
 static int seek_async;                          /* the next q_open: a seek's (same track) */
 
+static int absent_n;                            /* tracks passed over in a row (a card not in) */
+
 /* chain: 2 from the end of a track (PLAY_ASYNC), else 0 or 1 */
 static int q_open(int i, int chain)
 {
@@ -212,6 +214,15 @@ static int q_open(int i, int chain)
         return HIFI_EREAD;                      /* its folder not readable (or changed) */
     if (!e->size)
         return Q_EEMPTY;                        /* not queued since 0.65; kept for safety */
+    if ((e->flags & F_OTHER) || ((e->flags & F_SD) && !sd_present())) {
+        if (!absent_n++)                        /* the first said, then how many (below) */
+            log_printf("ui: queue %d/%d: %s: its card is not in, passed over", i + 1, q_n,
+                       q_name(i));
+        return Q_EABSENT;                       /* the card is not in: passed over (§128) */
+    }
+    if (absent_n > 1)
+        log_printf("ui: %d tracks passed over (their card is not in)", absent_n);
+    absent_n = 0;
     if ((e->flags & F_SD) && sd_open())
         return HIFI_EREAD;                      /* the card forgotten (USB) and not readable */
     uint16_t flags = e->flags;
@@ -311,9 +322,19 @@ void play_step(int i, int step)
         q_playing = 0;
         return;
     }
-    int r, r0 = 0;
+    int r, r0 = 0, absent = 0;
     uint32_t why0 = 0;
     while ((r = q_open(q_dec, keep)) < 0) {
+        if (r == Q_EABSENT && ++absent <= q_n) {        /* a card not in: not a failure */
+            q_dec += step;
+            if (q_dec >= 0 && q_dec < q_n)
+                continue;
+            log_printf("ui: %d tracks passed over (their card is not in): none to play", absent_n);
+            absent_n = 0;
+            play_stop(STOP_NOW);
+            q_cur = q_dec = i;
+            return;
+        }
         if (q_dec == i) {                       /* the screen tells why the one chosen failed */
             r0 = r;
             why0 = player.why;
@@ -394,11 +415,19 @@ void ui_background(void)
     if (r == 1 || player.time_ms > 10000)
         q_errors = 0;                           /* it played: only failures in a row stop */
     int first = q_dec, err = r < 0 ? r : 0;     /* the first that failed, why */
+    int absent = 0;
     for (int n = q_next_index(q_dec, 0); n >= 0; n = q_next_index(n, 0)) {
         q_dec = n;
         int o = q_open(q_dec, 2);
         if (o == 0)
             return;                             /* the next one, gapless when it can */
+        if (o == Q_EABSENT) {                   /* on a card that is not in: passed over */
+            if (++absent <= q_n)
+                continue;
+            log_printf("ui: %d tracks passed over (their card is not in): none to play", absent_n);
+            absent_n = 0;
+            break;
+        }
         if (!err) {
             first = q_dec;
             err = o;

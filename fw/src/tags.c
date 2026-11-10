@@ -35,6 +35,7 @@ static struct {
  * eMMC command per run of clusters (each command costs a fixed delay, about 0.5 ms on the
  * device). The Ogg comment header is crossed page by page: 16 KiB at a time. */
 void (*tags_yield)(void);                       /* between two reads (the storage task), or 0 */
+int tags_fields_only;                           /* the library (ETUDE §126): no hint for core B */
 
 static int rd_at(uint32_t pos, uint32_t n, const uint8_t **p)
 {
@@ -598,9 +599,13 @@ static void ogg(struct tags *t)
             if (og_read(c, n))
                 return;
             vorbis_comment(t, c, n);
-        } else if (og_read(0, n))               /* cover art (METADATA_BLOCK_PICTURE): skipped */
+        } else if (tags_fields_only && i + 1 == count)
+            return;                             /* the last one, a cover: nothing after it */
+        else if (og_read(0, n))                 /* cover art (METADATA_BLOCK_PICTURE): skipped */
             return;
     }
+    if (tags_fields_only)
+        return;                                 /* (the end of the header: for core B only) */
     og_packet_end(t);
     if (!opus && t->ogg_end_page) {             /* check: the setup header follows */
         uint8_t s[7];

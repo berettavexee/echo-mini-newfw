@@ -58,12 +58,9 @@ SECTIONS
     }
     ASSERT(SIZEOF(.screenram) <= 0x18000, "screen buffers larger than 96 KiB")
 
-    /* The play queue's listing, 32 KiB above the code, and the directory listing, 96 KiB up to the loader's
-     * data and stack and over them (dead once we run): not loaded, not cleared (ETUDE §25) */
-    .queuebuf 0x03070000 (NOLOAD) : {
-        KEEP(*(.queuebuf))
-    }
-    ASSERT(SIZEOF(.queuebuf) <= 0x8000, "play queue larger than 32 KiB")
+    /* The directory listing, 96 KiB above the code up to the loader's data and stack and over
+     * them (dead once we run): not loaded, not cleared (ETUDE §25). The play queue's listing was
+     * at 0x03070000 until 0.102 (ETUDE §127: in .screenram since, the code 32 KiB more) */
     .dirbuf 0x03078000 (NOLOAD) : {
         KEEP(*(.dirbuf))
     }
@@ -74,7 +71,7 @@ SECTIONS
         KEEP(*(.pmusram))
     }
     ASSERT(SIZEOF(.pmusram) <= 0xc000, "queue folders reach the log ring (0x0309c000)")
-    ASSERT(_sidata + SIZEOF(.data) <= 0x03070000, "code reaches the play queue (0x03070000)")
+    ASSERT(_sidata + SIZEOF(.data) <= 0x03078000, "code reaches the directory listing (0x03078000)")
 
     /DISCARD/ : { *(.ARM.exidx*) *(.ARM.attributes) *(.comment) }
 }

@@ -10,6 +10,7 @@
 #include <string.h>
 #define LIBRARY_HOST                            /* (lib_file: the device's) */
 #include "../src/library.c"
+#include "../src/libview.c"
 
 static uint8_t *img;
 static long img_n;
@@ -70,10 +71,11 @@ static void damaged(void)
     img[100] ^= 1;
     check(lib_open(&io) < 0 && lib_count(LIB_TRACKS) == 0, "damaged header refused", "");
     img[100] = keep;
-    keep = img[512 + 2000];                     /* a byte of the half in use: its CRC */
-    img[512 + 2000] ^= 0x40;
+    uint32_t at = 512 + (img[12] == 1 ? 4u << 20 : 0) + 100;    /* a byte of the half in use */
+    keep = img[at];
+    img[at] ^= 0x40;
     check(lib_open(&io) < 0, "damaged half refused", "");
-    img[512 + 2000] = keep;
+    img[at] = keep;
     check(lib_open(&io) == 0, "index open again", "");
     struct lib_track t;
     check(lib_track(lib_count(LIB_TRACKS), &t) < 0, "track past the end refused", "");
@@ -167,6 +169,41 @@ int main(int argc, char **argv)
             uint32_t t;
             check(!lib_song(strtoul(v[1], 0, 10), &t) && t == strtoul(v[2], 0, 10), "song",
                   copy);
+        } else if (!strcmp(v[0], "clus")) {
+            uint32_t key, t, f;
+            check(!lib_clus(strtoul(v[1], 0, 10), &key, &t) &&
+                  key == (strtoul(v[2], 0, 10) << 31 | strtoul(v[3], 0, 10)) &&
+                  t == strtoul(v[4], 0, 10) &&
+                  !lib_find(strtoul(v[2], 0, 10), strtoul(v[3], 0, 10), &f) &&
+                  f == t, "clus", copy);
+        } else if (!strcmp(v[0], "vol")) {
+            int ok = 0;
+            for (uint32_t i = 0; i < 4; i++) {
+                uint32_t vo, se, n;
+                if (!lib_volume(i, &vo, &se, &n) && vo == strtoul(v[1], 0, 10))
+                    ok = se == strtoul(v[2], 0, 10) && n == strtoul(v[3], 0, 10);
+            }
+            check(ok, "volume", copy);
+        } else if (!strcmp(v[0], "view")) {    /* libview.c's lists, the card in or not */
+            static int card = -1;
+            int c = atoi(v[1]), kind = atoi(v[2]);
+            uint32_t param = strtoul(v[3], 0, 10);
+            if (c != card) {
+                card = c;
+                check(!lv_setup(c), "lv_setup", copy);
+            }
+            char got[8192] = "";
+            uint32_t m = lv_count(kind, param);
+            for (uint32_t i = 0; i < m; i++) {
+                uint32_t id = 0xffffffff;
+                lv_item(kind, param, i, &id);
+                sprintf(got + strlen(got), i ? ",%u" : "%u", id);
+            }
+            uint32_t extra;
+            check(!strcmp(got, n > 4 ? v[4] : "") && lv_item(kind, param, m, &extra) < 0, "view",
+                  copy);
+            if (strcmp(got, n > 4 ? v[4] : ""))
+                printf("  got %s\n", got);
         } else if (!strcmp(v[0], "order")) {    /* Python's order: lib_cmp gives the same */
             cmp_artist = atoi(v[1]);
             int m = n - 2;

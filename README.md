@@ -15,6 +15,11 @@ with gapless playback and ReplayGain.
 - **Gapless playback** and **ReplayGain** (album, track or auto, with a preamp).
 - **Folder browser** with long names, on the internal memory and the microSD card (FAT32 or
   exFAT). Play a whole folder tree, in order or shuffled.
+- **Music library** by its tags: artists, albums, years, genres, all songs; built on the player
+  (about 3 minutes for 18,000 tracks, then seconds when nothing changed), the internal memory
+  and the microSD card together.
+- **Play queue** kept on the internal memory: play next, add to the end, a screen to see it;
+  resumed after a power off.
 - **Settings**: brightness, screen timeout, sleep timer, power off when idle, start-up behaviour.
 - **Languages**: English, French, Japanese, Simplified Chinese (partial); translations are gettext
   PO files, see [docs/TRANSLATING.md](docs/TRANSLATING.md).
@@ -25,7 +30,7 @@ with gapless playback and ReplayGain.
 - **Robust**: a fault is recorded on the internal memory and shown at the next start; the HiFi
   core is restarted by itself after a fault or a hang (the track goes on); a watchdog restarts
   a frozen player.
-- **Not there (yet)**: equaliser, music library by artist or album (folders only), lyrics.
+- **Not there (yet)**: equaliser, favourites, lyrics, covers.
 
 ## Before you install
 
@@ -38,7 +43,7 @@ with gapless playback and ReplayGain.
 
 ## Getting started
 
-1. Download `NEWFW102.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
+1. Download `NEWFW103.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
 2. Follow [Installing](MANUAL.md#installing) in the manual.
 3. The [manual](MANUAL.md) shows the keys of each screen.
 
@@ -86,7 +91,7 @@ DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §61, ac
 | `fw/hifi/` | HiFi-core runtime and codec glue |
 | `fw/tools/` | image builder, emulator (`emu_fw.py`, Unicorn) and its tests (`emutest.py`), test set builder (`mktestset.py`), test disk and exFAT image builders, log reader, latency report (`perfreport.py`) |
 | `fw/tools/fuzz/` | fuzzing bench for the decoders and file readers (ASan, UBSan, coverage-guided): see `docs/FUZZING.md` |
-| `docs/` | `FUZZING.md` (the fuzzing bench and its findings), `HIFIACC.md` (the RKNanoD audio accelerator: registers, sequence, pitfalls), `MP3ACC.md` (the SYNTH and Imdct36 MP3 accelerators), `CS43131.md` (the DACs: wiring, start-up sequence, the firmwares compared), `USB_AUDIO.md` (the USB sound card: profiles, feedback, limits, pitfalls, hosts tested), `BATTERY.md` (battery life version after version: voltage curves and runs), `LIBRARY.md` (the library's index file, being written), screenshots of the manual |
+| `docs/` | `FUZZING.md` (the fuzzing bench and its findings), `HIFIACC.md` (the RKNanoD audio accelerator: registers, sequence, pitfalls), `MP3ACC.md` (the SYNTH and Imdct36 MP3 accelerators), `CS43131.md` (the DACs: wiring, start-up sequence, the firmwares compared), `USB_AUDIO.md` (the USB sound card: profiles, feedback, limits, pitfalls, hosts tested), `BATTERY.md` (battery life version after version: voltage curves and runs), `LIBRARY.md` (the library's index file and its views), screenshots of the manual |
 | `fw/font/` | Fusion Pixel 12 px (SIL OFL 1.1) |
 | `third_party/` | libopus 1.5.2 (decoder-only variant), Tremor lowmem (patched), AOSP pvmp3dec and pvaacdec, Apple ALAC decoder, libmpcdec |
 | `tools/` | reverse-engineering helpers used for the study (they expect the stock image and `re/rknanofw.py` next to this tree) |

@@ -106,14 +106,16 @@ void settings_get(const uint32_t *w)
 /* ---- the screen: VOL+/VOL- the line, PLAY the next value, PLAY held the one before,
  * BACK or MENU back (saved). Each change takes effect at once. ---- */
 enum { S_LANG, S_CLOCK, S_SHOW_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START, S_SLEEP, S_AUTO_OFF, S_SWAP,
-       S_DEFAULTS, S_COUNT };
+       S_LIBRARY, S_DEFAULTS, S_COUNT };
 static const char *const s_names[S_COUNT] = {
     EN("Language"),                             /* in English: found again in any language */
     N_("Date and time"),
     /* TRANSLATORS: the time shown at the top of the play screen and the browser */
     N_("Clock"), N_("Screen off after"), N_("Brightness"), N_("Track title"),
     N_("ReplayGain"), N_("ReplayGain preamp"), N_("At power on"), N_("Sleep timer"),
-    N_("Power off when idle"), N_("Swap VOL+ and VOL-"), N_("Restore the defaults (PLAY)"),
+    N_("Power off when idle"), N_("Swap VOL+ and VOL-"),
+    /* TRANSLATORS: the music library (artists, albums...): its index, PLAY updates it */
+    N_("Library (PLAY: update)"), N_("Restore the defaults (PLAY)"),
 };
 static const uint8_t rg_order[RG_MODES] = { RG_MODE_ALBUM, RG_MODE_TRACK, RG_MODE_AUTO,
                                             RG_MODE_OFF };
@@ -130,6 +132,8 @@ static uint32_t sleep_left(void)                /* minutes, rounded up */
     int32_t left = (int32_t)(sleep_at - millis());
     return sleep_at && left > 0 ? ((uint32_t)left + 59999) / 60000 : 0;
 }
+
+static int lib_tracks = -1;                     /* lib_status(), read on entering */
 
 /* The value of line i, into b[VALUE_MAX] */
 #define VALUE_MAX 48
@@ -202,6 +206,12 @@ static void value_text(int i, char *b)
         break;
     case S_SWAP:
         p = log_format(p, end, "%s", cfg.swap_vol ? T("yes") : T("no"));
+        break;
+    case S_LIBRARY:
+        if (lib_tracks < 0)
+            p = log_format(p, end, "%s", T("none"));
+        else
+            p = log_format(p, end, T("%u tracks"), (uint32_t)lib_tracks);
         break;
     }
     *p = 0;
@@ -322,6 +332,7 @@ static void settings_enter(void)
     s_sel = s_top = 0;
     s_dirty = s_page = 1;
     s_shown = 0;
+    lib_tracks = lib_status();
 }
 
 static void settings_shown(void)
@@ -375,7 +386,12 @@ static int settings_key(const struct key_ev *e)
         s_page = t != s_top;
     } else if (k == KEY_PLAY && ev == EV_PRESS && s_sel == S_CLOCK) {
         scr_push(&clock_screen);
-    } else if (k == KEY_PLAY && s_sel != S_CLOCK &&
+    } else if (k == KEY_PLAY && ev == EV_PRESS && s_sel == S_LIBRARY) {
+        resume_save_later();
+        lib_update();                           /* (its own screen: the music stops) */
+        lib_tracks = lib_status();
+        s_dirty = s_page = 1;
+    } else if (k == KEY_PLAY && s_sel != S_CLOCK && s_sel != S_LIBRARY &&
                (ev == EV_PRESS || (ev == EV_LONG && s_sel != S_DEFAULTS))) {
         change(s_sel, ev == EV_PRESS ? 1 : -1);
         s_dirty = 1;

@@ -2,6 +2,9 @@
  * sorted folders first then files in natural order, the path from the top, the card set up on
  * first use and followed by its detect switch, the browser screen and its keys. */
 #include "ui_priv.h"
+#include "libview.h"
+#define LIB_TRACKS_LIST LV_TRACKS
+#include "library.h"
 #include "storage.h"
 
 /* ---- names ---- */
@@ -43,7 +46,7 @@ static int name_cmp(const char *a, const char *b)
 }
 
 /* Our codec for a file name (by its extension), 0 when we do not play it */
-static uint32_t codec_of(const char *name)
+uint32_t file_codec(const char *name)
 {
     static const struct { const char *ext; uint32_t codec; } t[] = {
         { "wav", HP_CODEC_WAV }, { "flac", HP_CODEC_FLAC }, { "fla", HP_CODEC_FLAC },
@@ -84,15 +87,21 @@ static struct {
 } browser_mq = { .index = UINT16_MAX };     /* the selected row's name scrolled (a file or a folder) */
 int dir_n;
 static int dir_full;
+static int qmode;                               /* the queue mode (below) */
+static char qmsg[48] __attribute__((section(".screenram")));     /* what it did, shown 2 s */
+static uint32_t qmsg_at;
+static int qmsg_on;
+
+static int lib_shown;                           /* the listing is a library list */
 
 const char *ent_name(int i)
 {
-    return dir.pool + dir.e[dir.order[i]].name;
+    return lib_shown ? libv_name(i) : dir.pool + dir.e[dir.order[i]].name;
 }
 
 const struct entry *ent(int i)
 {
-    return &dir.e[dir.order[i]];
+    return lib_shown ? libv_ent(i) : &dir.e[dir.order[i]];
 }
 
 /* An entry at the end of the listing, its name (len bytes) into the pool; 0 when it is full */
@@ -120,7 +129,7 @@ static int list_add(struct listing *l, const char *name, uint32_t len, uint32_t 
 static int collect(const struct fat_dirent *d, void *ctx)
 {
     struct listing *l = ctx;
-    uint32_t codec = d->attr & FAT_ATTR_DIR ? 0 : codec_of(d->name);
+    uint32_t codec = d->attr & FAT_ATTR_DIR ? 0 : file_codec(d->name);
     if (!(d->attr & FAT_ATTR_DIR) && (!codec || (l->skip_empty && !d->size)))
         return 0;                               /* not something we play (the queue: empty) */
     /* a big folder: files stop at max - 50, the last places are kept for folders, and the
@@ -213,9 +222,16 @@ int dir_load(const struct fat_dir *d)
     browser_mq.off = 0;
     uint32_t t0 = ticks();
     int r = 0;
+    lib_shown = d->vol == VOL_LIB;
+    if (lib_shown) {                            /* a library list (libbrowse.c) */
+        dir_n = libv_load((int)d->cluster, d->size);
+        dir_full = 0;
+        return 0;
+    }
     if (d->vol == VOL_TOP) {
         dir_l.n = dir_l.full = 0;
         dir_l.used = 0;
+        top_entry(T("Library"), F_LIB);         /* (first: ETUDE §127) */
         top_entry(T("Internal"), 0);           /* (the names of the volumes: the language of */
         if (sd_present())                       /* the listing's load) */
             top_entry(sd_bad == SD_NOREPLY ? T("SD card (not responding)") :
@@ -239,6 +255,13 @@ int dir_load(const struct fat_dir *d)
 /* The directory an entry of the listing designates */
 void dir_of_entry(const struct entry *e, struct fat_dir *d)
 {
+    if ((e->flags & (F_DIR | F_LIB)) == (F_DIR | F_LIB)) {     /* a library list */
+        d->vol = VOL_LIB;
+        d->contig = 0;
+        d->cluster = e->cluster;
+        d->size = e->size;
+        return;
+    }
     d->vol = e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT;
     d->contig = (e->flags & F_CONTIG) != 0;
     d->cluster = e->flags & F_VOLROOT ? 0 : e->cluster;
@@ -274,7 +297,10 @@ static int playing_index(void)                  /* the row of the track that pla
     const struct entry *qe = q_playing && q_cur < q_n ? q_ent(q_cur) : 0;
     if (!qe)
         return -1;
-    for (int i = 0; i < dir_n; i++)
+    int from = lib_shown ? path[depth].top : 0, to = lib_shown ? from + ROWS : dir_n;
+    if (to > dir_n)                             /* (a library list: the page only) */
+        to = dir_n;
+    for (int i = from; i < to; i++)
         if (!(ent(i)->flags & F_DIR) && same_file(ent(i), qe))
             return i;
     return -1;
@@ -286,7 +312,8 @@ static void draw_row(int r, int sel, int mark)
     if (i >= dir_n) {
         lcd_fill(0, y, LCD_W, 16, BG);
         if (!dir_n && !r)
-            lcd_text(8, y, T("no folder or playable file here"), DIM, BG);
+            lcd_text_clip(8, y, lib_shown ? libv_empty() : T("no folder or playable file here"),
+                          LCD_W - 8, DIM, BG);
         return;
     }
     const struct entry *e = ent(i);
@@ -452,8 +479,23 @@ void browser_marquee_tick(void)
                     browser_mq.fg, SEL_BG);
 }
 
+static void lib_restored(void)                  /* a resume in the library: its list loaded */
+{
+    if (libv_restore_now()) {
+        dir_load(&path[depth].dir);
+        if (path[depth].sel >= dir_n)
+            path[depth].sel = path[depth].top = 0;
+        b_dirty = 1;
+    }
+}
+
 static void draw_browser_do(void)
 {
+    lib_restored();
+    if (qmsg_on && millis() - qmsg_at >= 2000) {        /* the message's time over: the title */
+        qmsg_on = 0;
+        b_dirty = 1;
+    }
     int sel = path[depth].sel, top = path[depth].top, mark = playing_index();
     if (!b_dirty && top == b_top) {
         /* the same page: only the rows whose look changed (selection, playing mark) */
@@ -474,7 +516,13 @@ static void draw_browser_do(void)
     }
     if (b_dirty) {                              /* every band once, nothing cleared first */
         lcd_fill(0, 0, 4, 16, BG);
-        lcd_text_clip(4, 0, depth ? path[depth].name : T("Storage"), LCD_W - 114, TITLE_FG, BG);
+        const char *title = depth ? path[depth].name : T("Storage");
+        uint16_t tfg = TITLE_FG;
+        if (qmsg_on)
+            title = qmsg, tfg = SK_FG;
+        else if (qmode)
+            title = T("Queue: PLAY next, MENU add"), tfg = SK_FG;
+        lcd_text_clip(4, 0, title, LCD_W - 114, tfg, BG);
         draw_clock(LCD_W - 114, LCD_W - 70, 1);
         lcd_fill(LCD_W - 4, 0, 4, 16, BG);
         lcd_fill(0, 16, LCD_W, ROW_Y0 - 16, BG);
@@ -526,7 +574,7 @@ void browser_lang_changed(void)
 void path_root(int v)
 {
     depth = 1;
-    path[0].sel = v == FAT_VOL_SD;
+    path[0].sel = v == FAT_VOL_SD ? 2 : 1;      /* (the library first) */
     path[0].top = 0;
     fat_root(v, &path[1].dir);
     copy_name(path[1].name, v == FAT_VOL_SD ? T("SD card") : T("Internal"), sizeof path[1].name);
@@ -566,6 +614,11 @@ static int sd_open_do(void)
     return 0;
 }
 
+int sd_card_bad(void)
+{
+    return sd_bad;
+}
+
 int sd_open(void)
 {
     const char *pp = perf_begin("card mount");
@@ -580,7 +633,7 @@ static void card_failed(void)
     if (!sd_bad || !depth || path[depth].dir.vol != FAT_VOL_SD)
         return;
     depth = 0;
-    path[0].sel = 1;
+    path[0].sel = 2;                            /* the card's line (the library first) */
     path[0].top = 0;
     dir_load(&path[0].dir);
 }
@@ -644,7 +697,17 @@ int sd_watch(void)
         sd_open();                              /* nothing heard: mounted at once (§106); */
                                                 /* while music plays: at its first use */
     int stopped = 0;
-    if (!in && q_on_sd()) {
+    if (!in && q_on_sd() && q_is_file()) {      /* a file queue (§128): its card's tracks */
+        const struct entry *ce = q_cur < q_n ? q_ent(q_cur) : 0;      /* passed over */
+        if (ce && (ce->flags & F_SD) && (q_playing || player_is_open())) {
+            play_stop(STOP_NOW);
+            parked = 0;
+            int nx = q_next_index(q_cur, 1);
+            if (nx >= 0)
+                play_index(nx);
+            stopped = !q_playing;
+        }
+    } else if (!in && q_on_sd()) {
         if (q_playing || player_is_open())
             play_stop(STOP_NOW);
         parked = 0;
@@ -653,6 +716,9 @@ int sd_watch(void)
     }
     if (!in && depth && path[1].dir.vol == FAT_VOL_SD)
         depth = 0;
+    libv_card_changed();                        /* the library's views: the card's tracks */
+    if (depth && path[depth].dir.vol == VOL_LIB)
+        dir_load(&path[depth].dir);
     if (!depth)
         dir_load(&path[0].dir);
     if (path[depth].sel >= dir_n)
@@ -669,16 +735,129 @@ static void move(int d)
 
 /* A key on the browser: VOL+/VOL- move, BACK goes up, PLAY opens a folder or plays the file and
  * those after it, PLAY held on a folder plays all that is under it. Returns UI_* (ui_priv.h). */
+/* ---- the queue mode (ETUDE §128): VOL+ and VOL- together; PLAY puts the row next, MENU adds it
+ * at the end, PLAY held opens a folder or a list, BACK leaves the mode ---- */
+int browser_qmode(void)
+{
+    return qmode;
+}
+
+int browser_chord(void)
+{
+    qmode = !qmode && depth > 0;                /* (not at the top level) */
+    b_dirty = 1;
+    return UI_FULL;
+}
+
+static void queue_row(int sel, int next)
+{
+    static struct q_src s __attribute__((section(".screenram")));  /* (not the BSS) */
+    const struct entry *e = ent(sel);
+    if ((e->flags & F_VOLROOT) || ((e->flags & F_DIR) && lib_shown &&
+                                   (e->cluster == LIBV_UPDATE || e->cluster == LIBV_INFO)))
+        return;
+    if (e->flags & F_DIR) {
+        if (lib_shown) {
+            s.type = QS_LIB;
+            s.kind = (int)e->cluster;
+            s.param = e->size;
+        } else {
+            s.type = QS_FOLDER;
+            dir_of_entry(e, &s.d);
+            if (s.d.vol == FAT_VOL_SD && sd_open())
+                return;
+        }
+    } else {
+        if (!e->size)
+            return;
+        s.type = QS_ONE;
+        s.e = *e;
+        copy_name(s.name, ent_name(sel), sizeof s.name);   /* (a library row: its title) */
+    }
+    int was = q_n;
+    int r = q_add(&s, next);
+    char *p = r == Q_EFULL ? log_format(qmsg, qmsg + sizeof qmsg - 1, "%s", T("The queue is full")) :
+              r < 0 ? log_format(qmsg, qmsg + sizeof qmsg - 1, "%s", T("No room for NEWFWQ.DAT")) :
+              log_format(qmsg, qmsg + sizeof qmsg - 1, next ? T("Next: %d tracks") :
+                         T("Added: %d tracks"), r);
+    *p = 0;
+    qmsg_at = millis();
+    qmsg_on = 1;
+    b_dirty = 1;
+    if (r > 0 && !was) {                        /* nothing queued before: it plays */
+        play_index(0);
+    }
+    resume_save_later();
+}
+
 int browser_key(const struct key_ev *e)
 {
     int k = e->key, ev = e->type;
+    lib_restored();
+    if (qmode) {
+        if (k == KEY_BACK && ev == EV_PRESS) {
+            qmode = 0;
+            b_dirty = 1;
+            return UI_FULL;
+        }
+        if (dir_n && k == KEY_PLAY && ev == EV_PRESS) {
+            queue_row(path[depth].sel, 1);
+            return UI_FULL;
+        }
+        if (dir_n && k == KEY_MENU && ev == EV_PRESS) {
+            queue_row(path[depth].sel, 0);
+            return UI_FULL;
+        }
+        if (dir_n && k == KEY_PLAY && ev == EV_LONG && (ent(path[depth].sel)->flags & F_DIR)) {
+            enter(path[depth].sel);             /* held: open it (the mode kept) */
+            return UI_FULL;
+        }
+        if (k != KEY_VOLUP && k != KEY_VOLDOWN)
+            return UI_FULL;
+    }
     if (k == KEY_VOLUP)
         move(-1);
     else if (k == KEY_VOLDOWN)
         move(1);
     else if (k == KEY_BACK && ev == EV_PRESS)
         leave();
-    else if (k == KEY_PLAY && dir_n) {
+    else if (k == KEY_PLAY && dir_n && lib_shown) {   /* a library list (ETUDE §127) */
+        int sel = path[depth].sel;
+        const struct entry *le = ent(sel);
+        if (le->cluster == LIBV_INFO && (le->flags & F_DIR))
+            return UI_FULL;
+        if (le->cluster == LIBV_UPDATE && (le->flags & F_DIR)) {
+            if (ev == EV_PRESS) {               /* the library updated (its own screen), then */
+                resume_save_later();            /* shown again from its top (§129) */
+                lib_update();
+                depth = 1;
+                path[1].sel = path[1].top = 0;
+                dir_load(&path[1].dir);
+                b_dirty = 1;
+            }
+            return UI_FULL;
+        }
+        if ((le->flags & F_DIR) && ev == EV_PRESS)
+            enter(sel);
+        else if ((le->flags & F_DIR) && ev == EV_LONG) {
+            char nm[64];                        /* held on a list: all its tracks (§128) */
+            copy_name(nm, ent_name(sel), sizeof nm);
+            q_from_lib((int)le->cluster, le->size, -1, nm);
+            if (q_n) {
+                play_index(q_cur);
+                return UI_FULL | UI_TO_PLAYING;
+            }
+        } else if (!(le->flags & F_DIR) && ev == EV_PRESS) {
+            if (parked && q_cur < q_n && q_ent(q_cur) && same_file(le, q_ent(q_cur)))
+                player_seek_hint(parked_ms);    /* the parked track: where it was */
+            q_from_lib((int)path[depth].dir.cluster, path[depth].dir.size, sel,
+                       path[depth].name);
+            if (q_n) {
+                play_index(q_cur);
+                return UI_FULL | UI_TO_PLAYING;
+            }
+        }
+    } else if (k == KEY_PLAY && dir_n) {
         int sel = path[depth].sel;
         if ((ent(sel)->flags & F_DIR) && ev == EV_PRESS)
             enter(sel);

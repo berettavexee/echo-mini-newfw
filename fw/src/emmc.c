@@ -39,17 +39,26 @@ int emmc_sectors(uint32_t *n)
     return *n ? 0 : EMMC_EDATA;
 }
 
+struct io_count emmc_io;
+uint32_t ticks(void);
+
 int emmc_read(uint32_t sector, uint32_t count, void *buf)
 {
+    uint32_t t0 = ticks();
     while (count) {
         uint32_t n = count > 64 ? 64 : count;
         int r = transfer(sector, n, buf, 0);
-        if (r)
+        emmc_io.cmds++;
+        emmc_io.sectors += n;
+        if (r) {
+            emmc_io.us += ticks() - t0;
             return r;
+        }
         sector += n;
         count -= n;
         buf = (uint8_t *)buf + 512 * n;
     }
+    emmc_io.us += ticks() - t0;
     return 0;
 }
 
@@ -87,12 +96,19 @@ int emmc_user_area(uint32_t base, uint32_t count)
     return 0;
 }
 
+struct io_count emmc_wio;
+
 int emmc_write_user(uint32_t sector, uint32_t count, const void *buf)
 {
     if (user_hi <= user_lo || user_lo < EMMC_FW1 + emmc.p || sector < user_lo ||
         sector + count > user_hi || sector + count < sector)
         return EMMC_EPROTECT;
-    return write_run(sector, count, buf);
+    uint32_t t0 = ticks();
+    int r = write_run(sector, count, buf);
+    emmc_wio.cmds++;
+    emmc_wio.sectors += count;
+    emmc_wio.us += ticks() - t0;
+    return r;
 }
 
 /* IDB: 5 copies, sector 64 + 1024 * i. Sector 0 of a copy starts with 0xfcdc8c3b, sector 1 has

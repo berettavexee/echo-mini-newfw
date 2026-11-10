@@ -1,6 +1,6 @@
 # User manual
 
-This manual is for the ECHO MINI new firmware, version 0.102. It describes what the player shows
+This manual is for the ECHO MINI new firmware, version 0.103. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
 The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing Daft
@@ -129,8 +129,8 @@ page), after a short silence: about 0.2 s (Vorbis) or 0.3 s (Opus).
 
 ## The folder browser
 
-The top level lists **Internal** (the internal memory) and **SD card** (the microSD card, when
-one is inserted). In a folder, the subfolders come first, then the playable files. Names are
+The top level lists **Library** (the music by its tags, below), **Internal** (the internal
+memory) and **SD card** (the microSD card, when one is inserted). In a folder, the subfolders come first, then the playable files. Names are
 sorted in natural order, ignoring case, so "track 2" comes before "track 10". Empty files
 (0 bytes) are greyed and never played.
 
@@ -157,6 +157,67 @@ PLAY held takes the whole tree, up to 4,000 folders with tracks and 8 levels of 
 folder of more than about 550 tracks is cut). After a power off, the player resumes a track
 played from a folder (PLAY on a file), not a queue made by PLAY held.
 
+## The library
+
+**Library**, the first line of the top level, browses the music by its tags rather than by
+its folders. It reads the library's index (Settings, Library: built there, and at once after a
+USB session in which the computer wrote); with no index yet, it says so.
+
+| List | What it shows |
+|---|---|
+| Artists | the album artists (the artist when an album has none), then their albums (with their year), then the tracks |
+| Albums | all the albums, "album - artist", then the tracks |
+| Years | the years of the albums ("Unknown year" last), then their albums, then the tracks |
+| Genres | the genres, then their albums, then the tracks |
+| All songs | every track by its title, "title - artist" |
+
+The keys are those of the folder browser: VOL+ / VOL- move, PLAY opens, BACK goes up, MENU to
+the play screen and back. **PLAY on a track** plays the list it is in (the album, or all the
+songs) from that track. **PLAY held** on any other line plays all its tracks: an album, an
+artist (all their albums), a year, a genre (the albums of that genre), or a line of the top of
+the library (Artists, Albums, Years and Genres: the whole library in that order; All songs: by
+title); in order, or anywhere in it when shuffle is on. After a power off, the player resumes
+the track, and the browser shows the library's list again.
+
+- The tracks of the microSD card show only when the card the library was built with is in.
+  When another card is in (or the library was made without one), the first line says **SD card
+  not in the library: PLAY to update**; a card that cannot be read (FAT16, a damaged one): **SD
+  card not readable**. An update made without the library's card (taken out, or another one
+  that cannot be read) keeps its tracks as they are: when it is back, they show again at once.
+  The library knows one card: an update made with another card that can be read replaces the
+  first card's tracks by the new card's (the first card back, its tracks are read again).
+- The last line, **Update the library**, does what Settings, Library does: the files are
+  counted, and nothing is read or written when none changed (3 s); files changed meanwhile,
+  on the internal memory or on the card (copied with a card reader), are read again.
+- A track on both the internal memory and the card (the same album, disc, number and title) is
+  shown once: the internal memory's.
+- Names sort without regard to case and accents, "The" left out of the artists.
+
+## The play queue
+
+What plays is kept on the internal memory, in NEWFWQ.DAT (made by the player, 3 MiB): after a
+power off it resumes at once, and tracks can be added while the music plays.
+
+**The queue mode**: in the folder browser or the library, press **VOL+ and VOL- together**. The
+title shows "Queue: PLAY next, MENU add".
+
+| Key | Action |
+|---|---|
+| **PLAY** | the line goes next: right after the track playing (in shuffle too) |
+| **MENU** | the line goes at the end of the queue |
+| **PLAY held** on a folder or a list | opens it (the mode stays) |
+| **BACK** | leaves the queue mode |
+
+A line is a track, a folder (its files), or a list of the library (an album, an artist...). The
+title says what was done ("Next: 12 tracks"). With nothing queued, the line plays at once.
+
+**The queue's screen**: main menu, **Play queue**. The tracks in the queue's order, the one
+playing marked; PLAY plays the one chosen. Its first line, **Empty the queue**, keeps only the
+track playing; **PLAY held** on any line does the same (a long queue: the first line is far up).
+
+Tracks of the microSD card are passed over while the card is out, or while another card is in
+(the queue goes on with the others): a track is never looked for on a card it is not on. A queue holds up to 24,576 tracks.
+
 ## The main menu (MENU held)
 
 VOL+ / VOL- move, PLAY chooses, BACK or MENU closes the menu. The music goes on while the menu
@@ -168,6 +229,7 @@ is open, except for the USB and system entries, which stop it.
 |---|---|
 | Files | the folder browser |
 | Now playing | the play screen |
+| Play queue | the play queue: its tracks, PLAY plays one, the first line empties it |
 | Settings | the settings screen (below) |
 | USB disk, read only | the internal memory as a USB disk; the computer can read it but not write to it |
 | USB disk, read/write | the same, and the computer can write to it (copy music, firmware images) |
@@ -181,6 +243,7 @@ is open, except for the USB and system entries, which stop it.
 - After a read/write session, the clock is set from the newest file the computer wrote, when
   the clock was not set or was behind that file.
 - The microSD card is not available over USB yet.
+- When the computer wrote, the library is updated at once (see Settings, Library).
 
 **USB sound card** (0.97, high speed in 0.98, 192 kHz in 0.99, remote and Power key since 0.99): plug the cable, then choose the entry. The computer
 sees a sound card named "ECHO MINI" (USB Audio Class 2 at high speed, or Class 1 on an older
@@ -246,7 +309,18 @@ power off (except the sleep timer).
 | Sleep timer | off, 15, 30, 45, 60, 90 min; shows the minutes left. At the end the music fades out over 5 s, pauses, and the player powers off (it resumes paused there) | off |
 | Power off when idle | 5, 10, 20, 30 min, never: nothing played and no key for that long (not with the USB cable) | 10 min |
 | Swap VOL+ and VOL- | the volume keys of the play screen swapped (lists and seek unchanged) | no |
+| Library (PLAY: update) | the tracks in the library's index, or **none**; PLAY updates it (below) | |
 | Restore the defaults | PLAY puts back all the defaults above, except the language | |
+
+**Library** (browsed from the top level, above): an index of the tags of the
+music on the internal memory and the card, in the file NEWFWLIB.DAT at the root of the internal
+memory (created by the player, 8 MiB). The update stops the music and shows its progress:
+looking for the music, reading the tags, sorting, writing. Files not changed since the last
+update are not read again, and an update with the same files ends in a few seconds. **BACK**
+stops it; the library before is kept, as after a power cut. Reading the tags is the long part:
+about 3 to 4 minutes for 18,000 tracks the first time. Big cover art embedded in the files
+slows it down (an Ogg or Opus file is read through its whole cover): 600 pixels wide are
+plenty for the player's screen.
 
 The translations are those of `fw/po/` in the repository (docs/TRANSLATING.md): a string not yet
 translated shows in English. The Japanese and Simplified Chinese ones are partial for now. The log
@@ -311,8 +385,8 @@ Storage:
 
 ## Installing
 
-1. Copy the image (`NEWFW102.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
-   instance `NEWFW102.IMG`) to the
+1. Copy the image (`NEWFW103.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
+   instance `NEWFW103.IMG`) to the
    root of the internal memory. Use the stock firmware's USB disk, or "USB disk, read/write"
    with this firmware.
 2. Main menu → **Install a firmware (.IMG)**:

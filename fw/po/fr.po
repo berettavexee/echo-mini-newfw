@@ -652,3 +652,177 @@ msgstr "affichée"
 #: src/settings.c
 msgid "hidden"
 msgstr "masquée"
+
+#: src/libui.c
+msgid "Updating the library"
+msgstr "Mise à jour de la bibliothèque"
+
+#: src/libui.c
+msgid "BACK: stop (the library before is kept)"
+msgstr "BACK : arrêter (l'ancienne est gardée)"
+
+#: src/libui.c
+msgid "Looking for the music"
+msgstr "Recherche de la musique"
+
+#: src/libui.c
+msgid "Reading the tags"
+msgstr "Lecture des tags"
+
+#: src/libui.c
+msgid "Sorting"
+msgstr "Tri"
+
+#: src/libui.c
+msgid "Writing the library"
+msgstr "Écriture de la bibliothèque"
+
+#: src/libui.c
+#, c-format
+msgid "%u files"
+msgstr "%u fichiers"
+
+#: src/libui.c
+#, c-format
+msgid "%u of %u"
+msgstr "%u sur %u"
+
+#: src/libui.c
+#, c-format
+msgid "about %u min left"
+msgstr "encore environ %u min"
+
+#: src/libui.c
+#, c-format
+msgid "about %u s left"
+msgstr "encore environ %u s"
+
+#: src/libui.c
+#, c-format
+msgid "Library updated: %u tracks"
+msgstr "Bibliothèque à jour : %u morceaux"
+
+#: src/libui.c
+msgid "Stopped: the library before is kept"
+msgstr "Arrêté : l'ancienne bibliothèque est gardée"
+
+#: src/libui.c
+msgid "No room for NEWFWLIB.DAT"
+msgstr "Pas de place pour NEWFWLIB.DAT"
+
+#: src/libui.c
+msgid "Too much music for the library"
+msgstr "Trop de musique pour la bibliothèque"
+
+#: src/libui.c
+#, c-format
+msgid "The library could not be updated (%d)"
+msgstr "La bibliothèque n'a pas pu être mise à jour (%d)"
+
+#. TRANSLATORS: the music library (artists, albums...): its index, PLAY updates it
+#: src/settings.c
+msgid "Library (PLAY: update)"
+msgstr "Bibliothèque (PLAY : mettre à jour)"
+
+#: src/settings.c
+#, c-format
+msgid "%u tracks"
+msgstr "%u morceaux"
+
+#: src/browser.c
+msgid "Library"
+msgstr "Bibliothèque"
+
+#: src/libbrowse.c
+msgid "Artists"
+msgstr "Artistes"
+
+#: src/libbrowse.c
+msgid "Albums"
+msgstr "Albums"
+
+#: src/libbrowse.c
+msgid "Years"
+msgstr "Années"
+
+#: src/libbrowse.c
+msgid "Genres"
+msgstr "Genres"
+
+#: src/libbrowse.c
+msgid "All songs"
+msgstr "Tous les morceaux"
+
+#: src/libbrowse.c
+msgid "nothing here"
+msgstr "rien ici"
+
+#: src/libbrowse.c
+msgid "No library yet: Settings, Library, PLAY"
+msgstr "Pas encore de bibliothèque : Réglages, Bibliothèque, PLAY"
+
+#: src/libbrowse.c
+msgid "Unknown album"
+msgstr "Album inconnu"
+
+#: src/libbrowse.c
+msgid "Unknown artist"
+msgstr "Artiste inconnu"
+
+#: src/libbrowse.c
+msgid "Unknown genre"
+msgstr "Genre inconnu"
+
+#: src/libbrowse.c
+msgid "Unknown year"
+msgstr "Année inconnue"
+
+#: src/browser.c
+msgid "Queue: PLAY next, MENU add"
+msgstr "File : PLAY ensuite, MENU ajoute"
+
+#: src/browser.c
+msgid "The queue is full"
+msgstr "La file est pleine"
+
+#: src/browser.c
+msgid "No room for NEWFWQ.DAT"
+msgstr "Pas de place pour NEWFWQ.DAT"
+
+#: src/browser.c
+#, c-format
+msgid "Next: %d tracks"
+msgstr "Ensuite : %d morceaux"
+
+#: src/browser.c
+#, c-format
+msgid "Added: %d tracks"
+msgstr "Ajoutés : %d morceaux"
+
+#: src/menu.c src/qscreen.c
+msgid "Play queue"
+msgstr "File de lecture"
+
+#: src/qscreen.c
+msgid "Empty the queue (the track playing kept)"
+msgstr "Vider la file (le morceau en cours gardé)"
+
+#: src/queue.c
+msgid "Queue"
+msgstr "File"
+
+#: src/qscreen.c
+msgid "Queue emptied"
+msgstr "File vidée"
+
+#: src/libbrowse.c
+msgid "SD card not in the library: PLAY to update"
+msgstr "Carte SD absente de la bibliothèque : PLAY pour mettre à jour"
+
+#: src/libbrowse.c
+msgid "Update the library"
+msgstr "Mettre à jour la bibliothèque"
+
+#: src/libbrowse.c
+msgid "SD card not readable (FAT32 or exFAT only)"
+msgstr "Carte SD illisible (FAT32 ou exFAT seulement)"

@@ -29,6 +29,24 @@ struct resume_q {
     uint32_t sum;
 };
 _Static_assert(RQ_WORD * 4 + sizeof(struct resume_q) <= 64 * 4, "resume_q overlaps the settings");
+
+/* A queue of NEWFWQ.DAT (§128): at the same place as resume_q (one or the other) */
+struct resume_f {
+    char magic[4];                              /* "QFL1" */
+    struct q_fstate q;
+    char name[32];                              /* the queue's name, on the play screen */
+    uint32_t sum;
+};
+_Static_assert(RQ_WORD * 4 + sizeof(struct resume_f) <= 64 * 4, "resume_f overlaps the settings");
+
+static uint32_t rf_sum(const struct resume_f *r)
+{
+    const uint32_t *w = (const uint32_t *)r;
+    uint32_t s = 0x51464c31;
+    for (unsigned i = 0; i < __builtin_offsetof(struct resume_f, sum) / 4; i++)
+        s = (s << 5 | s >> 27) ^ w[i];
+    return s;
+}
 _Static_assert(sizeof(struct resume) <= RQ_WORD * 4, "resume overlaps resume_q");
 
 /* The track of a tree queue, to play it at power-on before its tree is walked again (0.99r23,
@@ -77,14 +95,17 @@ static void resume_save_do(void)
     struct resume *r = (struct resume *)rs_buf;
     for (int i = 0; i < 128; i++)
         rs_buf[i] = 0x20202020;                 /* spaces: the log reader shows nothing */
-    __builtin_memcpy(r->magic, "NEWFWSTATE 3", 12);
+    __builtin_memcpy(r->magic, "NEWFWSTATE 4", 12);     /* 4: the library first (§127) */
     r->depth = (uint32_t)depth | (depth ? (uint32_t)path[1].dir.vol << 8 : 0);
+    int in_lib = depth && path[1].dir.vol == VOL_LIB;
     for (int i = 0; i < DEPTH_MAX; i++) {
-        r->cluster[i] = i <= depth ? path[i].dir.cluster : 0;
+        r->cluster[i] = i > depth ? 0 : in_lib && i ? path[i].dir.cluster | path[i].dir.size << 8 :
+                        path[i].dir.cluster;    /* (a library list: its kind and param) */
         r->sel[i] = (uint16_t)(i <= depth ? path[i].sel : 0);
         r->top[i] = (uint16_t)(i <= depth ? path[i].top : 0);
     }
-    const struct entry *qe = (q_playing || parked) && q_cur < q_n ? q_ent(q_cur) : 0;
+    const struct entry *qe = (q_playing || parked) && q_cur < q_n && !q_is_lib() ?
+                             q_ent(q_cur) : 0;  /* (a library list: not resumed yet, step 5) */
     r->track = qe ? qe->cluster : 0;
     r->playing = (uint32_t)(q_playing && !audio_paused);
     r->level = (uint32_t)play_level;
@@ -95,7 +116,13 @@ static void resume_save_do(void)
     r->len_sum = ~r->len_ms ^ r->sum;
     struct resume_q *rq = (struct resume_q *)(rs_buf + RQ_WORD);
     uint32_t tsum = 0;
-    if (qe && q_state_get(&rq->q)) {
+    if (qe && q_is_file()) {                    /* NEWFWQ.DAT's queue: where it is in it */
+        struct resume_f *rf = (struct resume_f *)rq;
+        __builtin_memcpy(rf->magic, "QFL1", 4);
+        q_file_state(&rf->q);
+        copy_name(rf->name, q_folder, sizeof rf->name);
+        rf->sum = rf_sum(rf);
+    } else if (qe && q_state_get(&rq->q)) {
         __builtin_memcpy(rq->magic, "QTR1", 4);
         copy_name(rq->name, q_folder, sizeof rq->name);
         rq->sum = rq_sum(rq);
@@ -110,7 +137,8 @@ static void resume_save_do(void)
         rt->sum = rt_sum(rt);
         tsum = rt->sum;
     }
-    uint32_t sum = r->sum ^ rq->sum ^ tsum ^ settings_put(rs_buf + 64);
+    uint32_t sum = r->sum ^ rq->sum ^ ((struct resume_f *)rq)->sum ^ tsum ^
+                   settings_put(rs_buf + 64);
     if (sum == rs_last_sum)
         return;                                 /* nothing changed: no write */
     rs_last_sum = sum;
@@ -221,6 +249,20 @@ static void resume_tree(const struct resume *r, struct resume_q *rq)
     resume_track(r);
 }
 
+/* A queue of NEWFWQ.DAT: read again (no folder read, no index), its track checked (§128) */
+static void resume_file(const struct resume *r, struct resume_f *rf)
+{
+    rf->name[sizeof rf->name - 1] = 0;
+    const struct entry *e;
+    if (q_file_resume(&rf->q, rf->name) || !(e = q_ent(q_cur)) || e->cluster != r->track) {
+        log_printf("ui: resume: the queue of NEWFWQ.DAT is not the one saved");
+        q_clear();
+        return;
+    }
+    log_printf("ui: resume: NEWFWQ.DAT's queue, track %d/%d", q_cur + 1, q_n);
+    resume_track(r);
+}
+
 /* At boot: back to the last folder, its selection, the track (where it was); a tree queue
  * (PLAY held) walked again */
 void resume_load(void)
@@ -229,7 +271,8 @@ void resume_load(void)
     int bad = log_state_read(rs_buf);
     settings_get(rs_buf + 64);                  /* the defaults when there are none */
     if (bad || r->sum != rs_sum(r) ||
-        (__builtin_memcmp(r->magic, "NEWFWSTATE 3", 12) &&
+        (__builtin_memcmp(r->magic, "NEWFWSTATE 4", 12) &&
+         __builtin_memcmp(r->magic, "NEWFWSTATE 3", 12) &&
          __builtin_memcmp(r->magic, "NEWFWSTATE 2", 12)) || (r->depth & 0xff) >= DEPTH_MAX - 1)
         return;
     /* state 2 (before 0.58): no top level, index 0 was the internal root */
@@ -239,6 +282,8 @@ void resume_load(void)
     rs_last_sum = r->sum ^ rq->sum ^ (rt->sum == rt_sum(rt) ? rt->sum : 0) ^
                   settings_put(rs_buf + 64);
     int tree = !__builtin_memcmp(rq->magic, "QTR1", 4) && rq->sum == rq_sum(rq) && rq->q.tree;
+    struct resume_f *rf = (struct resume_f *)rq;
+    int fq = !__builtin_memcmp(rf->magic, "QFL1", 4) && rf->sum == rf_sum(rf);
     if (r->level <= 0xfe)
         play_level = (int)r->level;
     if ((r->mode & 0xff) < MODE_COUNT)
@@ -247,14 +292,36 @@ void resume_load(void)
         rg_mode = (int)(r->mode >> 8);
     if (old)
         v = FAT_VOL_INT;
+    if (saved && v == VOL_LIB && saved < 6) {   /* in the library: its lists, named once shown */
+        depth = saved;
+        for (int i = 1; i <= saved; i++) {
+            path[i].dir.vol = VOL_LIB;
+            path[i].dir.contig = 0;
+            path[i].dir.cluster = i == 1 ? 0 : r->cluster[i] & 0xff;
+            path[i].dir.size = i == 1 ? 0 : r->cluster[i] >> 8;
+            path[i].sel = r->sel[i];
+            path[i].top = r->top[i];
+            path[i].name[0] = 0;
+        }
+        path[0].sel = 0;
+        path[0].top = 0;
+        libv_restore();
+        log_printf("ui: resume: in the library, depth %d", depth);
+        if (fq && r->track && cfg.start != START_BROWSER)
+            resume_file(r, rf);
+        return;
+    }
     if (!saved || v > FAT_VOL_SD || (v == FAT_VOL_SD && sd_open())) {
         depth = 0;                              /* the top level (or the card is gone) */
-        path[0].sel = old ? 0 : r->sel[0];
+        path[0].sel = old ? 1 : r->sel[0] + (r->magic[11] == '3');   /* (before 4: no
+                                                                         * library line) */
         dir_load(&path[0].dir);
         if (path[0].sel >= dir_n)
             path[0].sel = 0;
         log_printf("ui: resume: top level (%d saved)", saved);
-        if (tree && r->track && cfg.start != START_BROWSER)
+        if (fq && r->track && cfg.start != START_BROWSER)
+            resume_file(r, rf);
+        else if (tree && r->track && cfg.start != START_BROWSER)
             resume_tree(r, rq);
         return;
     }
@@ -281,6 +348,10 @@ void resume_load(void)
                r->playing, (uint32_t)play_level / 2);
     if (!r->track || cfg.start == START_BROWSER)
         return;                                 /* (the setting: the folder only) */
+    if (fq) {
+        resume_file(r, rf);
+        return;
+    }
     if (tree) {
         resume_tree(r, rq);
         return;

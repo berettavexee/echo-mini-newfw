@@ -4,10 +4,10 @@
 #include "library.h"
 
 #define HALF   (4u << 20)
-#define NSECT  8
-enum { S_VOLS, S_STRS, S_TRKS, S_ARTS, S_ALBS, S_GENS, S_GALB, S_SONG };
-static const char sect_id[] = "VOLSSTRSTRKSARTSALBSGENSGALBSONG";      /* 4 bytes each */
-static const uint8_t sect_size[NSECT] = { 12, 0, 36, 8, 16, 12, 2, 4 };
+#define NSECT  9
+enum { S_VOLS, S_STRS, S_TRKS, S_ARTS, S_ALBS, S_GENS, S_GALB, S_SONG, S_CLUS };
+static const char sect_id[] = "VOLSSTRSTRKSARTSALBSGENSGALBSONGCLUS";  /* 4 bytes each */
+static const uint8_t sect_size[NSECT] = { 12, 0, 36, 8, 16, 12, 2, 4, 8 };
 
 static struct {
     struct lib_io io;
@@ -16,20 +16,33 @@ static struct {
     int open;
 } lib;
 
-/* ---- reading, through four sectors cached ---- */
+/* ---- reading, through sectors cached: four, or the buffer lib_cache() gives ---- */
 #define CACHE 4
 #ifdef LIBRARY_HOST
 #define SCREENRAM
 #else
 #define SCREENRAM __attribute__((section(".screenram")))  /* not the BSS: set in lib_open */
 #endif
-static struct { uint32_t sector; uint32_t age; uint8_t b[512]; } cache[CACHE] SCREENRAM;
-static uint32_t cache_age;
+struct ce { uint32_t sector; uint32_t age; uint8_t b[512]; };
+static struct ce cache4[CACHE] SCREENRAM, *cache = cache4;
+static uint32_t cache_age, ncache = CACHE, last;
 
 static void cache_clear(void)
 {
-    for (int i = 0; i < CACHE; i++)
+    if (!cache) {
+        cache = cache4;
+        ncache = CACHE;
+    }
+    for (uint32_t i = 0; i < ncache; i++)
         cache[i].sector = 0xffffffffu;
+    last = 0;
+}
+
+void lib_cache(void *buf, uint32_t bytes)
+{
+    cache = buf && bytes >= sizeof(struct ce) * CACHE ? buf : cache4;
+    ncache = cache == cache4 ? CACHE : bytes / sizeof(struct ce);
+    cache_clear();
 }
 
 static int rd(uint32_t off, void *buf, uint32_t n)
@@ -37,12 +50,12 @@ static int rd(uint32_t off, void *buf, uint32_t n)
     uint8_t *d = buf;
     while (n) {
         uint32_t s = off / 512, o = off % 512, k = 512 - o < n ? 512 - o : n;
-        int c = -1, old = 0;
-        for (int i = 0; i < CACHE; i++) {
+        int c = cache[last].sector == s ? (int)last : -1, old = 0;
+        for (uint32_t i = 0; c < 0 && i < ncache; i++) {
             if (cache[i].sector == s)
-                c = i;
+                c = (int)i;
             if (cache[i].age < cache[old].age)
-                old = i;
+                old = (int)i;
         }
         if (c < 0) {                            /* a miss: the oldest sector replaced */
             c = old;
@@ -53,6 +66,7 @@ static int rd(uint32_t off, void *buf, uint32_t n)
             cache[c].sector = s;
         }
         cache[c].age = ++cache_age;
+        last = (uint32_t)c;
         for (uint32_t i = 0; i < k; i++)
             d[i] = cache[c].b[o + i];
         d += k;
@@ -80,6 +94,11 @@ static uint32_t crc_add(uint32_t c, const uint8_t *p, uint32_t n)
         c = (c >> 4) ^ crc_t[c & 15];
     }
     return c;
+}
+
+uint32_t lib_crc(uint32_t c, const void *p, uint32_t n)
+{
+    return crc_add(c, p, n);
 }
 
 /* ---- the file on the device ---- */
@@ -121,15 +140,22 @@ int lib_file(struct fat_file *f)
 #endif
 
 /* ---- opening ---- */
+void (*lib_yield)(void);
+
+/* the key of every 64th CLUS entry, in RAM (lib_fence): a search reads one or two sectors */
+static uint32_t *fence, nfence;
+
 void lib_close(void)
 {
     lib.open = 0;
+    fence = 0;
 }
 
 int lib_open(const struct lib_io *io)
 {
     uint8_t h[512];
     lib.open = 0;
+    fence = 0;
     lib.io = *io;
     cache_clear();
     if (rd(0, h, 512) || __builtin_memcmp(h, "NEWFWLIB", 8) || le32(h + 8) != 1)
@@ -150,6 +176,8 @@ int lib_open(const struct lib_io *io)
         if (lib.io.read(lib.io.ctx, lib.half + at, b, 512) < 0)
             return -1;
         c = crc_add(c, b, k);
+        if (lib_yield && at % (64 * 512) == 0)
+            lib_yield();
     }
     if (~c != crc)
         return -2;
@@ -257,6 +285,73 @@ int lib_song(uint32_t i, uint32_t *track)
         return -1;
     *track = le32(b);
     return *track < lib.n[S_TRKS] ? 0 : -1;
+}
+
+int lib_volume(uint32_t i, uint32_t *volume, uint32_t *serial, uint32_t *tracks)
+{
+    uint8_t b[12];
+    if (entry(S_VOLS, i, b))
+        return -1;
+    *volume = b[0];
+    *serial = le32(b + 4);
+    *tracks = le32(b + 8);
+    return 0;
+}
+
+int lib_clus(uint32_t i, uint32_t *key, uint32_t *track)
+{
+    uint8_t b[8];
+    if (entry(S_CLUS, i, b))
+        return -1;
+    *key = le32(b);
+    *track = le32(b + 4);
+    return *track < lib.n[S_TRKS] ? 0 : -1;
+}
+
+int lib_fence(uint32_t *buf, uint32_t max)
+{
+    fence = 0;
+    uint32_t n = lib.open ? (lib.n[S_CLUS] + 63) / 64 : 0, t;
+    if (!buf || !n || n > max)
+        return -1;
+    for (uint32_t j = 0; j < n; j++)
+        if (lib_clus(64 * j, &buf[j], &t))
+            return -1;
+    fence = buf;
+    nfence = n;
+    return 0;
+}
+
+int lib_find(uint32_t volume, uint32_t cluster, uint32_t *track)
+{
+    uint32_t want = volume << 31 | cluster, lo = 0, hi = lib.open ? lib.n[S_CLUS] : 0;
+    if (fence && hi) {                          /* the last 64 entries starting not above want */
+        uint32_t a = 0, z = nfence;
+        while (a < z) {
+            uint32_t m = (a + z) / 2;
+            if (fence[m] <= want)
+                a = m + 1;
+            else
+                z = m;
+        }
+        if (!a)
+            return -1;
+        lo = 64 * (a - 1);
+        if (hi > lo + 64)
+            hi = lo + 64;
+    }
+    while (lo < hi) {                           /* the first entry not below want */
+        uint32_t mid = (lo + hi) / 2, key, t;
+        if (lib_clus(mid, &key, &t))
+            return -1;
+        if (key < want)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    uint32_t key;
+    return lo < (lib.open ? lib.n[S_CLUS] : 0) && !lib_clus(lo, &key, track) && key == want ? 0
+                                                                                        : -1;
 }
 
 int lib_track(uint32_t i, struct lib_track *t)
@@ -377,6 +472,23 @@ static const uint8_t *skip_the(const uint8_t *s)
     if ((s[0] | 32) == 't' && (s[1] | 32) == 'h' && (s[2] | 32) == 'e' && s[3] == ' ' && s[4])
         return s + 4;
     return s;
+}
+
+void lib_key(const char *s, int artist, uint16_t *k, int n, int skip)
+{
+    const uint8_t *p = (const uint8_t *)s;
+    if (!*p) {
+        for (int i = 0; i < n; i++)
+            k[i] = skip ? 0 : 0xffff;
+        return;
+    }
+    struct key kk = { artist ? skip_the(p) : p, 0 };
+    for (int i = 0; i < skip && key_next(&kk); i++)
+        ;
+    for (int i = 0; i < n; i++) {
+        uint32_t c = key_next(&kk);
+        k[i] = (uint16_t)(c > 0xffff ? 0xffff : c);
+    }
 }
 
 int lib_cmp(const char *a, const char *b, int artist)
