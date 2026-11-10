@@ -3,8 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-07, version 0.102 (pause when the headphones are unplugged, the clock shown
-or hidden, more tags read for the library to come).
+Last update: 2026-11-10, version 0.103 (the music library: built on the player, its views, the
+play queue on the internal memory, the microSD card in the library).
 
 ## Done, validated on the device
 
@@ -55,6 +55,8 @@ or hidden, more tags read for the library to come).
 | The clock shown or hidden (Settings, the line Clock) | 0.102 | §120 |
 | Pause when the headphones are unplugged (the last plug out; plugging back does not play; checked with a 3.5 mm plug) | 0.102 | §119 |
 | Steady battery percent (the mean of a minute of readings; checked over a 14.6 h session to an empty battery) | 0.97, 0.102 | §82, §115 |
+| Music library: the index built on the player (18,003 tracks in 3 to 4 min, "no change" in 3 s), Library first at the top level (Artists, Albums, Years, Genres, All songs), the card's tracks with the card that was read, kept when it cannot be read at an update | 0.103 | §126-§127, §129 |
+| Play queue on the internal memory (NEWFWQ.DAT, 24,576 tracks): resumed at once, the queue mode (VOL+ and VOL-: PLAY next, MENU add), the Play queue screen; a card's tracks never read on another card | 0.103 | §128-§129 |
 | Interface languages (gettext PO files, catalogues in the image, the Language setting): English, French, Japanese and Simplified Chinese (partial) | 0.101 | §112 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
@@ -157,6 +159,11 @@ One line per version; the measurements are in `ETUDE.md`.
   library's index format, PC tool and reader, and the creation of its file by the firmware,
   tested but not used yet (§123-§124); the emulator's tests in parallel (§118); a double press
   of BACK documented.
+- 0.103: the music library (§126-§129): the index built on the player (the index before in RAM,
+  reads and writes in runs, BACK held stops it), the views (Library first: Artists, Albums,
+  Years, Genres, All songs), the play queue kept in NEWFWQ.DAT (the queue mode, the Play queue
+  screen, resumed at once), the microSD card (its serial in the queue and the index, the update
+  offered for another card, an unreadable card's tracks kept); read errors logged once.
 
 ## To do
 
