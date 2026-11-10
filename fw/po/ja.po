@@ -882,3 +882,15 @@ msgstr ""
 #: src/qscreen.c
 msgid "Queue emptied"
 msgstr ""
+
+#: src/libbrowse.c
+msgid "SD card not in the library: PLAY to update"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "Update the library"
+msgstr ""
+
+#: src/libbrowse.c
+msgid "SD card not readable (FAT32 or exFAT only)"
+msgstr ""

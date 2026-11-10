@@ -180,6 +180,15 @@ title); in order, or anywhere in it when shuffle is on. After a power off, the p
 the track, and the browser shows the library's list again.
 
 - The tracks of the microSD card show only when the card the library was built with is in.
+  When another card is in (or the library was made without one), the first line says **SD card
+  not in the library: PLAY to update**; a card that cannot be read (FAT16, a damaged one): **SD
+  card not readable**. An update made without the library's card (taken out, or another one
+  that cannot be read) keeps its tracks as they are: when it is back, they show again at once.
+  The library knows one card: an update made with another card that can be read replaces the
+  first card's tracks by the new card's (the first card back, its tracks are read again).
+- The last line, **Update the library**, does what Settings, Library does: the files are
+  counted, and nothing is read or written when none changed (3 s); files changed meanwhile,
+  on the internal memory or on the card (copied with a card reader), are read again.
 - A track on both the internal memory and the card (the same album, disc, number and title) is
   shown once: the internal memory's.
 - Names sort without regard to case and accents, "The" left out of the artists.

@@ -93,6 +93,8 @@ void dir_of_entry(const struct entry *e, struct fat_dir *d);
 #define VOL_LIB   3                             /* of a library list (libbrowse.c) */
 #define F_LIB     0x0001                        /* with F_DIR: a library list (cluster: its
                                                  * kind, size: its param) */
+#define LIBV_UPDATE 99                          /* an F_LIB row that updates the library */
+#define LIBV_INFO   98                          /* an F_LIB row that says something only */
 #define DEPTH_MAX 16
 struct path_level {
     struct fat_dir dir;         /* path[0]: the top level (VOL_TOP), path[1]: a volume's root */

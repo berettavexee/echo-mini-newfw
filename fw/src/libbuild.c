@@ -346,15 +346,19 @@ static void copy(char *d, const char *s, int max)
 
 /* A file unchanged since the index before: its title into sf, its names' ids from the maps (the
  * index before read for those not seen yet). 1, or 0 (changed, not there, or a read failed) */
-/* the card of the index before (VOLS): its tracks kept only from the same card (0.102b13) */
-static uint32_t old_card;
+/* the card of the index before (VOLS): its tracks kept only from the same card (0.102b13);
+ * kept as they are when no card can be read (taken out, or one that does not mount: 0.102b15,
+ * §129): card_now is then old_card, keep_pass set while they are added */
+static uint32_t old_card, card_now;
+static int keeping, keep_pass;
+static uint32_t kept_codec;
 
 static int reuse(const struct fat_dirent *e, uint32_t codec, uint32_t id[4], uint32_t *track,
                  uint32_t *year, uint32_t *disc)
 {
     uint32_t t;
     struct lib_track o;
-    if (!b.old || (e->vol == FAT_VOL_SD && old_card != sdvol.serial) ||
+    if (!b.old || (e->vol == FAT_VOL_SD && old_card != card_now) ||
         lib_find(e->vol, e->cluster, &t) || lib_track(t, &o) || o.vol != e->vol ||
         o.size != e->size || o.mtime != e->mtime || o.codec != codec ||
         lib_str(o.title, sf->f_title, sizeof sf->f_title) < 0)
@@ -441,7 +445,7 @@ static void fp_add(const struct fat_dirent *e, uint32_t codec)
 {
     uint8_t k[18];
     k[0] = e->vol;
-    put32(k + 1, e->vol == FAT_VOL_SD ? sdvol.serial : 0);
+    put32(k + 1, e->vol == FAT_VOL_SD ? card_now : 0);
     put32(k + 5, e->cluster);
     put32(k + 9, e->size);
     put32(k + 13, e->mtime);
@@ -469,6 +473,8 @@ static int scan_cb(const struct fat_dirent *e, void *ctx)
         return 0;
     }
     uint32_t codec = file_codec(e->name);
+    if (!codec && keep_pass)
+        codec = kept_codec;                     /* (a name cut in the index: its codec kept) */
     if (!codec || !e->size)
         return 0;
     if (count_only) {
@@ -486,8 +492,8 @@ static int scan_cb(const struct fat_dirent *e, void *ctx)
     if (reuse(e, codec, id, &track, &year, &disc))
         b.reused++;
     else {
-        if (b.err)
-            return 1;
+        if (b.err || keep_pass)
+            return b.err != 0;                  /* (a kept track: never read on no card) */
         fields(e, codec, &track, &year, &disc);
         b.read++;
         id[0] = name_id(aa);
@@ -537,6 +543,24 @@ static int walk(int count_only)
     for (uint32_t i = 0; i < b.ndirs && !b.err; i++) {
         struct fat_dir d = { dirs[i].cluster, dirs[i].size, dirs[i].vol, dirs[i].contig };
         fat_list(&d, scan_cb, &count_only);
+    }
+    if (keeping && !b.err) {                    /* the card's tracks of the index before, as */
+        static struct fat_dirent fe;            /* they were (its files not read: no card) */
+        struct lib_track o;
+        keep_pass = 1;
+        for (uint32_t t = 0; t < lib_count(LIB_TRACKS) && !b.err; t++) {
+            if (lib_track(t, &o) || o.vol != 1 || lib_str(o.file, fe.name, sizeof fe.name) < 0)
+                continue;
+            fe.attr = 0;
+            fe.vol = FAT_VOL_SD;
+            fe.contig = (uint8_t)o.contig;
+            fe.cluster = o.cluster;
+            fe.size = o.size;
+            fe.mtime = o.mtime;
+            kept_codec = o.codec;
+            scan_cb(&fe, &count_only);
+        }
+        keep_pass = 0;
     }
     return b.err;
 }
@@ -1068,10 +1092,10 @@ static int write_index(struct lb_result *res)
     for (uint32_t i = 0; i < n; i++)
         cnt[ckey[i] >> 31]++;
     for (uint32_t v = 0; v < 2; v++) {
-        if (v && !sdvol.mounted && !cnt[1])
+        if (v && !sdvol.mounted && !keeping && !cnt[1])
             continue;
         uint8_t a[12] = { (uint8_t)v };
-        put32(a + 4, v ? sdvol.serial : 0);
+        put32(a + 4, v ? card_now : 0);
         put32(a + 8, cnt[v]);
         if (put(0, vols + 12 * nvol++, a, 12))
             return LB_EIO;
@@ -1193,6 +1217,8 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
     ph_c[LB_SCAN] = ph_c[LB_SORT] = ph_c[LB_WRITE] = 0;
     rd_old_crc = rd_old;
     rd_half = 0;
+    old_card = 0;
+    keep_pass = 0;
     if (b.old) {                                /* the index before: sectors cached and maps */
         lib_cache(order, OLD_CACHE);            /* in order's SYSRAM, unused until the sort */
         for (uint32_t i = 0; i < MAP_ALBUMS; i++)
@@ -1204,14 +1230,17 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
         if (lib_fence(fence, FENCE))
             log_printf("library: no CLUS fence (searched whole)");
         uint32_t v, s, n;
-        old_card = 0;
         for (uint32_t i = 0; !lib_volume(i, &v, &s, &n); i++)
-            if (v == 1)
+            if (v == 1 && n)
                 old_card = s;
         if (sdvol.mounted && old_card != sdvol.serial)
             log_printf("library: another card (%08x, the index's %08x): its tags read", sdvol.serial,
                        old_card);
     }
+    keeping = b.old && old_card && !sdvol.mounted;     /* no card read: the index's kept */
+    card_now = sdvol.mounted ? sdvol.serial : keeping ? old_card : 0;
+    if (keeping)
+        log_printf("library: the card %08x not readable: its tracks kept as they are", old_card);
     fp_a = fp_b = 0;
     if (!walk(1) && b.old && b.total == old_n && fp_a == old_a && fp_b == old_b &&
         (fp_a || fp_b)) {

@@ -463,9 +463,9 @@ def patch_state(disk, fields):
     keys cannot reach in a short run (a track paused before any of it was heard, say)"""
     with open(disk, "r+b") as f:
         d = f.read()
-        at = d.find(b"NEWFWSTATE 4")
-        while at >= 0 and at % 512:             # the firmware's own copy of the string first
-            at = d.find(b"NEWFWSTATE 4", at + 1)
+        at = d.find(b"NEWFWSTATE 4", VOL_SECTOR * 512)    # in the volume: the firmware's own
+        while at >= 0 and at % 512:             # copies before it (its strings may fall on a
+            at = d.find(b"NEWFWSTATE 4", at + 1)    # sector's start: 0.102b15)
         if at < 0:
             raise RuntimeError("no resume state on the disk")
         s = bytearray(d[at:at + 512])
@@ -531,6 +531,8 @@ def run(name, t, img, elf, tmp):
             capture_output=True, text=True).stdout
     text = read_log(dump) if os.path.exists(dump) else ""
     whole = text + "\n" + out
+    if os.environ.get("EMUTEST_LOG"):           # (the run kept, to look into a failure)
+        open(os.environ["EMUTEST_LOG"], "w").write(whole)
     fails, pos = [], 0
     for pat in t.get("expect", []):
         m = re.compile(pat, re.M).search(whole, pos)
@@ -993,6 +995,94 @@ def queue_card(img, elf, tmp):
 
 
 TESTS["queue-card"] = dict(custom=queue_card)
+
+
+def lib_card(img, elf, tmp):
+    """The card not in the index (§129): an index made by mklib.py without the card; the
+    library's top has "SD card not in the library" first; PLAY on it updates the library (the
+    card's files read), the views then hold the card's tracks; the update compared with
+    mklib.py's answers for disk and card"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dat = os.path.join(tmp, "NEWFWLIB.DAT")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "-o", dat],
+                   check=True, capture_output=True)
+    mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
+    dump = os.path.join(tmp, "after.img")
+    k = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"), (4000, "PLAY"))
+    shots = os.environ.get("EMUTEST_SHOTS")
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "16000", "--steps", "30000000000", "--dump-disk", dump,
+                          "--keys", k] + (["--shots", shots] if shots else []),
+                         capture_output=True, text=True).stdout
+    text = read_log(dump)
+    if os.environ.get("EMUTEST_LOG"):
+        open(os.environ["EMUTEST_LOG"], "w").write(text + "\n" + out)
+    fails = []
+    pos = 0
+    for pat in (r"library: views of \d+ tracks, the card's none",
+                r"library: NEWFWLIB\.DAT found",
+                r"library: \d+ tracks \(\d+ read, \d+ from the index before\)",
+                r"library: views of \d+ tracks, the card's in"):
+        m = re.compile(pat).search(text, pos)
+        if not m:
+            fails.append(f"missing: {pat}")
+        else:
+            pos = m.end()
+    return fails + lib_compare(dump, disk, card, tmp, "card"), text + "\n" + out
+
+
+TESTS["lib-card"] = dict(custom=lib_card)
+
+
+def lib_keep(img, elf, tmp):
+    """No card readable at an update (§129): the index made with the card (by mklib.py: no
+    fingerprint); boots without the card, "Update the library" (the last line of the library's
+    top): the card's tracks kept as they are (first a build from the index before, then with
+    the same files "no change"); then a file of the internal memory deleted: an update, the
+    card's tracks still in it (the index compared with mklib.py's for the disk and the card);
+    the card in again: "no change" (nothing read)"""
+    IMG_FOR_DISK[0] = img
+    disk, card, _ = lib_disks(tmp)
+    dat = os.path.join(tmp, "NEWFWLIB.DAT")
+    subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "--sd", card, "-o",
+                    dat], check=True, capture_output=True)
+    mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
+    first = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"),
+                 *[(3300 + 300 * i, "VOL-") for i in range(5)], (5200, "PLAY"))
+    again = keys(*[(2000 + 300 * i, "VOL-") for i in range(5)], (4000, "PLAY"))  # (resumed
+    dump = os.path.join(tmp, "after.img")                                       # on Artists)
+    fails, whole = [], ""
+    for step in ("build", "same", "changed", "back"):
+        if step != "build":
+            shutil.move(dump, disk)
+        if step == "changed":
+            mtools(disk, "mdel", "::tags/flac-ascii.flac")
+        out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--ms",
+                              "8000", "--steps", "30000000000", "--dump-disk", dump, "--keys",
+                              first if step == "build" else again] +
+                             (["--sd", card] if step == "back" else []),
+                             capture_output=True, text=True).stdout
+        text = read_log(dump)
+        boot = text[text.rfind("=== boot"):]
+        whole += boot + "\n" + out
+        if step == "back":                      # the card in again: its tracks as they were
+            if "library: no change" not in boot:
+                fails.append("back: the card in again, not \"no change\"")
+            continue
+        if "not readable: its tracks kept as they are" not in boot:
+            fails.append(f"{step}: the card's tracks not kept")
+        built = re.search(r"library: (\d+) tracks \(0 read, \d+ from the index before\)", boot)
+        if step == "same" and "library: no change" not in boot:
+            fails.append("same: not \"no change\"")
+        if step != "same" and (not built or "no change" in boot):
+            fails.append(f"{step}: not built from the index before")
+    if os.environ.get("EMUTEST_LOG"):
+        open(os.environ["EMUTEST_LOG"], "w").write(whole)
+    return fails + lib_compare(dump, disk, card, tmp, "kept"), whole
+
+
+TESTS["lib-keep"] = dict(custom=lib_keep)
 
 TESTS.update({
     # built from the tags, compared with mklib.py's answers (content: STRS's order differs)

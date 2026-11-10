@@ -16,7 +16,7 @@
 #elif defined(ECHO_HWTEST)
 #define FW_VERSION "0.102hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.102b13"          /* test build: the card (§129) */
+#define FW_VERSION "0.102b15"          /* test build: the card (§129) */
 #endif
 #define FW_DATE    "2026-11-07"
 

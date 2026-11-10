@@ -753,7 +753,8 @@ static void queue_row(int sel, int next)
 {
     static struct q_src s __attribute__((section(".screenram")));  /* (not the BSS) */
     const struct entry *e = ent(sel);
-    if (e->flags & F_VOLROOT)
+    if ((e->flags & F_VOLROOT) || ((e->flags & F_DIR) && lib_shown &&
+                                   (e->cluster == LIBV_UPDATE || e->cluster == LIBV_INFO)))
         return;
     if (e->flags & F_DIR) {
         if (lib_shown) {
@@ -823,6 +824,19 @@ int browser_key(const struct key_ev *e)
     else if (k == KEY_PLAY && dir_n && lib_shown) {   /* a library list (ETUDE §127) */
         int sel = path[depth].sel;
         const struct entry *le = ent(sel);
+        if (le->cluster == LIBV_INFO && (le->flags & F_DIR))
+            return UI_FULL;
+        if (le->cluster == LIBV_UPDATE && (le->flags & F_DIR)) {
+            if (ev == EV_PRESS) {               /* the library updated (its own screen), then */
+                resume_save_later();            /* shown again from its top (§129) */
+                lib_update();
+                depth = 1;
+                path[1].sel = path[1].top = 0;
+                dir_load(&path[1].dir);
+                b_dirty = 1;
+            }
+            return UI_FULL;
+        }
         if ((le->flags & F_DIR) && ev == EV_PRESS)
             enter(sel);
         else if ((le->flags & F_DIR) && ev == EV_LONG) {

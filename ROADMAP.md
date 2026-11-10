@@ -263,7 +263,10 @@ One line per version; the measurements are in `ETUDE.md`.
     list, PLAY held on an album the album (done, §127); 5. the play queue kept in NEWFWQ.DAT
     (resumed from it), PLAY held on every library line, the queue mode (VOL+ and VOL-: PLAY puts
     next, MENU adds), the queue's screen (main menu), the card's tracks passed over when it is
-    out (done, §128; folders played with PLAY held could use the file too); 6. the card. Favourites would build on it;
+    out (done, §128; folders played with PLAY held could use the file too); 6. the card: a
+    track never read on another card (the queue keeps the card's serial; the index's tracks
+    kept only from the same card), the library's top says when the card in is not in it and
+    offers the update, a last line updates it (done, §129; one card at a time). Favourites would build on it;
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;
   - folder jumping: at the end of a folder, go on with the next one;

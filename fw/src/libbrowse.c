@@ -142,6 +142,26 @@ static const struct {
                  { LV_SONGS, N_("All songs") } };
 #define TOP_ROWS (int)(sizeof top_rows / sizeof top_rows[0])
 
+/* The library's top (ETUDE §129): first, when the card in is not the index's (another card, or
+ * an index made without it), "SD card not in the library: PLAY to update"; last, "Update the
+ * library" (the same as Settings, Library: the files counted, nothing written when none
+ * changed: a card changed on a computer is seen there). Both lines: LIBV_UPDATE rows */
+static int top_notice, no_index;               /* (no index: only "Update the library") */
+static int notice_kind;                         /* 1: another card, 2: a card not readable */
+
+static int card_not_indexed(void)
+{
+    uint32_t v, s, n, serial = 0;
+    for (uint32_t i = 0; !lib_volume(i, &v, &s, &n); i++)
+        if (v == 1)
+            serial = s;                         /* (written even with no track on the card) */
+    if (!sd_present())
+        return 0;
+    if (sd_card_bad() || sd_open())
+        return 2;                               /* a card in, not readable */
+    return sdvol.serial != serial;
+}
+
 int libv_load(int kind, uint32_t param)
 {
     cur_kind = kind;
@@ -149,10 +169,17 @@ int libv_load(int kind, uint32_t param)
     for (int k = 0; k < SLOTS; k++)
         slot[k].i = -1;
     cur_discs = 0;
-    if (ready())
-        return 0;
-    if (kind == 0)
-        return TOP_ROWS;
+    no_index = 0;
+    if (ready()) {
+        no_index = kind == 0;                   /* the top: the line that builds it */
+        top_notice = 0;
+        return no_index;
+    }
+    if (kind == 0) {
+        notice_kind = card_not_indexed();
+        top_notice = notice_kind != 0;
+        return top_notice + TOP_ROWS + 1;
+    }
     if (kind == LV_TRACKS) {
         struct lib_album a;
         struct lib_track x, y;
@@ -228,7 +255,15 @@ static void row(int i, struct entry *e, char *b, int max)
     e->name = 0;
     e->flags = F_DIR | F_LIB;
     if (cur_kind == 0) {
-        if (i < TOP_ROWS) {
+        i -= top_notice;
+        if (!no_index && i < 0 && notice_kind == 2) {
+            copy_name(b, T("SD card not readable (FAT32 or exFAT only)"), max);
+            e->cluster = LIBV_INFO;             /* (nothing to do there) */
+        } else if (no_index || i < 0 || i == TOP_ROWS) {
+            copy_name(b, i < 0 ? T("SD card not in the library: PLAY to update") :
+                      T("Update the library"), max);
+            e->cluster = LIBV_UPDATE;
+        } else if (i < TOP_ROWS) {
             char *p = log_format(b, b + max - 1, "%s (%u)", tr(top_rows[i].name),
                                  lv_count(top_rows[i].kind, 0));
             *p = 0;
