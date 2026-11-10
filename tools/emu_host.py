@@ -500,7 +500,7 @@ class Accel:
 class Hifi:
     def __init__(self, img, m, path, trace):
         d = open(img, "rb").read()
-        sys.path.insert(0, __file__.rsplit("/", 3)[0])            # rknanofw.py, outside the
+        sys.path.insert(0, __file__.rsplit("/", 2)[0] + "/ref")  # rknanofw.py, outside the
         from rknanofw import overlays                             # repository: the stock modules
         c, base, ents = overlays(d)
         cl, ce, cs, dl, de, ds, be, bs = ents[m]
@@ -583,7 +583,7 @@ class Hifi:
             u.reg_write(r, v)
         # the flags too, as the hardware's exception return does: without
         # them, a stop between a compare and its conditional branch took the wrong way (a
-        # rare, layout-dependent error in a decoder, re/newfw/ETUDE.md §29.1)
+        # rare, layout-dependent error in a decoder, ETUDE.md §29.1)
         u.reg_write(UC_ARM_REG_APSR, ctx[16] & 0xf80f0000)
 
     def run(self, budget=50_000_000):

@@ -1,7 +1,7 @@
 """Core B for tools/emu_fw.py: a second Unicorn running the HiFi module that our firmware loaded,
 sharing HIGHRAM0, HIGHRAM1 and the mailbox with core A.
 
-Built on the HiFi model of re/newfw/tools/emu_host.py (its exception delivery, WFI handling and
+Built on the HiFi model of tools/emu_host.py (its exception delivery, WFI handling and
 HIFIACC/DMAC2 model); here the module comes from the memory core A wrote, and the mailbox is a
 register file both cores see:
   A2B  +0x00 int enable, +0x04 status (write 1 to clear), +0x08 + 8*ch cmd, +0x0c + 8*ch data

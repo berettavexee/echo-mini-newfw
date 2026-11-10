@@ -1,6 +1,6 @@
 /* RKNanoD peripheral addresses and register offsets used by the firmware.
  * Names follow the RKNanoD TRM; values were checked against the stock firmware and RECHO
- * (re/newfw/ETUDE.md). Registers of the CRU and the GRF take a write mask in bits 31:16. */
+ * (ETUDE.md). Registers of the CRU and the GRF take a write mask in bits 31:16. */
 #ifndef REGS_H
 #define REGS_H
 

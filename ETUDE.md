@@ -1,7 +1,8 @@
 # Nouveau firmware ECHO MINI : étude de faisabilité (étape 1)
 
-Document de travail local, en français, comme `re/REPORT.md`. Rien de ce dossier n'est publié. Le
-SDK Rockchip (`re/sdk_ref/`) et le TRM (`re/doc_rknanod/`) ont servi de référence de lecture : on n'en
+Document de travail en français, publié avec le dépôt (l'étude du firmware d'origine, `ref/REPORT.md`,
+reste locale). Le
+SDK Rockchip (`ref/sdk_ref/`) et le TRM (`ref/doc_rknanod/`) ont servi de référence de lecture : on n'en
 recopie rien, on ne cite que des noms et des adresses observés dans le firmware.
 
 ## 0. Objectif et architecture visée
@@ -1064,7 +1065,7 @@ en deux copies, RECHO par exemple).
 | 0.7→0.8 | entrée en mode USB par VOL− 3 s : le chargeur répond mal (PLL et attentes mémoire laissées à 200 MHz) | 0.8 : retour au quartz (valeurs de RECHO `0x030516c4`) avant tout redémarrage |
 | 0.8 | installée par RECHO ; **installateur validé sur l'appareil** : `RECHO010.IMG` (5 Mio) vérifiée (FAT32, CRC), écrite dans FW2 puis FW1 avec relecture, redémarrage sous RECHO | — |
 
-Écriture : par le mode USB du chargeur avec `re/newfw/flash/flash.sh` (local, non publié). Le Rockusb du chargeur se bloque après une erreur de transfert tant que son point d'accès IN n'est pas vidé ; `rkdiag.py` (lecture seule) le débloque avant chaque étape.
+Écriture : par le mode USB du chargeur avec `flash/flash.sh` (local, non publié). Le Rockusb du chargeur se bloque après une erreur de transfert tant que son point d'accès IN n'est pas vidé ; `rkdiag.py` (lecture seule) le débloque avant chaque étape.
 
 ## 12. Étape 4 : USB en stockage de masse, image 0.9 (2026-10-18)
 - `usb.c` : DWC2 en mode esclave, interrogé (sans interruptions), FIFO d'émission partagée ;
@@ -1738,7 +1739,7 @@ de 32 Kio, sortie du cœur B portée à 96 Kio.
 - **Émulation** : WAV identique au bit près (132 300 trames), MP3 à 2 LSB de ffmpeg ; anneau du
   DAC plein 279 ms après le démarrage (sortie du cœur B : 94 Ko d'avance), 0 manque.
 - **Outils** : le scratchpad de la session a été vidé ; environnement Python, disques et
-  médias de test dans `re/newfw/work/` (local, jamais publié). `fw/tools/mkdisk.py` refait un
+  médias de test dans `work/` (local, jamais publié). `fw/tools/mkdisk.py` refait un
   disque de test, `fw/tools/pcmcmp.py` compare deux PCM.
 - **FLAC 24 bits / 96 kHz, blocs de 8 192** (émulation 0.30) : 288 000 trames **identiques au bit
   près** à ffmpeg (trames de 32 bits), tas de dr_flac 70 Ko (sous la limite de 112 Ko), anneau du
@@ -2007,14 +2008,14 @@ celle d'origine). Repris de RECHO : seulement l'ergonomie décrite sur sa page (
 - **OPEN Vorbis** : de 41 à 55 ms et de 95 à 155 Ko lus, contre 17 ms pour l'Opus. `pg_packet` copiait les 16 premiers Ko de l'en-tête de commentaires, puis sautait le reste par pas de 255 octets. Ces sauts restaient presque toujours dans ce que le cœur A avait déjà lu (32 Ko d'avance par `feed`), si bien que la pochette était lue en entier.
 
 **0.41** :
-- `hifi/oggpage.c` : `pg_packet(buf, max)` ne lit que les `max` premiers octets. Le reste est sauté par un seul `in_seek` par page, ce qui fait sauter le cœur A au-delà de son anneau. Même méthode que pour le firmware d'origine (`re/REPORT.md` §38).
+- `hifi/oggpage.c` : `pg_packet(buf, max)` ne lit que les `max` premiers octets. Le reste est sauté par un seul `in_seek` par page, ce qui fait sauter le cœur A au-delà de son anneau. Même méthode que pour le firmware d'origine (`ref/REPORT.md` §38).
 - En-tête de commentaires : seuls 7 octets sont lus (Vorbis) ou 8 (Opus, le magic `OpusTags` est vérifié dans tous les cas).
 - `ogg_end_granule` (cœur A) n'est pas modifié : il part déjà d'une fenêtre de 8 Ko, parcourue en remontant.
 - Indicateur de batterie : « CHG » pendant la charge et « USB » une fois chargée (`charging()`, `board.c`).
 - Vérification en émulation (Vorbis 173 Ko de pochette, puis Opus 205 Ko, tronqués à environ 245 Ko) : PCM identique octet pour octet à l'ancien lecteur Ogg (277 000 trames), mais **lecture identique elle aussi** : 237 893 octets lus, ouverture inchangée. ffmpeg découpe l'en-tête de commentaires en pages de 4 123 octets, alors que le cœur A lit 8 Ko par lecture et jusqu'à 32 Ko d'avance. Un saut d'une page reste donc dans ce qui est déjà lu. Le gain n'existe que pour des pages plus grandes que cette avance.
-- Sur ce firmware, il resterait donc à aller plus loin : soit faire parcourir les en-têtes de page par le cœur A avant le démarrage du cœur B (peu de gain : une petite lecture par page de 4 Ko au lieu de lectures contiguës), soit garder les codebooks décodés d'une piste à l'autre quand l'en-tête de configuration est identique, ce qui est le cas sur tout un album. Les codebooks coûtent environ 2 M d'instructions (QEMU, `re/REPORT.md` §38), soit sans doute la plus grande part des 41 à 55 ms mesurées.
+- Sur ce firmware, il resterait donc à aller plus loin : soit faire parcourir les en-têtes de page par le cœur A avant le démarrage du cœur B (peu de gain : une petite lecture par page de 4 Ko au lieu de lectures contiguës), soit garder les codebooks décodés d'une piste à l'autre quand l'en-tête de configuration est identique, ce qui est le cas sur tout un album. Les codebooks coûtent environ 2 M d'instructions (QEMU, `ref/REPORT.md` §38), soit sans doute la plus grande part des 41 à 55 ms mesurées.
 
-**Journal de la 0.41 sur l'appareil** (`work/logs/20261022_2211/`, 35 min). Installée par le firmware d'origine sous le nom `HIFIEC74.IMG`, puisqu'il ne cherche que `ECHOMINI.IMG` et `HIFIEC00`–`97.IMG` (`re/REPORT.md` §5). Enchaînement des 11 fichiers CH\* sans décrochage, FLAC 24 bits / 96 kHz compris.
+**Journal de la 0.41 sur l'appareil** (`work/logs/20261022_2211/`, 35 min). Installée par le firmware d'origine sous le nom `HIFIEC74.IMG`, puisqu'il ne cherche que `ECHOMINI.IMG` et `HIFIEC00`–`97.IMG` (`ref/REPORT.md` §5). Enchaînement des 11 fichiers CH\* sans décrochage, FLAC 24 bits / 96 kHz compris.
 
 | Fichier | OPEN (cœur B) | Lu | Tags (cœur A) |
 |---|---|---|---|
@@ -3702,7 +3703,7 @@ Plus aucune fréquence de la table ne repose sur un VCO hors de la plage éprouv
 
 ## 91. Les CS43131 comparés au datasheet (2026-11-01)
 
-Datasheet public de Cirrus Logic (DS1155F2) gardé en référence locale (`re/doc_cs43131/`, hors du dépôt, comme le TRM). Page de documentation : `docs/CS43131.md` (câblage, séquence, comparaison des firmwares).
+Datasheet public de Cirrus Logic (DS1155F2) gardé en référence locale (`ref/doc_cs43131/`, hors du dépôt, comme le TRM). Page de documentation : `docs/CS43131.md` (câblage, séquence, comparaison des firmwares).
 
 **Constat** : l'origine, RECHO, EchoPod, ReChord et nous appliquons la même séquence, qui est presque mot pour mot l'exemple « I2S en mode mono » du datasheet (§5.13.4) ; le « bloc non documenté » `0x18xxxx` est la séquence d'activation du mode mono (§5.12.1). Écarts relevés :
 - `HP_OUT_CTL_1` : `10` (1 V pleine échelle) chez nous, RECHO et ReChord ; `31` (2 V) à l'origine ; EchoPod propose les deux. **Décision : on reste à 1 V.**

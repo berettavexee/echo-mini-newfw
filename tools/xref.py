@@ -7,7 +7,7 @@
 """
 import re, struct, sys
 import capstone
-sys.path.insert(0, __file__.rsplit("/", 3)[0])
+sys.path.insert(0, __file__.rsplit("/", 2)[0] + "/ref")
 from rknanofw import overlays                                       # noqa: E402
 
 d = open(sys.argv[1], "rb").read()

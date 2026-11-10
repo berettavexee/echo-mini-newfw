@@ -5,7 +5,7 @@
             [--trace-lcd] [--elf build/fw.elf] [--disk DISK.IMG] [--keys MS:KEY,...]
             [--shots MS:OUT.png,...] [--expect-fw FILE]
 
-The loader is reproduced from re/newfw/ETUDE.md 2.2: header check against its copy at fw_end,
+The loader is reproduced from ETUDE.md 2.2: header check against its copy at fw_end,
 overlay table at [0x6c], code and data of entries 0-2 copied, BSS cleared, then SP, PC from the
 vector table at the start of the data of entry 0, r0 = table, r1 = SP, r2 = reset.
 Models: CRU (PLL locked), SARADC (value per channel), GPIO inputs (Power key, panel variant

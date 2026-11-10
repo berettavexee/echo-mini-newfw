@@ -3,7 +3,7 @@
 
   mkimg.py build/fw.elf OUT.IMG [--date YYYY-MM-DD] [--pack codecs.bin]
 
-Layout (format in re/REPORT.md section 2, loader in re/newfw/ETUDE.md section 2.2):
+Layout (format in the study's REPORT.md section 2, loader in ETUDE.md section 2.2):
   0x000      header (512 bytes): BCD date, "RKnanoFW" at 0x1f8, fw_end at 0x1f4, code part at 0x6c
   0x200      code part: overlay table {base, n, n x 8 words}, then at +0x200 the code
   fw_end     copy of the header (the loader compares it with the header)
