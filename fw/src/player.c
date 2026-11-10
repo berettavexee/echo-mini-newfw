@@ -59,6 +59,18 @@ static void feed_start(void)
     c->seg_wr = 1;
 }
 
+
+/* A read failing again and again at one place (a card pulled out: until the detect switch is
+ * seen, ETUDE §128): one line, then how many times */
+static uint32_t rerr_pos, rerr_n;
+
+static void read_errors_said(void)
+{
+    if (rerr_n > 1)
+        log_printf("player: read error at %u: %u times", rerr_pos, rerr_n);
+    rerr_n = 0;
+}
+
 static void feed(void)
 {
     volatile struct hp_ctl *c = HP_CTL;
@@ -109,9 +121,15 @@ static void feed(void)
         if (!n)
             break;
         if (fat_pread(file, &cur, feed_pos, (void *)(HP_IN_BASE + o), n) != (int)n) {
-            log_printf("player: read error at %u (+%u)", feed_pos, n);
+            if (!rerr_n || rerr_pos != feed_pos)        /* once a place: a card pulled out */
+                log_printf("player: read error at %u (+%u)", feed_pos, n);  /* fails at each */
+            if (rerr_pos != feed_pos)                   /* round until it is seen gone */
+                rerr_n = 0;
+            rerr_pos = feed_pos;
+            rerr_n++;
             break;
         }
+        read_errors_said();
         wr += n;
         feed_pos += n;
         c->in_wr = wr;
@@ -1038,6 +1056,7 @@ static void perf_report(const char *name)
 void player_close(int stopped)
 {
     volatile struct hp_ctl *c = HP_CTL;
+    read_errors_said();
     if (!ps.open)
         return;
     ps.open = 0;

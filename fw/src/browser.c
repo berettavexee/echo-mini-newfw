@@ -614,6 +614,11 @@ static int sd_open_do(void)
     return 0;
 }
 
+int sd_card_bad(void)
+{
+    return sd_bad;
+}
+
 int sd_open(void)
 {
     const char *pp = perf_begin("card mount");

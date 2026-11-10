@@ -1,6 +1,7 @@
 /* The play queue on the internal memory (ETUDE §128): NEWFWQ.DAT, created by the firmware at the
  * root (one run of clusters, fatwrite.c), a header then two halves of QF_MAX entries of 64 bytes:
- * a track's cluster, size, flags (codec, F_SD, F_CONTIG) and its name. A new queue is written
+ * a track's cluster, size, flags (codec, F_SD, F_CONTIG), its card's serial (version 2, 0.102b13:
+ * a track of another card is never read at its cluster on the card in) and its name. A new queue is written
  * into the half not in use, then the header names it (a power cut leaves the queue before);
  * tracks added at the end are written after the last one, then the header counts them. The
  * entries are read one sector at a time (8 a sector), never the whole queue: it needs no RAM. */
@@ -19,8 +20,10 @@
 struct qf_ent {
     uint32_t cluster, size;
     uint16_t flags, pad;
-    char name[QF_ENT - 12];
+    uint32_t serial;                            /* the card's (F_SD), else 0 */
+    char name[QF_ENT - 16];
 };
+#define QF_VERSION 2
 _Static_assert(sizeof(struct qf_ent) == QF_ENT, "a queue entry is 64 bytes");
 
 /* the sectors: one read, one written (PMU-SRAM after the queue's folders: not the BSS) */
@@ -45,7 +48,7 @@ static int header_read(void)
         return -1;
     qf.rsec = ~0u;
     const uint32_t *w = (const uint32_t *)rbuf;
-    if (__builtin_memcmp(rbuf, "NEWFWQUE", 8) || w[2] != 1 ||
+    if (__builtin_memcmp(rbuf, "NEWFWQUE", 8) || w[2] != QF_VERSION ||
         ~lib_crc(0xffffffffu, rbuf, 508) != w[127] || (w[3] > 1 && w[3] != 0xffffffffu) ||
         w[4] > QF_MAX) {
         qf.active = 0xffffffffu;                /* none (or damaged: a queue no more) */
@@ -64,7 +67,7 @@ static int header_write(uint32_t active, uint32_t count, uint32_t gen)
     for (int i = 0; i < 128; i++)
         w[i] = 0;
     __builtin_memcpy(wbuf, "NEWFWQUE", 8);
-    w[2] = 1;
+    w[2] = QF_VERSION;
     w[3] = active;
     w[4] = count;
     w[5] = gen;
@@ -95,7 +98,7 @@ int qf_open(void)
         for (int i = 0; i < 128; i++)
             w[i] = 0;
         __builtin_memcpy(wbuf, "NEWFWQUE", 8);
-        w[2] = 1;
+        w[2] = QF_VERSION;
         w[3] = 0xffffffffu;
         w[127] = ~lib_crc(0xffffffffu, wbuf, 508);
         r = fat_create_contig(QF_FILE, QF_SIZE, wbuf, &f);
@@ -129,8 +132,8 @@ uint32_t qf_gen(void)
     return qf.state == QF_OPEN ? qf.gen : 0;
 }
 
-/* Entry i of half h: 0, or -1 */
-static int get(uint32_t h, uint32_t i, struct entry *e, char *name, int max)
+/* Entry i of half h: 0, or -1; its card's serial in *serial */
+static int get(uint32_t h, uint32_t i, struct entry *e, char *name, int max, uint32_t *serial)
 {
     uint32_t s = half_sec(h) + i / QF_PER_SEC;
     if (s != qf.rsec) {
@@ -144,6 +147,7 @@ static int get(uint32_t h, uint32_t i, struct entry *e, char *name, int max)
     e->size = q->size;
     e->flags = q->flags;
     e->name = 0;
+    *serial = q->serial;
     if (name) {
         int k = 0;
         for (; k < max - 1 && k < (int)sizeof q->name && q->name[k]; k++)
@@ -153,11 +157,23 @@ static int get(uint32_t h, uint32_t i, struct entry *e, char *name, int max)
     return 0;
 }
 
+/* The card in: its serial, or 0 (none, or not readable) */
+static uint32_t card_serial(void)
+{
+    if (!sd_present() || (!sdvol.mounted && (sd_card_bad() || sd_open())))
+        return 0;                               /* (a card that failed: not tried again here) */
+    return sdvol.mounted ? sdvol.serial : 0;
+}
+
 int qf_get(uint32_t i, struct entry *e, char *name, int max)
 {
-    if (qf.state != QF_OPEN || qf.active > 1 || i >= qf.count)
+    uint32_t serial;
+    if (qf.state != QF_OPEN || qf.active > 1 || i >= qf.count ||
+        get(qf.active, i, e, name, max, &serial))
         return -1;
-    return get(qf.active, i, e, name, max);
+    if ((e->flags & F_SD) && (!serial || serial != card_serial()))
+        e->flags |= F_OTHER;                    /* another card, or none: passed over */
+    return 0;
 }
 
 /* ---- writing: a new queue in the other half (qf_begin), or more at the end (qf_append) ---- */
@@ -204,7 +220,7 @@ int qf_append(void)
     return load_wsec(half_sec(qf.whalf) + qf.wn / QF_PER_SEC, qf.wn % QF_PER_SEC != 0);
 }
 
-int qf_put(const struct entry *e, const char *name)
+static int put_s(const struct entry *e, const char *name, uint32_t serial)
 {
     if (!qf.writing || qf.wn >= QF_MAX)
         return -1;
@@ -214,8 +230,9 @@ int qf_put(const struct entry *e, const char *name)
     struct qf_ent *q = (struct qf_ent *)(wbuf + QF_ENT * (qf.wn % QF_PER_SEC));
     q->cluster = e->cluster;
     q->size = e->size;
-    q->flags = e->flags;
+    q->flags = e->flags & (uint16_t)~F_OTHER;
     q->pad = 0;
+    q->serial = serial;
     int k = 0;
     for (; name && name[k] && k < (int)sizeof q->name - 1; k++)
         q->name[k] = name[k];
@@ -223,6 +240,12 @@ int qf_put(const struct entry *e, const char *name)
         q->name[k] = 0;
     qf.wn++;
     return 0;
+}
+
+/* A track the queue gets now: on the card in (F_SD), its serial with it */
+int qf_put(const struct entry *e, const char *name)
+{
+    return put_s(e, name, e->flags & F_SD ? card_serial() : 0);
 }
 
 uint32_t qf_written(void)
@@ -254,12 +277,14 @@ int qf_insert(uint32_t at, uint32_t n, int (*put)(uint32_t k, void *ctx), void *
         return -1;
     struct entry e;
     char name[QF_ENT];
+    uint32_t serial;
     for (uint32_t i = 0; i < count + n; i++) {
         int r;
         if (i >= at && i < at + n)
             r = put(i - at, ctx);
-        else {
-            r = get(from, i < at ? i : i - n, &e, name, sizeof name) ? -1 : qf_put(&e, name);
+        else {                                  /* (a track kept: its card's serial kept) */
+            r = get(from, i < at ? i : i - n, &e, name, sizeof name, &serial) ? -1 :
+                put_s(&e, name, serial);
             if (i % 64 == 0)
                 ui_background();                /* (a long queue: the music goes on) */
         }

@@ -57,7 +57,9 @@ void scr_push(const struct screen *s);
 #define F_SD      0x4000                        /* on the card (else the internal volume) */
 #define F_CONTIG  0x2000                        /* exFAT "no FAT chain" */
 #define F_VOLROOT 0x1000                        /* the top level: a volume */
-#define F_CODEC   0x0fff
+#define F_OTHER   0x0800                        /* a file queue's track of another card, or of a
+                                                 * card not in (qfile.c): passed over (§128) */
+#define F_CODEC   0x07ff
 #define NAME_KEEP 72                            /* bytes of a name kept (the screen shows ~40) */
 struct entry {
     uint32_t cluster, size;
@@ -102,6 +104,7 @@ extern int depth;                               /* path[depth] is the folder sho
 void copy_name(char *d, const char *s, int max);
 void path_root(int v);                          /* path[1]: the root of a volume */
 int sd_open(void);                              /* the card set up and mounted, 0: ready */
+int sd_card_bad(void);                          /* the card in failed to mount (until changed) */
 void sd_forget(void);                           /* set up again at the next access */
 int sd_watch(void);                             /* the detect switch: 1 redraw, 2 playback stopped */
 

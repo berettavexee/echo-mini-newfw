@@ -940,6 +940,60 @@ def queue_file(img, elf, tmp):
 
 TESTS["queue-file"] = dict(custom=queue_file)
 
+
+def queue_card(img, elf, tmp):
+    """A file queue of the card's tracks (§129): a folder of the card played, made the file's by
+    an add in the queue mode; then a boot with the same card (it resumes) and one with another
+    card holding the same files at the same clusters (another serial): its tracks passed over,
+    never read at their clusters"""
+    IMG_FOR_DISK[0] = img
+    disk, card, src = lib_disks(tmp)
+    card2 = os.path.join(tmp, "card2.img")
+    with open(card2, "wb") as f:
+        f.truncate(64 << 20)
+    subprocess.run(["/usr/sbin/mkfs.exfat", card2], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run([sys.executable, os.path.join(TOOLS, "exfat_add.py"), card2,
+                    os.path.join(tmp, "spec.json")], check=True, stdout=subprocess.DEVNULL)
+    from fatimg import Volume
+    fails = [] if Volume(card, 0).serial != Volume(card2, 0).serial else ["the same serial"]
+    dump = os.path.join(tmp, "after.img")
+    k = keys((2000, "BACK"), (2400, "VOL-"), (2800, "PLAY"), (3400, "PLAY"), (4000, "PLAY"),
+             (5000, "MENU")) + ",5600:VOL+,5800:VOL-,6100:NONE," + \
+        keys((6600, "VOL-"), (7000, "MENU"), (7600, "BACK"))
+    out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
+                          "--ms", "9000", "--steps", "30000000000", "--dump-disk", dump,
+                          "--keys", k], capture_output=True, text=True).stdout
+    shutil.move(dump, disk)
+    first = os.path.join(tmp, "first.img")
+    shutil.copy(disk, first)
+    text1 = read_log(disk)
+    for c, tag in ((card, "same card"), (card2, "another card")):
+        shutil.copy(first, disk)
+        out += f"\n-- reboot, {tag}\n" + subprocess.run(
+            [sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", c, "--boot-disk",
+             "--ms", "8000", "--steps", "30000000000", "--dump-disk", dump],
+            capture_output=True, text=True).stdout
+        text = read_log(dump)
+        boot = text[text.rfind("=== boot"):]
+        played = re.search(r"ui: queue \d+/\d+: .* \(0\)", boot)
+        if "NEWFWQ.DAT's queue" not in boot:
+            fails.append(f"{tag}: not resumed from the file")
+        elif tag == "same card" and not played:
+            fails.append("same card: nothing played")
+        elif tag == "another card" and (played or "its card is not in, passed over" not in boot):
+            fails.append(f"another card: {played.group(0) if played else 'no track passed over'}")
+        text1 += "\n" + boot
+    for pat in (r"queue: \d+ tracks of the queue written into NEWFWQ\.DAT",
+                r"queue: 1 tracks added"):
+        if not re.search(pat, text1):
+            fails.append(f"missing: {pat}")
+    if os.environ.get("EMUTEST_LOG"):
+        open(os.environ["EMUTEST_LOG"], "w").write(text1 + "\n" + out)
+    return fails, text1 + "\n" + out
+
+
+TESTS["queue-card"] = dict(custom=queue_card)
+
 TESTS.update({
     # built from the tags, compared with mklib.py's answers (content: STRS's order differs)
     "libb-build": dict(custom=lib_build_test("build"), libcreate=True),

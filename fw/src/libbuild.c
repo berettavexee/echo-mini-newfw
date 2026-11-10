@@ -346,12 +346,16 @@ static void copy(char *d, const char *s, int max)
 
 /* A file unchanged since the index before: its title into sf, its names' ids from the maps (the
  * index before read for those not seen yet). 1, or 0 (changed, not there, or a read failed) */
+/* the card of the index before (VOLS): its tracks kept only from the same card (0.102b13) */
+static uint32_t old_card;
+
 static int reuse(const struct fat_dirent *e, uint32_t codec, uint32_t id[4], uint32_t *track,
                  uint32_t *year, uint32_t *disc)
 {
     uint32_t t;
     struct lib_track o;
-    if (!b.old || lib_find(e->vol, e->cluster, &t) || lib_track(t, &o) || o.vol != e->vol ||
+    if (!b.old || (e->vol == FAT_VOL_SD && old_card != sdvol.serial) ||
+        lib_find(e->vol, e->cluster, &t) || lib_track(t, &o) || o.vol != e->vol ||
         o.size != e->size || o.mtime != e->mtime || o.codec != codec ||
         lib_str(o.title, sf->f_title, sizeof sf->f_title) < 0)
         return 0;
@@ -1199,6 +1203,14 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
             amemo[i][0] = 0;
         if (lib_fence(fence, FENCE))
             log_printf("library: no CLUS fence (searched whole)");
+        uint32_t v, s, n;
+        old_card = 0;
+        for (uint32_t i = 0; !lib_volume(i, &v, &s, &n); i++)
+            if (v == 1)
+                old_card = s;
+        if (sdvol.mounted && old_card != sdvol.serial)
+            log_printf("library: another card (%08x, the index's %08x): its tags read", sdvol.serial,
+                       old_card);
     }
     fp_a = fp_b = 0;
     if (!walk(1) && b.old && b.total == old_n && fp_a == old_a && fp_b == old_b &&

@@ -206,8 +206,8 @@ title says what was done ("Next: 12 tracks"). With nothing queued, the line play
 playing marked; PLAY plays the one chosen. Its first line, **Empty the queue**, keeps only the
 track playing; **PLAY held** on any line does the same (a long queue: the first line is far up).
 
-Tracks of the microSD card are passed over while the card is out (the queue goes on with the
-others). A queue holds up to 24,576 tracks.
+Tracks of the microSD card are passed over while the card is out, or while another card is in
+(the queue goes on with the others): a track is never looked for on a card it is not on. A queue holds up to 24,576 tracks.
 
 ## The main menu (MENU held)
 
