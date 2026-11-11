@@ -94,10 +94,10 @@ void settings_get(const uint32_t *w)
         cfg.uac_remote = cfg.uac_remote != 0;
         cfg.hide_clock = cfg.hide_clock != 0;
         log_printf("ui: settings %u: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
-                   "off %u, swap %u, remote %u, language %s, clock %s", v3 ? 3 : v2 ? 2 : 1, cfg.screen,
-                   bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags", cfg.rg_pre, cfg.start,
-                   cfg.auto_off, cfg.swap_vol, cfg.uac_remote, cfg.lang[0] ? cfg.lang : "en",
-                   cfg.hide_clock ? "hidden" : "shown");
+                   "off %u, swap %u, remote %u, language %s, clock %s", v3 ? 3 : v2 ? 2 : 1,
+                   cfg.screen, bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags",
+                   cfg.rg_pre, cfg.start, cfg.auto_off, cfg.swap_vol, cfg.uac_remote,
+                   cfg.lang[0] ? cfg.lang : "en", cfg.hide_clock ? "hidden" : "shown");
     }                                           /* (RG mode: resume.c) */
     lang_set_code(cfg.lang);                    /* unknown to this image: English */
     lcd_brightness(bright_pct[cfg.bright - 1]); /* (ReplayGain: when a track is heard) */
@@ -105,8 +105,8 @@ void settings_get(const uint32_t *w)
 
 /* ---- the screen: VOL+/VOL- the line, PLAY the next value, PLAY held the one before,
  * BACK or MENU back (saved). Each change takes effect at once. ---- */
-enum { S_LANG, S_CLOCK, S_SHOW_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START, S_SLEEP, S_AUTO_OFF, S_SWAP,
-       S_LIBRARY, S_DEFAULTS, S_COUNT };
+enum { S_LANG, S_CLOCK, S_SHOW_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START,
+       S_SLEEP, S_AUTO_OFF, S_SWAP, S_LIBRARY, S_DEFAULTS, S_COUNT };
 static const char *const s_names[S_COUNT] = {
     EN("Language"),                             /* in English: found again in any language */
     N_("Date and time"),
@@ -201,7 +201,8 @@ static void value_text(int i, char *b)
             p = log_format(p, end, T("%u min left"), sleep_left());
         break;
     case S_AUTO_OFF:
-        p = auto_off_min[cfg.auto_off] ? log_format(p, end, T("%u min"), auto_off_min[cfg.auto_off]) :
+        p = auto_off_min[cfg.auto_off] ?
+            log_format(p, end, T("%u min"), auto_off_min[cfg.auto_off]) :
             log_format(p, end, "%s", T("never"));
         break;
     case S_SWAP:

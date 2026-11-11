@@ -31,8 +31,9 @@ static char *battery_text(char *p)
 
 static const char *codec_name(uint32_t c)
 {
-    static const char *const n[] = { "", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF", "AAC", "ALAC",
-                                       "MPC" };          /* names: the same in every language */
+    static const char *const n[] = {           /* names: the same in every language */
+        "", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF", "AAC", "ALAC", "MPC",
+    };
     return c < sizeof n / sizeof *n ? n[c] : "";
 }
 
@@ -64,7 +65,8 @@ static void marquee_set(struct marquee *m, int y, const char *s, uint16_t fg, in
 void marquee_tick(void)
 {
     uint32_t now = ticks();
-    int paused = !q_playing || audio_paused;    /* paused, parked or stopped: the text stands still */
+    /* paused, parked or stopped: the text stands still */
+    int paused = !q_playing || audio_paused;
     for (int i = 0; i < 3; i++) {
         struct marquee *m = &mq[i];
         if (paused) {

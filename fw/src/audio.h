@@ -16,14 +16,16 @@ struct audio_state {
     uint8_t vol;                /* PCM_VOL value: attenuation = vol / 2 dB, 0xff = mute */
     uint32_t i2c_errors;
     uint32_t rate;              /* sample rate in use */
-    int bits16;                 /* ring holds packed 16-bit frames (4 bytes) instead of 32-bit (8) */
+    /* ring holds packed 16-bit frames (4 bytes) instead of 32-bit (8) */
+    int bits16;
     uint32_t frame_bytes;
     uint32_t ring, ring_size;   /* ring in use */
     /* stream (byte counters, modulo 2^32): rd from the DMA position, wr by the producer */
     uint32_t rd, wr, last_pos;
     uint32_t ring_ur, i2s_ur;   /* underrun episodes: producer behind the DMA; I2S FIFO empty */
     uint32_t ring_lost;         /* bytes the DMA played again because the producer was late */
-    uint32_t ur_all, i2s_all, lost_all; /* the same since boot, never reset: per track by difference */
+    /* the same since boot, never reset: per track by difference */
+    uint32_t ur_all, i2s_all, lost_all;
     int in_ur;
     int32_t min_fill;           /* lowest fill seen since the counters were reset, bytes */
     uint32_t t_upd;             /* ticks() of the last audio_update: laps the DMA position hides */

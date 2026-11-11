@@ -13,6 +13,5 @@ enum { FATW_EXISTS = 1, FATW_EIO = -1, FATW_ENOVOL = -2, FATW_ENOSPACE = -3,
  * a file of that name (left untouched); < 0 nothing created (or, after a write error, at most
  * clusters reserved that nothing uses). Not during a USB session (the host owns the volume). */
 int fat_create_contig(const char *name, uint32_t size, const void *first, struct fat_file *f);
-extern void (*fatw_yield)(void);    /* called while the FAT is searched, when set */
 
 #endif

@@ -56,21 +56,24 @@ int lcd_ready;
 #define BLOCK_WORDS 2048u
 #define DMA_TIMEOUT 50000u                      /* us: a whole frame takes 8 ms */
 
-/* the VOP's modes for the FIFO, in the order tried: four phases (a word, four bytes), with the
- * half-words swapped or not, the bytes swapped or not (TRM 15.6.2: two pixels a word, half-words
- * swapped). 0: no DMA, the CPU writes each byte (bypass) */
+/* the VOP's modes for the FIFO: four phases (a word, four bytes), with the half-words swapped or
+ * not, the bytes swapped or not (TRM 15.6.2: two pixels a word, half-words swapped). 0: no DMA,
+ * the CPU writes each byte (bypass); 1: the one checked on the device (ETUDE §135), the default;
+ * 2 to 4: for the test build's screen test only (ECHO_LCDCAL) */
 static const uint32_t dma_con[5] = { 0, 0x16, 0x06, 0x36, 0x26 };
 
 /* How a transfer is set up (ETUDE §135): VOP_START written or not, the AHB masters of the source
- * and of the destination, the burst length. 0.103d1 wrote VOP_START, the destination on master
- * 2, bursts of 4: on the device the VOP stayed "working" after the second transfer. RECHO
- * (read in its image, ETUDE §135) runs its bands without VOP_START, the source on master 2 and
- * the destination on master 1, bursts of 16: the first variant. */
+ * and of the destination, the burst length. The first, checked on the device: no VOP_START, the
+ * source on master 2, the destination on master 1, bursts of 16 (as RECHO, read in its image).
+ * The others only in the test build, which logs them all (dma_diag); 0.103d1 used the last. */
 struct dma_var {
     uint8_t start, sms, dms, msize;
 };
 static const struct dma_var dma_vars[] = {
-    { 0, 1, 0, 3 }, { 0, 1, 0, 1 }, { 0, 0, 1, 1 }, { 0, 0, 0, 1 }, { 1, 1, 0, 3 }, { 1, 0, 1, 1 },
+    { 0, 1, 0, 3 },
+#ifdef ECHO_LCDCAL
+    { 0, 1, 0, 1 }, { 0, 0, 1, 1 }, { 0, 0, 0, 1 }, { 1, 1, 0, 3 }, { 1, 0, 1, 1 },
+#endif
 };
 #define DMA_VARS    (int)(sizeof dma_vars / sizeof dma_vars[0])
 static int dma_var;
@@ -109,19 +112,20 @@ void lcd_sync(void)
     if (!dma_busy)
         return;
     uint32_t t = ticks();
-    /* done: the channel stopped, and the VOP idle or its frame done */
-    while ((REG(D_CH_EN) & 1u << DCH) || ((REG(VOP_STATUS) & 1) && !(REG(VOP_INT_STATUS) & 8))) {
+    while (REG(D_CH_EN) & 1u << DCH)            /* the channel's last word into the FIFO */
         if (ticks() - dma_t0 > DMA_TIMEOUT) {
-            dma_fail(REG(D_CH_EN) & 1u << DCH ? "DMA still running" : "VOP still working");
+            dma_fail("DMA still running");
             return;
         }
-    }
-    /* The channel stopped when the VOP's FIFO took the last words, not when the panel did:
-     * without VOP_START its "working" bit never rises (0.103d2c, lcddiag), so give the FIFO time
-     * to drain before commands go out in bypass mode (RECHO waits 12 us here, ETUDE §135) */
+    /* The FIFO still drains into the panel: without VOP_START the VOP's "working" bit never
+     * rises (0.103d2c, lcddiag), so a fixed time before commands go out in bypass mode (RECHO
+     * waits 12 us, ETUDE §135); then "working" for the test build's variants with VOP_START */
     udelay(20);
-    while ((REG(VOP_STATUS) & 1) && ticks() - dma_t0 < DMA_TIMEOUT)
-        ;
+    while (REG(VOP_STATUS) & 1)
+        if (ticks() - dma_t0 > DMA_TIMEOUT) {
+            dma_fail("VOP still working");
+            return;
+        }
     uint32_t w = ticks() - t;
     lcd_dma.wait_us += w;
     if (w > lcd_dma.wait_max)
@@ -985,7 +989,7 @@ void lcd_wake_lit(void)
     }
 }
 
-int lcd_waking(void)
+static int lcd_waking(void)       /* a sleep or wake command still waits its delay */
 {
     return lcd_busy || lcd_want != lcd_asleep;
 }

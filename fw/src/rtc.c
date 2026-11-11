@@ -134,8 +134,9 @@ int rtc_set(const struct rtc_tm *in)
 int rtc_from_fat(uint32_t v)
 {
     struct rtc_tm t = {
-        .year = (uint16_t)(1980 + (v >> 25)), .mon = (uint8_t)(v >> 21 & 15), .day = (uint8_t)(v >> 16 & 31),
-        .hour = (uint8_t)(v >> 11 & 31), .min = (uint8_t)(v >> 5 & 63), .sec = (uint8_t)((v & 31) * 2),
+        .year = (uint16_t)(1980 + (v >> 25)), .mon = (uint8_t)(v >> 21 & 15),
+        .day = (uint8_t)(v >> 16 & 31), .hour = (uint8_t)(v >> 11 & 31),
+        .min = (uint8_t)(v >> 5 & 63), .sec = (uint8_t)((v & 31) * 2),
     };
     struct rtc_tm now;
     if (!present || t.year < 2024 || t.year > 2099 || !sane(&t))

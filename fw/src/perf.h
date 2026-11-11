@@ -28,9 +28,10 @@ extern struct perf_gap perf_play, perf_loop;
 const char *perf_begin_at(uint32_t now, const char *what);
 void perf_end_at(uint32_t now, const char *outer);
 void perf_tick_at(struct perf_gap *g, uint32_t now);   /* a service: the gap since the last */
-void perf_reset(struct perf_gap *g);
+void perf_reset(struct perf_gap *g);    /* (tools/perf_test.c only) */
 const char *perf_phase(void);   /* the phase running, or 0 (the fault record) */
-void perf_restart(struct perf_gap *g);  /* a new report: the maximum cleared, the gap running kept */
+/* a new report: the maximum cleared, the gap running kept */
+void perf_restart(struct perf_gap *g);
 
 #ifndef PERF_NO_CLOCK
 #include "board.h"

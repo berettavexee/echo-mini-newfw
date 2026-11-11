@@ -31,6 +31,25 @@ int emmc_write_user(uint32_t sector, uint32_t count, const void *buf);
 int emmc_log_area(uint32_t base, uint32_t count);
 int emmc_write_log(uint32_t sector, uint32_t count, const void *buf);
 
+/* A blob of the firmware image in copy k (0: FW1, 1: FW2): the image's header read into sec (512
+ * bytes), checked ("RKnanoFW"); the blob's {offset, length} taken at byte slot of the header; its
+ * first sector read into sec, its first word checked against magic. 0 and *lba, *len; or -1.
+ * (The font, the languages, the log's formats, the codec pack, the overlays: tools/mkimg.py.) */
+static inline int fw_blob(int k, uint32_t slot, uint32_t magic, uint32_t *sec, uint32_t *lba,
+                          uint32_t *len)
+{
+    const uint8_t *b = (const uint8_t *)sec;
+    uint32_t img = EMMC_FW1 + (k ? emmc.r : 0);
+    if (emmc_read(img, 1, sec) || b[0x1f8] != 'R' || b[0x1ff] != 'W')
+        return -1;
+    uint32_t off = sec[slot / 4], n = sec[slot / 4 + 1];
+    if (!n || off % 512 || emmc_read(img + off / 512, 1, sec) || sec[0] != magic)
+        return -1;
+    *lba = img + off / 512;
+    *len = n;
+    return 0;
+}
+
 /* Reads counted (ETUDE §126: where the library's build spends its time): commands, sectors,
  * microseconds in the reads; the card's in sd.c */
 struct io_count { uint32_t cmds, sectors, us; };

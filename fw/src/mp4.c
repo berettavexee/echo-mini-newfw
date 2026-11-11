@@ -103,7 +103,8 @@ static const uint8_t *entry(struct table *t, uint32_t i)
         if (pos + t->esz > base + n)
             n = pos + t->esz - base;            /* at most 512 + 12: entries are small */
         if (n > sizeof t->buf || fat_pread(file, &t->c, base, t->buf, n) != (int)n) {
-            log_printf("mp4: table entry %u at %u not readable (window %u, %u bytes)", i, pos, base, n);
+            log_printf("mp4: table entry %u at %u not readable (window %u, %u bytes)", i, pos,
+                       base, n);
             return 0;
         }
         t->win = base;
@@ -503,7 +504,8 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
     if (!find(stbl.body, stbl.end, FOURCC('s', 't', 'c', 'o'), &b)) {
         if (table_init(&stco, &b, 4, 0))
             return MP4_EFORMAT;
-    } else if (find(stbl.body, stbl.end, FOURCC('c', 'o', '6', '4'), &b) || table_init(&stco, &b, 8, 0))
+    } else if (find(stbl.body, stbl.end, FOURCC('c', 'o', '6', '4'), &b) ||
+               table_init(&stco, &b, 8, 0))
         return MP4_EFORMAT;
     total = t->samples = stsz.count;
     if (!total || !stco.count)
@@ -516,7 +518,8 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
         static struct table stts;               /* static: its window is 0.5 KiB */
         uint64_t sum = 0;
         const uint8_t *e;
-        if (!find(stbl.body, stbl.end, FOURCC('s', 't', 't', 's'), &b) && !table_init(&stts, &b, 8, 0))
+        if (!find(stbl.body, stbl.end, FOURCC('s', 't', 't', 's'), &b) &&
+            !table_init(&stts, &b, 8, 0))
             for (uint32_t i = 0; i < stts.count && (e = entry(&stts, i)); i++)
                 sum += (uint64_t)be32(e) * be32(e + 4);
         if (ts && ts != t->rate)
@@ -528,10 +531,12 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
         uint32_t movie_ts = 0;
         t->delay = t->padding = 0;
         t->length = decoded;
-        if (!find(moov.body, moov.end, FOURCC('m', 'v', 'h', 'd'), &mvhd) && !rd(mvhd.body, buf, 24))
+        if (!find(moov.body, moov.end, FOURCC('m', 'v', 'h', 'd'), &mvhd) &&
+            !rd(mvhd.body, buf, 24))
             movie_ts = be32(buf + (buf[0] == 1 ? 20 : 12));
         if (!find(trak.body, trak.end, FOURCC('e', 'd', 't', 's'), &edts) &&
-            !find(edts.body, edts.end, FOURCC('e', 'l', 's', 't'), &elst) && !rd(elst.body, buf, 20) &&
+            !find(edts.body, edts.end, FOURCC('e', 'l', 's', 't'), &elst) &&
+            !rd(elst.body, buf, 20) &&
             buf[0] == 0 && be32(buf + 4) >= 1 && ts && movie_ts) {
             uint32_t seg = be32(buf + 8), mt = be32(buf + 12);   /* the first entry */
             if (mt != 0xffffffffu) {
@@ -566,7 +571,7 @@ int mp4_open(const struct fat_file *f, uint32_t seek_ms, struct mp4_track *t)
     if (failed)
         return MP4_EREAD;
     log_printf("mp4: %s %u Hz, %u ch, %u bits, %u packets of %u, delay %u, padding %u, length %u; "
-               "start at packet %u (skip %u)", alac ? "ALAC" : "AAC-LC", t->rate, t->channels, t->bits,
-               total, flen, t->delay, t->padding, t->length, start, h->skip);
+               "start at packet %u (skip %u)", alac ? "ALAC" : "AAC-LC", t->rate, t->channels,
+               t->bits, total, flen, t->delay, t->padding, t->length, start, h->skip);
     return MP4_OK;
 }

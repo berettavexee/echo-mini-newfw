@@ -1,12 +1,13 @@
 /* Tags for the play screen (step 6, ETUDE §25): title, artist, album, track number, read by core A
  * when a track starts; for the library (0.101t1, ETUDE §122) also the album artist, the genre (a
- * number of ID3v1's table read as its name), the year and the disc number. ID3v2.2/2.3/2.4 (then ID3v1) for MP3, Vorbis comments for FLAC, Ogg
- * Vorbis and Opus (read through the Ogg pages), RIFF INFO or an ID3v2 chunk for WAV, ID3v2 or NAME
- * and AUTH chunks for AIFF (0.74, ETUDE §53; both after the samples too). Big fields (cover art, lyrics)
- * are skipped by position, never read. Unsynchronised or compressed ID3v2 frames are skipped.
- * ReplayGain (0.55, ETUDE §35): REPLAYGAIN_TRACK/ALBUM_GAIN/PEAK in Vorbis comments and ID3v2
- * TXXX frames; R128_TRACK/ALBUM_GAIN in Opus (Q7.8 dB for -23 LUFS: +5 dB for the -18 LUFS of
- * ReplayGain; the header's output gain is applied by the decoder). */
+ * number of ID3v1's table read as its name), the year and the disc number. ID3v2.2/2.3/2.4 (then
+ * ID3v1) for MP3, Vorbis comments for FLAC, Ogg Vorbis and Opus (read through the Ogg pages), RIFF
+ * INFO or an ID3v2 chunk for WAV, ID3v2 or NAME and AUTH chunks for AIFF (0.74, ETUDE §53; both
+ * after the samples too). Big fields (cover art, lyrics) are skipped by position, never read.
+ * Unsynchronised or compressed ID3v2 frames are skipped. ReplayGain (0.55, ETUDE §35):
+ * REPLAYGAIN_TRACK/ALBUM_GAIN/PEAK in Vorbis comments and ID3v2 TXXX frames; R128_TRACK/ALBUM_GAIN
+ * in Opus (Q7.8 dB for -23 LUFS: +5 dB for the -18 LUFS of ReplayGain; the header's output gain is
+ * applied by the decoder). */
 #include <stdint.h>
 #include "bytes.h"
 #include "fat.h"
@@ -327,6 +328,45 @@ static void vorbis_comment(struct tags *t, const uint8_t *s, uint32_t n)
     }
 }
 
+/* The frames and chunks read, by their ID: 't' title, 'a' artist, 'l' album, 'A' album artist
+ * (tag_dst), '#' the track number, 'x' a TXXX frame (id3_txxx), 'g' genre, 'y' year, 'd' disc
+ * (field_text) */
+struct tag_id {
+    char id[5], what;
+};
+static const struct tag_id id3v22[] = {     /* ID3v2.2: 3-letter IDs */
+    { "TT2", 't' }, { "TP1", 'a' }, { "TAL", 'l' }, { "TP2", 'A' }, { "TRK", '#' },
+    { "TCO", 'g' }, { "TYE", 'y' }, { "TPA", 'd' }, { "", 0 },
+};
+static const struct tag_id id3v23[] = {     /* ID3v2.3 and 2.4 */
+    { "TIT2", 't' }, { "TPE1", 'a' }, { "TALB", 'l' }, { "TPE2", 'A' }, { "TRCK", '#' },
+    { "TXXX", 'x' }, { "TCON", 'g' }, { "TDRC", 'y' }, { "TYER", 'y' }, { "TPOS", 'd' },
+    { "", 0 },
+};
+static const struct tag_id riff_info[] = {  /* WAV: RIFF LIST INFO */
+    { "INAM", 't' }, { "IART", 'a' }, { "IPRD", 'l' }, { "IGNR", 'g' }, { "ICRD", 'y' }, { "", 0 },
+};
+
+static int tag_what(const struct tag_id *tab, const void *id, uint32_t n)
+{
+    for (; tab->what; tab++)
+        if (!__builtin_memcmp(tab->id, id, n))
+            return tab->what;
+    return 0;
+}
+
+/* where field 't', 'a', 'l' or 'A' goes (0 for the others), its size in *max */
+static char *tag_dst(struct tags *t, int what, int *max)
+{
+    switch (what) {
+    case 't': *max = sizeof t->title; return t->title;
+    case 'a': *max = sizeof t->artist; return t->artist;
+    case 'l': *max = sizeof t->album; return t->album;
+    case 'A': *max = sizeof t->albumartist; return t->albumartist;
+    }
+    return 0;
+}
+
 /* An ID3v2 TXXX frame: encoding, description, value */
 static void id3_txxx(struct tags *t, const uint8_t *d, uint32_t n)
 {
@@ -373,28 +413,9 @@ static uint32_t id3v2(struct tags *t, uint32_t base)
                         ver == 4 ? syncsafe(fh + 4) : be32(fh + 4);
         int fflags = ver == 2 ? 0 : fh[9];
         const char *id = (const char *)fh;
-        char *dst = 0;
-        int max = 0, trk = 0, fld = 0;
-        if (ver == 2) {
-            if (id[0] == 'T' && id[1] == 'T' && id[2] == '2') { dst = t->title; max = sizeof t->title; }
-            else if (id[0] == 'T' && id[1] == 'P' && id[2] == '1') { dst = t->artist; max = sizeof t->artist; }
-            else if (id[0] == 'T' && id[1] == 'A' && id[2] == 'L') { dst = t->album; max = sizeof t->album; }
-            else if (id[0] == 'T' && id[1] == 'P' && id[2] == '2') { dst = t->albumartist; max = sizeof t->albumartist; }
-            else if (id[0] == 'T' && id[1] == 'R' && id[2] == 'K') trk = 1;
-            else if (id[0] == 'T' && id[1] == 'C' && id[2] == 'O') fld = 'g';
-            else if (id[0] == 'T' && id[1] == 'Y' && id[2] == 'E') fld = 'y';
-            else if (id[0] == 'T' && id[1] == 'P' && id[2] == 'A') fld = 'd';
-        } else {
-            if (!__builtin_memcmp(id, "TIT2", 4)) { dst = t->title; max = sizeof t->title; }
-            else if (!__builtin_memcmp(id, "TPE1", 4)) { dst = t->artist; max = sizeof t->artist; }
-            else if (!__builtin_memcmp(id, "TALB", 4)) { dst = t->album; max = sizeof t->album; }
-            else if (!__builtin_memcmp(id, "TPE2", 4)) { dst = t->albumartist; max = sizeof t->albumartist; }
-            else if (!__builtin_memcmp(id, "TRCK", 4)) trk = 1;
-            else if (!__builtin_memcmp(id, "TXXX", 4)) trk = 2;
-            else if (!__builtin_memcmp(id, "TCON", 4)) fld = 'g';
-            else if (!__builtin_memcmp(id, "TDRC", 4) || !__builtin_memcmp(id, "TYER", 4)) fld = 'y';
-            else if (!__builtin_memcmp(id, "TPOS", 4)) fld = 'd';
-        }
+        int w = tag_what(ver == 2 ? id3v22 : id3v23, id, ver == 2 ? 3 : 4), max = 0;
+        int trk = w == '#' ? 1 : w == 'x' ? 2 : 0, fld = w == 'g' || w == 'y' || w == 'd' ? w : 0;
+        char *dst = tag_dst(t, w, &max);
         /* compressed, encrypted or unsynchronised frames are skipped */
         if (!(dst || trk || fld) || size < 2 || (fflags & (ver == 4 ? 0x0e : 0xc0)))
             skipped(size);
@@ -636,12 +657,8 @@ static void wav(struct tags *t)
                 if (rd_at(q, 8, &s))
                     return;
                 uint32_t n = le32(s + 4);
-                char *dst = 0;
-                int max = 0;
-                if (!__builtin_memcmp(s, "INAM", 4)) { dst = t->title; max = sizeof t->title; }
-                else if (!__builtin_memcmp(s, "IART", 4)) { dst = t->artist; max = sizeof t->artist; }
-                else if (!__builtin_memcmp(s, "IPRD", 4)) { dst = t->album; max = sizeof t->album; }
-                int fld = !__builtin_memcmp(s, "IGNR", 4) ? 'g' : !__builtin_memcmp(s, "ICRD", 4) ? 'y' : 0;
+                int w = tag_what(riff_info, s, 4), max = 0, fld = w == 'g' || w == 'y' ? w : 0;
+                char *dst = tag_dst(t, w, &max);
                 if ((dst || fld) && n <= 512 && !rd_at(q + 8, n, &s)) {
                     if (fld)
                         field_text(t, fld, s, n, 3);
@@ -736,7 +753,8 @@ static void mp4(struct tags *t)
         if (c == 0xa96e616d) { dst = t->title; max = sizeof t->title; }         /* ©nam */
         else if (c == 0xa9415254) { dst = t->artist; max = sizeof t->artist; }  /* ©ART */
         else if (c == 0xa9616c62) { dst = t->album; max = sizeof t->album; }    /* ©alb */
-        else if (c == 0x61415254) { dst = t->albumartist; max = sizeof t->albumartist; }   /* aART */
+        /* aART */
+        else if (c == 0x61415254) { dst = t->albumartist; max = sizeof t->albumartist; }
         else if (c != 0x74726b6e && c != 0x2d2d2d2d && c != 0xa967656e &&       /* trkn, ----, */
                  c != 0x676e7265 && c != 0xa9646179 && c != 0x6469736b) {      /* ©gen, gnre, */
             skipped(next - pos);                /* ©day, disk; covr and the rest: the window */

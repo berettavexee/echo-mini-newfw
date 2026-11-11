@@ -10,7 +10,8 @@ struct player_state {
     int error;
     uint32_t rate, channels, bps, length_ms, time_ms;
     uint32_t frames, reads, read_bytes;
-    uint32_t codec;             /* the core B codec of the track (M4A: AAC or ALAC, from its content) */
+    /* the core B codec of the track (M4A: AAC or ALAC, from its content) */
+    uint32_t codec;
     uint32_t why;               /* with an error: enum hp_why (hifi_proto.h), for the screen */
     /* our codecs: core B in the last 250 ms window (step 5g) */
     uint32_t b_load;            /* per mille of the time awake */

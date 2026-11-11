@@ -6,6 +6,7 @@
  * hwcfg3 01340480 (FIFO of 308 words, 11-bit transfer size: at most 2047 bytes per transfer),
  * hwcfg4 09e04061 (one shared TX FIFO for all IN endpoints), RX FIFO 147 words, non-periodic
  * TX FIFO 128 words (one 512-byte packet). Enumerates at high speed. */
+#include "bytes.h"
 #include "ovl.h"
 #include "usb.h"
 #include "board.h"
@@ -147,7 +148,7 @@ static int fifo_write(int ep, const void *data, uint32_t len)
         wdt_kick();
     }
     for (uint32_t i = 0; i < words; i++, p += 4)
-        REG(FIFO(ep)) = p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
+        REG(FIFO(ep)) = le32(p);
     return 0;
 }
 

@@ -25,8 +25,9 @@ void clk_gate(int n, int on);
 void soft_reset(int n, int on);
 
 extern uint32_t cpu_hz;
+/* clock_init()'s calibration counts, and what it read back after the switch (main.c logs them) */
 extern uint32_t adc_cycles_24m, adc_cycles, pll_con1;
-extern uint32_t loop_24m, loop_pll, cru_mode, cru_sel0, cru_sel1, mode_tries, pll_con1_after;   /* read back after the switch */   /* calibration counts (clock_init) */
+extern uint32_t cru_mode, cru_sel0, cru_sel1, mode_tries, pll_con1_after;
 int clock_init(void);           /* 1 = running at 200 MHz, 0 = stayed on the 24 MHz crystal */
 void clock_fast_ok(void);       /* clears the 200 MHz attempt marker */
 void clock_low(int on);         /* 1: 24 MHz crystal, PLL off; 0: back to the PLL */

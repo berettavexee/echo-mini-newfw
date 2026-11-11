@@ -36,15 +36,16 @@ extern struct fat_vol sdvol;    /* the card's */
 
 int fat_mount(uint32_t from);   /* searches from sector 'from' in 1 MiB steps */
 int fat_mount_sd(void);         /* the first FAT32 or exFAT partition of the card (sd_init done) */
-/* Calls fn for each regular file of the root directory; stops when fn returns non-zero */
+/* Calls fn for each regular file of the root directory; stops when fn returns non-zero
+ * (the fuzzing harness only, tools/fuzz) */
 int fat_list_root(int (*fn)(const struct fat_file *f, void *ctx), void *ctx);
 void fat_open(struct fat_file *f);
 /* Reads up to n bytes (multiple of 512, from a 512-aligned position); returns the count or <0 */
 int fat_read(struct fat_file *f, void *buf, uint32_t n);
 
 enum { FAT_DIRTY_BS = 1, FAT_DIRTY_FAT = 2, FAT_DIRTY_ERR = 4 };
-int fat_dirty(void);
-void fat_forget(void);          /* the FAT sectors cached: dropped (after a write, fatwrite.c) */            /* mask of the marks above, <0 on a read error */
+int fat_dirty(void);            /* mask of the marks above, <0 on a read error */
+void fat_forget(void);          /* the FAT sectors cached: dropped (after a write, fatwrite.c) */
 int fat_find_root(const char *name, struct fat_file *f);    /* 8.3 name in the root, 0 = found */
 
 /* Reads n bytes at any position (pos + n within the file); a cursor caches the last cluster

@@ -17,8 +17,6 @@
 #include "log.h"
 #include "rtc.h"
 
-void (*fatw_yield)(void);                       /* every 64 FAT sectors searched, when set */
-
 #define SCREENRAM __attribute__((section(".screenram")))   /* buffers, not the BSS */
 static uint32_t buf[128] SCREENRAM;
 static struct {
@@ -73,8 +71,6 @@ static uint32_t find_run(uint32_t n, uint32_t from)
     for (int pass = 0; pass < 2; pass++) {
         uint32_t c = pass ? 2 : from, end = pass ? from : last, run = 0, start = c;
         for (; c < end; c++) {
-            if (c % 128 == 0 && (c / 128) % 64 == 0 && fatw_yield)
-                fatw_yield();
             uint32_t v = entry(c);
             if (v == 0xffffffff)
                 return 0;

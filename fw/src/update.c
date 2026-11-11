@@ -11,6 +11,7 @@
  *      otherwise, starts the new FW2;
  *   3. FW1 from its second sector on, read back; 4. FW1 header last, read back.
  * Images larger than one copy (the 32 MiB stock image) only go to FW1, as RECHO does. */
+#include "bytes.h"
 #include "update.h"
 #include "board.h"
 #include "i18n.h"
@@ -61,8 +62,10 @@ static const struct { int e; const char *cause, *title, *hint; } upd_msg[] = {
       N_("not an image for this player") },
     { UPD_ECOPY, "header copy mismatch", N_("Damaged image"), N_("download it again") },
     { UPD_ECRC, "CRC mismatch", N_("Damaged image"), N_("download it again") },
-    { UPD_EWRITE, "flash write failed", N_("Flash write failed"), N_("restart, then install again") },
-    { UPD_EVERIFY, "flash verify failed", N_("Flash write failed"), N_("restart, then install again") },
+    { UPD_EWRITE, "flash write failed", N_("Flash write failed"),
+      N_("restart, then install again") },
+    { UPD_EVERIFY, "flash verify failed", N_("Flash write failed"),
+      N_("restart, then install again") },
 };
 
 static int upd_find(int e)
@@ -106,7 +109,7 @@ int fw_check(struct fat_file *f, struct fw_info *info, progress_fn progress)
         return UPD_ENOTFW;
     info->fw_end = hdr[0x1f4 / 4];
     info->fw_size = (info->fw_end + 0x104000) & ~0xfffffu;
-    info->year = h[0] | h[1] << 8;
+    info->year = (uint16_t)le16(h);
     info->day = h[2];
     info->month = h[3];
     if (info->fw_end < 0x200 || info->fw_end % 512 || info->fw_end + 0x200 > info->fw_size)
@@ -130,7 +133,8 @@ int fw_check(struct fat_file *f, struct fw_info *info, progress_fn progress)
             stored = b[c] | b[c + 1] << 8 | b[c + 2] << 16 | (uint32_t)b[c + 3] << 24;
         }
         crc = crc_update(crc, b, c);
-        if (o <= info->fw_end && info->fw_end < o + n && !same(buf + (info->fw_end - o) / 4, hdr, 128))
+        if (o <= info->fw_end && info->fw_end < o + n &&
+            !same(buf + (info->fw_end - o) / 4, hdr, 128))
             return UPD_ECOPY;
         if (progress && o % (256 * 1024) == 0)
             progress(0, o, info->fw_size);

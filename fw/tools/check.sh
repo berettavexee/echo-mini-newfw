@@ -3,6 +3,7 @@
 #   - the image builds, warnings as errors (the stricter WARN of the Makefile on our code);
 #   - BSS leaves at least 2 KiB before the DAC ring; the code's room is printed;
 #   - the code overlays keep their rules (tools/ovlcheck.py: entered only through ovl.c's gates);
+#   - no line of src/ longer than 100 characters;
 #   - the log formats match their arguments (log.h, LOG_FORMAT_CHECK);
 #   - the strings shown are marked for translation, po/newfw.pot is up to date (tools/mkpot.py),
 #     the translations keep the printf conversions and fit in a catalogue (tools/mklang.py);
@@ -57,6 +58,11 @@ if [ "$1" = "--full" ]; then
         build "$v" "-D$v"
     done
 fi
+
+say "line length"
+LONG=$(awk 'length > 100 { print FILENAME ":" FNR }' src/*.c src/*.h)
+if [ -z "$LONG" ]; then echo "ok    no line of src/ over 100 characters"
+else bad "lines over 100 characters:"; echo "$LONG" | head -10; fi
 
 say "log formats"
 # uint32_t is unsigned long on arm-none-eabi, which %u prints all the same: unsigned int here

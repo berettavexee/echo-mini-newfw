@@ -32,15 +32,15 @@ int lcd_text_width(const char *s);
 int lcd_text_clip(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t bg);
 /* the same, each pixel of the font a square of sc x sc (lines of 16 x sc pixels) */
 int lcd_text_width_x(const char *s, int sc);
+/* s scrolled left by off pixels, then gap, then s again */
 void lcd_text_scroll(int x, int y, const char *s, int xmax, int off, int gap, int sc,
-                     uint16_t fg, uint16_t bg);  /* s scrolled left by off pixels, then gap, then s again */
+                     uint16_t fg, uint16_t bg);
 int lcd_text_clip_x(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t bg, int sc);
 void lcd_backlight(int on);
 void lcd_brightness(int pct);   /* 1 to 100 %, applied at once when the backlight is on */
 void lcd_sleep(int on);         /* panel asleep (backlight apart): asked, done by lcd_service() */
 void lcd_wake_lit(void);        /* awake, then the backlight on, once the panel's 120 ms passed */
 void lcd_service(void);         /* the panel's sleep and wake commands, each after its delay */
-int lcd_waking(void);           /* a sleep or wake command still waits its delay */
 void lcd_settle(void);          /* waits for it (up to 120 ms): before a power off, a fixed wait */
 void lcd_wake_fault(void);
 

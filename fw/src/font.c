@@ -82,19 +82,14 @@ static uint32_t rd32(uint32_t off, int *err)    /* *err set on a read error */
 int font_init(void)
 {
     static uint32_t h[128] __attribute__((section(".screenram")));  /* (read once: not the BSS) */
-    for (int k = 0; k < 2; k++) {
-        uint32_t img = EMMC_FW1 + (k ? emmc.r : 0);     /* FW1, then FW2 */
-        const uint8_t *hb = (const uint8_t *)h;
-        if (emmc_read(img, 1, h) || hb[0x1f8] != 'R' || hb[0x1ff] != 'W')
-            continue;
-        uint32_t off = h[0x80 / 4], len = h[0x84 / 4];
-        if (!len || off % 512 || emmc_read(img + off / 512, 1, h) || h[0] != 0x46585046 ||
-            h[1] != 1)                          /* "FPXF", version 1 */
+    for (int k = 0; k < 2; k++) {                   /* FW1, then FW2 */
+        uint32_t lba, len;
+        if (fw_blob(k, 0x80, 0x46585046, h, &lba, &len) || h[1] != 1)  /* "FPXF", version 1 */
             continue;
         ready = 0;
         for (int j = 0; j < SECS; j++)
             sec_lba[j] = 0;
-        base = img + off / 512;
+        base = lba;
         blen = len;
         nglyphs = h[2];
         nranges = h[3];

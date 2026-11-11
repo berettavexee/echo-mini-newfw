@@ -69,7 +69,8 @@ const struct screen menu_screen = { menu_enter, menu_shown, menu_key, menu_draw 
  * the previous one (the first one cancels), MENU cancels. Playback goes on meanwhile. ---- */
 static struct rtc_tm c_t;
 static int c_ok, c_f, c_dirty;
-static uint32_t c_msg_at, c_msg_ms;             /* a message shown (millis), for c_msg_ms, then off */
+/* a message shown (millis), for c_msg_ms, then off */
+static uint32_t c_msg_at, c_msg_ms;
 static const char *c_msg;
 static uint16_t c_msg_fg;
 
@@ -157,8 +158,9 @@ static int clock_key(const struct key_ev *e)
     struct rtc_tm *t = &c_t;
     if (k == KEY_VOLUP || k == KEY_VOLDOWN) {
         int d = k == KEY_VOLUP ? 1 : -1;
-        if (c_f == 0)
-            t->year = (uint16_t)(t->year + d < 2024 ? 2099 : t->year + d > 2099 ? 2024 : t->year + d);
+        if (c_f == 0)                           /* 2024 to 2099, round */
+            t->year = (uint16_t)(t->year + d < 2024 ? 2099 :
+                                 t->year + d > 2099 ? 2024 : t->year + d);
         else if (c_f == 1)
             t->mon = (uint8_t)((t->mon - 1 + 12 + d) % 12 + 1);
         else if (c_f == 2)

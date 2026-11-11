@@ -67,7 +67,8 @@ uint32_t cpu_hz = 24000000;
  * and its times ran about 4 times too slow on the device. */
 uint32_t adc_cycles_24m, adc_cycles, pll_con1;
 
-uint32_t loop_24m, loop_pll, cru_mode, cru_sel0, cru_sel1, mode_tries, pll_con1_after;
+uint32_t cru_mode, cru_sel0, cru_sel1, mode_tries, pll_con1_after;
+static uint32_t loop_24m, loop_pll;
 
 static void spin(uint32_t n)
 {

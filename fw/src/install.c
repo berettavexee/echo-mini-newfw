@@ -169,7 +169,8 @@ static void firmware_menu(void)
         p = log_format(b, b + sizeof b - 1, T("valid image, %s, %u MiB"), date, info.fw_size >> 20);
         *p = 0;
         sys_line(36, b, FG);
-        sys_line(54, info.two_copies ? T("writes FW2, then FW1") : T("too big for FW2: writes FW1 only"), FG);
+        sys_line(54, info.two_copies ? T("writes FW2, then FW1") :
+                                       T("too big for FW2: writes FW1 only"), FG);
         unsigned mv = battery_mv();
         if (!vbus() && mv < 3600) {
             p = log_format(b, b + sizeof b - 1, T("Battery too low (%u %%)"), battery_pct(mv));

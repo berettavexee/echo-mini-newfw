@@ -110,7 +110,8 @@ int mshc_data(uint32_t b, uint32_t idx, uint32_t arg, uint32_t count, uint32_t *
         return r;
     REG(b + BLKSIZ) = 512;
     REG(b + BYTCNT) = count * 512;
-    r = mshc_command(b, idx, arg, CMD_RESP | CMD_CRC | CMD_DATA | (write ? CMD_WRITE : 0) | (multi ? CMD_AUTO_STOP : 0));
+    r = mshc_command(b, idx, arg, CMD_RESP | CMD_CRC | CMD_DATA | (write ? CMD_WRITE : 0) |
+                     (multi ? CMD_AUTO_STOP : 0));
     if (r)
         return r;
     uint32_t t0 = ticks();

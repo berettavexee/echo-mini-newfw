@@ -152,20 +152,15 @@ int hifi_restart_own(void)
 int hifi_load_own(uint32_t codec)
 {
     own_codec = 0;
-    for (int k = 0; k < 2; k++) {
-        uint32_t base = EMMC_FW1 + (k ? emmc.r : 0);    /* FW1, then FW2 */
-        const uint8_t *h = (const uint8_t *)sec;
-        if (emmc_read(base, 1, sec) || h[0x1f8] != 'R' || h[0x1ff] != 'W' || sec[0x148 / 4] != 1)
-            continue;
-        uint32_t off = sec[0x14c / 4], len = sec[0x150 / 4];
-        if (off % 512 || len < 512 || emmc_read(base + off / 512, 1, sec) ||
-            sec[0] != HP_PACK_MAGIC || sec[1] > 16)
+    for (int k = 0; k < 2; k++) {                   /* FW1, then FW2 */
+        uint32_t base, len;                     /* (the image-pack slot: {1, offset, length}) */
+        if (fw_blob(k, 0x14c, HP_PACK_MAGIC, sec, &base, &len) || len < 512 || sec[1] > 16)
             continue;
         for (uint32_t i = 0; i < sec[1]; i++) {
             const struct hp_pack_entry *e = (const struct hp_pack_entry *)&sec[2 + 6 * i];
             if (e->codec != codec)
                 continue;
-            uint32_t code_off = off + e->offset, code_sec = (e->code_size + 511) / 512;
+            uint32_t code_off = e->offset, code_sec = (e->code_size + 511) / 512;  /* in the pack */
             uint32_t d_addr = e->data_addr, d_size = e->data_size, bss_end = e->bss_end;
             if (e->code_size > 0x20000 || d_addr < HP_DATA_START || bss_end > HP_DATA_END ||
                 d_addr + d_size > HP_DATA_END || e->offset % 512 || e->offset + code_sec * 512 +

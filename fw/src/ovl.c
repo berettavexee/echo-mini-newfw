@@ -29,18 +29,14 @@ static const struct {
     { "USB", __ovl_usb_start, __ovl_usb_end },
 };
 
-/* overlay id from the image at sector img: 0, or the reason */
-static const char *load_from(uint32_t img, int id)
+/* overlay id from image copy k (0: FW1, 1: FW2): 0, or the reason */
+static const char *load_from(int k, int id)
 {
     /* the sectors read on the way: the region's last 512 bytes (the region is overwritten
      * anyway; an overlay never reaches them) */
     uint32_t *sec = (uint32_t *)(void *)(ovl[id].end - 512);
-    const uint8_t *b = (const uint8_t *)sec;
-    if (emmc_read(img, 1, sec) || b[0x1f8] != 'R' || b[0x1ff] != 'W')
-        return "no image";
-    uint32_t off = sec[0x1e0 / 4], len = sec[0x1e4 / 4];
-    if (!len || off % 512 || emmc_read(img + off / 512, 1, sec) || sec[0] != OVL_MAGIC ||
-        sec[1] != 1)
+    uint32_t table, len;
+    if (fw_blob(k, 0x1e0, OVL_MAGIC, sec, &table, &len) || sec[1] != 1)
         return "no overlay table";
     if (sec[2] != ovl_tag)
         return "another build";
@@ -51,7 +47,7 @@ static const char *load_from(uint32_t img, int id)
         return "not this layout";
     if (o % 512 || n > (uint32_t)(ovl[id].end - dst) - 512 || o + n > len)
         return "bad table";
-    uint32_t whole = n / 512, lba = img + (off + o) / 512;
+    uint32_t whole = n / 512, lba = table + o / 512;
     if (whole && emmc_read(lba, whole, dst))
         return "read error";
     if (n % 512) {                              /* the last part: no write past the region */
@@ -72,7 +68,7 @@ int ovl_load(int id)
     const char *why = "no eMMC";
     for (int k = 0; k < 2 && emmc.p; k++) {
         uint32_t t0 = ticks();
-        why = load_from(EMMC_FW1 + (k ? emmc.r : 0), id);
+        why = load_from(k, id);
         if (!why) {
             ovl_cur = id;
             log_printf("ovl: %s from FW%d in %u us", ovl[id].name, k + 1, ticks() - t0);

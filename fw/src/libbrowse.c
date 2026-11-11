@@ -65,9 +65,9 @@ static int ready(void)
     lv_yield = bg;
     int r = lv_setup(c);
     lv_yield = 0;
-    log_printf("library: views of %u tracks, the card's %s, in %u ms: %u shown", lib_count(LIB_TRACKS),
-               lv_card_serial() ? c ? "in" : "out" : "none", (ticks() - t0) / 1000,
-               lv_count(LV_SONGS, 0));
+    log_printf("library: views of %u tracks, the card's %s, in %u ms: %u shown",
+               lib_count(LIB_TRACKS), lv_card_serial() ? c ? "in" : "out" : "none",
+               (ticks() - t0) / 1000, lv_count(LV_SONGS, 0));
     if (r)
         state = LB_FAILED;
     return r;

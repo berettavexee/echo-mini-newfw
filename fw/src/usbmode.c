@@ -61,7 +61,8 @@ static void usb_mode(int writable)
 
     sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    sys_line(0, writable ? T("USB disk (read/write)") : T("USB disk (read only)"), writable ? WARN : TITLE);
+    sys_line(0, writable ? T("USB disk (read/write)") : T("USB disk (read only)"),
+             writable ? WARN : TITLE);
     if (storage_err || volume_err || emmc_sectors(&total) || total <= vol.base) {
         sys_line(36, T("No FAT32 volume on the internal memory"), WARN);
         sys_line(54, T("nothing to share over USB"), FG);

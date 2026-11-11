@@ -337,15 +337,12 @@ static uint32_t fmt_check(void)
     uint32_t *h = (uint32_t *)(void *)fmt_sec[0];
     fmt_sec_lba[0] = fmt_sec_lba[1] = 0;
     fmt_len = 0;
-    for (int k = 0; k < 2; k++) {
-        uint32_t img = EMMC_FW1 + (k ? emmc.r : 0);
-        if (!emmc.p || emmc_read(img, 1, h) || fmt_sec[0][0x1f8] != 'R' || fmt_sec[0][0x1ff] != 'W')
+    for (int k = 0; k < 2 && emmc.p; k++) {
+        uint32_t lba, len;
+        if (fw_blob(k, 0x1e8, FMT_MAGIC, h, &lba, &len) || len < 16 || h[1] != 1 ||
+            h[3] > len - 16)
             continue;
-        uint32_t off = h[0x1e8 / 4], len = h[0x1ec / 4];
-        if (!len || off % 512 || len < 16 || emmc_read(img + off / 512, 1, h) ||
-            h[0] != FMT_MAGIC || h[1] != 1 || h[3] > len - 16)
-            continue;
-        fmt_lba = img + off / 512;
+        fmt_lba = lba;
         fmt_len = h[3];
         return h[2];
     }

@@ -78,13 +78,14 @@ uint32_t file_codec(const char *name)
 static struct dir_buf dir __attribute__((section(".dirbuf")));
 static struct listing dir_l = { dir.e, dir.order, dir.pool, DIR_MAX, sizeof dir.pool, 0, 0, 0, 0,
                                 0 };
+/* the selected row's name scrolled (a file or a folder) */
 static struct {
     uint16_t index;
     int top, y, xmax, width, off;
     uint16_t fg;
     uint32_t t;
     char text[96];
-} browser_mq = { .index = UINT16_MAX };     /* the selected row's name scrolled (a file or a folder) */
+} browser_mq = { .index = UINT16_MAX };
 int dir_n;
 static int dir_full;
 static int qmode;                               /* the queue mode (below) */
@@ -94,7 +95,7 @@ static int qmsg_on;
 
 static int lib_shown;                           /* the listing is a library list */
 
-const char *ent_name(int i)
+static const char *ent_name(int i)              /* the i-th entry shown, sorted */
 {
     return lib_shown ? libv_name(i) : dir.pool + dir.e[dir.order[i]].name;
 }
@@ -776,9 +777,10 @@ static void queue_row(int sel, int next)
     }
     int was = q_n;
     int r = q_add(&s, next);
-    char *p = r == Q_EFULL ? log_format(qmsg, qmsg + sizeof qmsg - 1, "%s", T("The queue is full")) :
-              r < 0 ? log_format(qmsg, qmsg + sizeof qmsg - 1, "%s", T("No room for NEWFWQ.DAT")) :
-              log_format(qmsg, qmsg + sizeof qmsg - 1, next ? T("Next: %d tracks") :
+    char *end = qmsg + sizeof qmsg - 1;
+    char *p = r == Q_EFULL ? log_format(qmsg, end, "%s", T("The queue is full")) :
+              r < 0 ? log_format(qmsg, end, "%s", T("No room for NEWFWQ.DAT")) :
+              log_format(qmsg, end, next ? T("Next: %d tracks") :
                          T("Added: %d tracks"), r);
     *p = 0;
     qmsg_at = millis();

@@ -352,7 +352,8 @@ void ui_main(void)
     fat_root(VOL_TOP, &path[0].dir);
     path[0].sel = path[0].top = 0;
     if (sd_present())
-        sd_open();                              /* the card mounted at once (0.99r26, ETUDE §106): */
+        /* the card mounted at once (0.99r26, ETUDE §106): */
+        sd_open();
     resume_load();                              /* nothing plays yet; the language set */
     copy_name(path[0].name, T("Storage"), sizeof path[0].name);
     if (!depth && !dir_n) {                     /* nothing saved: the internal volume */
@@ -500,7 +501,8 @@ void ui_main(void)
                 seek_begin();
                 r = UI_FULL;
             }
-        } else if (ev != EV_NONE && sk_on && scr == SCR_PLAYING && !(k == KEY_MENU && ev == EV_LONG))
+        } else if (ev != EV_NONE && sk_on && scr == SCR_PLAYING &&
+                   !(k == KEY_MENU && ev == EV_LONG))
             r = seek_key(&e);
         else if (ev != EV_NONE) {
             if (sk_on)
@@ -535,7 +537,8 @@ void ui_main(void)
                 full = b_dirty = 1;
         } else if (!sys_screen_is_off() && !banner_ms) {
             uint32_t since = ticks() - t_draw;
-            if (((full || quick) && since >= 33000) || since > (scr == SCR_PLAYING ? 250000u : 500000u)) {
+            if (((full || quick) && since >= 33000) ||
+                since > (scr == SCR_PLAYING ? 250000u : 500000u)) {
                 t_draw = ticks();
                 int whole = scr == SCR_BROWSER ? b_dirty : full;
                 if (scr == SCR_BROWSER) {

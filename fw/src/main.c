@@ -52,11 +52,11 @@ char *put_hex(char *p, uint32_t v, int digits)
     return p;
 }
 
-/* One text line, padded with the background up to the right edge */
+/* One text line, padded with the background up to the right edge (one pass of strips; a text
+ * too long ends with an ellipsis) */
 void sys_line(int y, const char *s, uint16_t fg)
 {
-    int x = lcd_text(4, y, s, fg, BG);
-    lcd_fill(x, y, LCD_W - x, 16, BG);
+    lcd_text_clip(4, y, s, LCD_W, fg, BG);
 }
 
 /* Status lines are redrawn only when their text or colour changed: every pixel goes through
@@ -395,8 +395,8 @@ void sys_screen_set(int on)
     if (on) {
         if (clock_is_low) {
             clock_low(0);                       /* the screen at full speed (ui.c power_service) */
-            log_printf("screen: clocks back on the PLL, core %u Hz against the crystal (%u expected)",
-                       clock_measure(50), cpu_hz);
+            log_printf("screen: clocks back on the PLL, core %u Hz against the crystal "
+                       "(%u expected)", clock_measure(50), cpu_hz);
         }
         lcd_wake_lit();                         /* not waited: lcd_service() lights it 120 ms */
     } else {                                    /* later, the first frame drawn meanwhile */
@@ -570,7 +570,8 @@ void fault_screen(const uint32_t *frame, uint32_t exc)
     p = put_hex(p, REG(0xe000ed38), 8);
     *p = 0;
     lcd_text(4, 44, b, FG, RGB(128, 0, 0));
-    lcd_text(4, 84, EN("any key: restart   Power 2 s: off"), FG, RGB(128, 0, 0));   /* the fault screen: English */
+    /* the fault screen: English */
+    lcd_text(4, 84, EN("any key: restart   Power 2 s: off"), FG, RGB(128, 0, 0));
     lcd_backlight(1);
     /* no SysTick here: busy-wait on the ADC (about 20 us per read) */
     for (unsigned n = 0;;) {
