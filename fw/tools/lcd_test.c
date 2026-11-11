@@ -1,6 +1,7 @@
 /* Host-side test of the glyph renderer of src/lcd.c (ETUDE §134): every glyph of the font blob
  * of the build, at sizes 1 and 2, cut at columns and drawn into strips of every height, compared
- * pixel for pixel with the renderer of 0.103 (each pixel tested: kept below as the reference).
+ * pixel for pixel with the renderer of 0.103 (each pixel tested: kept below as the reference); the
+ * strip filled with the background first, as the text functions do (ETUDE §136).
  *   cc -O1 -Wall -Isrc -Ibuild -o build/lcd_test tools/lcd_test.c && build/lcd_test build/font.bin */
 #include <stdarg.h>
 #include <stdio.h>
@@ -100,15 +101,15 @@ int main(int argc, char **argv)
                     /* strips of 8 rows, then of 3 (rows cut anywhere) */
                     for (int sh = 8; sh >= 3; sh -= 5)
                         for (int sy = y - 2; sy < y + FONT_LINE * sc; sy += sh) {
-                            strip_begin(20, 120, sy, sy + sh, 0x1234);
-                            draw_glyph_cols(x, y, g, fg, bg, sc, cl, cr);
+                            strip_begin(20, 120, sy, sy + sh, bg);
+                            draw_glyph_cols(x, y, g, fg, sc, cl, cr);
                             for (int r = sy; r < sy + sh; r++)
                                 for (int c = 20; c < 120; c++) {
                                     uint16_t got = st.p[(r - sy) * 100 + (c - 20)];
                                     int in = r >= y && r < y + FONT_LINE * sc && c >= x &&
                                              c < x + adv * sc && c >= cl && c < cr;
                                     uint16_t want = in ? (uint16_t)ref_pixel(g, sc, x, y, r, c, fg, bg)
-                                                       : 0x1234;
+                                                       : bg;
                                     checked++;
                                     if (got != want && bad++ < 10)
                                         printf("FAIL U+%04X size %d cut %d strip %d+%d: (%d, %d) %04x, "

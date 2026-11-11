@@ -400,11 +400,6 @@ static void strip_begin(int x0, int x1, int y0, int y1, uint16_t bg)
         q[i] = v;
 }
 
-static void strip_none(void)                    /* draws go nowhere */
-{
-    st.x0 = st.x1 = st.y0 = st.y1 = 0;
-}
-
 static void strip_end(void)
 {
     int w = st.x1 - st.x0, h = st.y1 - st.y0;
@@ -421,34 +416,22 @@ static void strip_end(void)
     }
 }
 
-/* the part of [x, x + w) x [y, y + h) inside the strip, filled */
-static void s_fill(int x, int y, int w, int h, uint16_t c)
-{
-    int x0 = x > st.x0 ? x : st.x0, x1 = x + w < st.x1 ? x + w : st.x1;
-    int y0 = y > st.y0 ? y : st.y0, y1 = y + h < st.y1 ? y + h : st.y1;
-    for (int r = y0; r < y1; r++) {
-        uint16_t *d = st.p + (r - st.y0) * (st.x1 - st.x0) + (x0 - st.x0);
-        for (int k = x1 - x0; k > 0; k--)
-            *d++ = c;
-    }
-}
-
 static int glyph_width(const uint8_t *g)
 {
     return g[0];                                /* the advance */
 }
 
 /* A glyph record (font.h) in a line of 16 px times 'sc' (1 or 2: each pixel a square): baseline
- * at row font_ascent, the advance filled; only the columns in [cl, cr) of the screen, and the
- * strip's part. A row of the glyph is read once as a 32-bit word, then each pixel is its top
- * bit (ETUDE §134: until 0.103 each pixel tested its bounds and its bit, 40 cycles a pixel). */
-static void draw_glyph_cols(int x, int y, const uint8_t *g, uint16_t fg, uint16_t bg, int sc,
-                            int cl, int cr)
+ * at row font_ascent; only the columns in [cl, cr) of the screen, and the strip's part. Only the
+ * glyph's pixels are written: the strip was filled with the background (strip_begin, the same
+ * colour as the text's), and the cells of a line never overlap. A row of the glyph is read as one
+ * 32-bit word, then only its set bits are visited (count leading zeros). ETUDE §136: until
+ * 0.103d4 every pixel of the cell was written, bg or fg, a sixth of the cost of a line. */
+static void draw_glyph_cols(int x, int y, const uint8_t *g, uint16_t fg, int sc, int cl, int cr)
 {
     int adv = g[0], w = g[1], h = g[2], xo = (int8_t)g[3], yo = (int8_t)g[4];
-    int bpr = (w + 7) / 8, top = font_ascent - yo - h;  /* row of the glyph's first line */
-    int c0 = x, c1 = x + adv * sc, r0 = y, r1 = y + FONT_LINE * sc;
-    const uint8_t *bits = g + 5;
+    int bpr = (w + 7) >> 3, top = font_ascent - yo - h;  /* row of the glyph's first line */
+    int c0 = x, c1 = x + adv * sc;
     if (c0 < cl)
         c0 = cl;
     if (c1 > cr)
@@ -457,6 +440,11 @@ static void draw_glyph_cols(int x, int y, const uint8_t *g, uint16_t fg, uint16_
         c0 = st.x0;
     if (c1 > st.x1)
         c1 = st.x1;
+    int r0 = y + top * sc, r1 = r0 + h * sc;    /* the rows with glyph lines, in the cell */
+    if (r0 < y)
+        r0 = y;
+    if (r1 > y + FONT_LINE * sc)
+        r1 = y + FONT_LINE * sc;
     if (r0 < st.y0)
         r0 = st.y0;
     if (r1 > st.y1)
@@ -464,44 +452,37 @@ static void draw_glyph_cols(int x, int y, const uint8_t *g, uint16_t fg, uint16_
     if (c1 <= c0 || r1 <= r0)
         return;
     uint32_t wmask = w >= 32 ? 0xffffffffu : ~(0xffffffffu >> w);
-    int stride = st.x1 - st.x0;
-    for (int r = r0; r < r1; r++) {
-        uint16_t *d = st.p + (r - st.y0) * stride + (c0 - st.x0);
-        int gy = (r - y) / sc - top, n = c1 - c0;
-        uint32_t v = 0;
-        if (gy >= 0 && gy < h) {
-            const uint8_t *row = bits + gy * bpr;
-            for (int k = 0; k < 4; k++)
-                v |= (uint32_t)(k < bpr ? row[k] : 0) << (24 - 8 * k);
-            v &= wmask;                         /* bit 31: column xo of the glyph's box */
+    int stride = st.x1 - st.x0, gx0 = x + xo * sc;   /* screen column of bit 31 */
+    const uint8_t *bits = g + 5;
+    uint16_t *d = st.p + (r0 - st.y0) * stride - st.x0;  /* d[c]: column c of row r */
+    for (int r = r0; r < r1; r++, d += stride) {
+        int gy = (sc == 1 ? r - y : (r - y) >> 1) - top;
+        const uint8_t *row = bits + gy * bpr;
+        uint32_t v = (uint32_t)row[0] << 24;
+        if (bpr > 1) {
+            v |= (uint32_t)row[1] << 16;
+            if (bpr > 2)
+                v |= (uint32_t)row[2] << 8 | (bpr > 3 ? row[3] : 0);
         }
-        if (!v) {
-            while (n--)
-                *d++ = bg;
-            continue;
-        }
-        if (sc == 1) {
-            int g0 = c0 - x - xo;               /* the glyph's column under c0 */
-            v = g0 >= 32 || g0 <= -32 ? 0 : g0 >= 0 ? v << g0 : v >> -g0;
-            while (n--) {
-                *d++ = v & 0x80000000u ? fg : bg;
-                v <<= 1;
-            }
-        } else {
-            for (int c = c0; c < c1; c++) {
-                int gx = (c - x) / sc - xo;
-                *d++ = gx >= 0 && gx < 32 && (v << gx) & 0x80000000u ? fg : bg;
-            }
+        v &= wmask;
+        while (v) {
+            int i = __builtin_clz(v);
+            v &= ~(0x80000000u >> i);
+            int c = gx0 + i * sc;
+            if (c >= c0 && c < c1)
+                d[c] = fg;
+            if (sc == 2 && c + 1 >= c0 && c + 1 < c1)
+                d[c + 1] = fg;
         }
     }
 }
 
-static int draw_glyph(int x, int y, const uint8_t *g, uint16_t fg, uint16_t bg, int sc)
+static int draw_glyph(int x, int y, const uint8_t *g, uint16_t fg, int sc)
 {
     int adv = g[0] * sc;
     if (!adv || x + adv > LCD_W)
         return 0;
-    draw_glyph_cols(x, y, g, fg, bg, sc, x, x + adv);
+    draw_glyph_cols(x, y, g, fg, sc, x, x + adv);
     return adv;
 }
 
@@ -518,34 +499,59 @@ static int draw_glyph(int x, int y, const uint8_t *g, uint16_t fg, uint16_t bg, 
         }                                                                                       \
     } while (0)
 
-static void text_scroll(int x, int y, const char *s, int xmax, int off, int gap, int sc,
-                        uint16_t fg, uint16_t bg)
+/* A line laid out once (its code points and their x), then drawn into each of its strips
+ * (ETUDE §136: until 0.103d4 each strip decoded the UTF-8 and measured the line again). Code
+ * points, not glyph pointers: a glyph met later in the line may take an earlier one's place in
+ * the font's cache. A line of more glyphs than LAY_MAX: the rest left out (320 pixels hold
+ * fewer). */
+#define LAY_MAX 160
+static struct {
+    uint32_t cp;
+    int16_t x;
+} lay[LAY_MAX];
+static int lay_n;
+
+static void lay_add(uint32_t cp, int x)
 {
-    int pos = x - off;
-    for (int copy = 0; copy < 2 && pos < xmax; copy++) {
-        for (const char *t = s; *t && pos < xmax;) {
-            const uint8_t *g = font_glyph(utf8_next(&t));
-            int adv = g[0] * sc;
-            if (pos + adv > x)
-                draw_glyph_cols(pos, y, g, fg, bg, sc, x, xmax);
-            pos += adv;
-        }
-        if (!copy) {
-            int a = pos > x ? pos : x, b = pos + gap < xmax ? pos + gap : xmax;
-            if (b > a)
-                s_fill(a, y, b - a, FONT_LINE * sc, bg);
-            pos += gap;
-        }
+    if (lay_n < LAY_MAX) {
+        lay[lay_n].cp = cp;
+        lay[lay_n].x = (int16_t)x;
+        lay_n++;
     }
-    if (pos < xmax)
-        s_fill(pos > x ? pos : x, y, xmax - (pos > x ? pos : x), FONT_LINE * sc, bg);
+}
+
+/* each glyph in its cell (cl < 0), or all clipped to [cl, cr) */
+static void lay_draw(int y, uint16_t fg, int sc, int cl, int cr)
+{
+    for (int i = 0; i < lay_n; i++) {
+        const uint8_t *g = font_glyph(lay[i].cp);
+        int x = lay[i].x;
+        draw_glyph_cols(x, y, g, fg, sc, cl < 0 ? x : cl, cl < 0 ? x + g[0] * sc : cr);
+    }
 }
 
 /* s scrolled left by 'off' pixels in [x, xmax): s, a gap of 'gap' pixels, s again */
+static void scroll_layout(int x, const char *s, int xmax, int off, int gap, int sc)
+{
+    int pos = x - off;
+    lay_n = 0;
+    for (int copy = 0; copy < 2 && pos < xmax; copy++) {
+        for (const char *t = s; *t && pos < xmax;) {
+            uint32_t c = utf8_next(&t);
+            int adv = font_glyph(c)[0] * sc;
+            if (pos + adv > x)
+                lay_add(c, pos);
+            pos += adv;
+        }
+        pos += gap;
+    }
+}
+
 void lcd_text_scroll(int x, int y, const char *s, int xmax, int off, int gap, int sc,
                      uint16_t fg, uint16_t bg)
 {
-    STRIPS(x, xmax, y, FONT_LINE * sc, bg, text_scroll(x, y, s, xmax, off, gap, sc, fg, bg));
+    scroll_layout(x, s, xmax, off, gap, sc);
+    STRIPS(x, xmax, y, FONT_LINE * sc, bg, lay_draw(y, fg, sc, x, xmax));
 }
 
 int lcd_glyph(int x, int y, uint32_t cp, uint16_t fg, uint16_t bg)
@@ -554,7 +560,7 @@ int lcd_glyph(int x, int y, uint32_t cp, uint16_t fg, uint16_t bg)
     int adv = g[0];
     if (!adv || x + adv > LCD_W)
         return 0;
-    STRIPS(x, x + adv, y, FONT_LINE, bg, draw_glyph(x, y, g, fg, bg, 1));
+    STRIPS(x, x + adv, y, FONT_LINE, bg, draw_glyph(x, y, g, fg, 1));
     return adv;
 }
 
@@ -591,23 +597,32 @@ int lcd_text_width(const char *s)
     return lcd_text_width_x(s, 1);
 }
 
-static int text_clip(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t bg, int sc)
+/* a glyph of advance 'adv' at x: laid out when it fits before the screen's edge (as drawn) */
+static int lay_glyph(uint32_t c, int x, int adv)
+{
+    if (!adv || x + adv > LCD_W)
+        return 0;
+    lay_add(c, x);
+    return adv;
+}
+
+/* s from x, cut with an ellipsis before xmax when it does not fit; returns the x reached */
+static int clip_layout(int x, const char *s, int xmax, int sc)
 {
     int ell = glyph_width(font_glyph(0x2026)) * sc;
     int fits = x + lcd_text_width_x(s, sc) <= xmax;
+    lay_n = 0;
     while (*s) {
         const char *t = s;
         uint32_t c = utf8_next(&t);
         int w = glyph_width(font_glyph(c)) * sc;
         if (!fits && x + w + ell > xmax) {
-            x += draw_glyph(x, y, font_glyph(0x2026), fg, bg, sc);
+            x += lay_glyph(0x2026, x, ell);
             break;
         }
-        x += draw_glyph(x, y, font_glyph(c), fg, bg, sc);
+        x += lay_glyph(c, x, w);
         s = t;
     }
-    if (x < xmax)
-        s_fill(x, y, xmax - x, FONT_LINE * sc, bg);
     return x;
 }
 
@@ -615,9 +630,8 @@ static int text_clip(int x, int y, const char *s, int xmax, uint16_t fg, uint16_
  * of the band up to xmax is filled with bg. Returns the x reached. */
 int lcd_text_clip_x(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t bg, int sc)
 {
-    strip_none();                               /* a dry run: the x reached (an ellipsis may */
-    int r = text_clip(x, y, s, xmax, fg, bg, sc);   /* end past xmax) */
-    STRIPS(x, r > xmax ? r : xmax, y, FONT_LINE * sc, bg, text_clip(x, y, s, xmax, fg, bg, sc));
+    int r = clip_layout(x, s, xmax, sc);        /* (an ellipsis may end past xmax) */
+    STRIPS(x, r > xmax ? r : xmax, y, FONT_LINE * sc, bg, lay_draw(y, fg, sc, -1, 0));
     return r;
 }
 
@@ -626,27 +640,15 @@ int lcd_text_clip(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t b
     return lcd_text_clip_x(x, y, s, xmax, fg, bg, 1);
 }
 
-/* the x lcd_text() reaches (a glyph that does not fit before the edge is left out) */
-static int text_end(int x, const char *s)
-{
-    while (*s) {
-        int adv = glyph_width(font_glyph(utf8_next(&s)));
-        if (adv && x + adv <= LCD_W)
-            x += adv;
-    }
-    return x;
-}
-
-static void text_body(int x, int y, const char *s, uint16_t fg, uint16_t bg)
-{
-    while (*s)
-        x += draw_glyph(x, y, font_glyph(utf8_next(&s)), fg, bg, 1);
-}
-
 int lcd_text(int x, int y, const char *s, uint16_t fg, uint16_t bg)
 {
-    int e = text_end(x, s);
-    STRIPS(x, e, y, FONT_LINE, bg, text_body(x, y, s, fg, bg));
+    int e = x;
+    lay_n = 0;
+    while (*s) {                                /* (a glyph past the edge left out) */
+        uint32_t c = utf8_next(&s);
+        e += lay_glyph(c, e, glyph_width(font_glyph(c)));
+    }
+    STRIPS(x, e, y, FONT_LINE, bg, lay_draw(y, fg, 1, -1, 0));
     return e;
 }
 
@@ -871,7 +873,8 @@ void lcd_perf_probe(void)
         for (int l = 0; l < 10; l++)
             for (int sy = 0; sy < FONT_LINE; sy += STRIP_H) {
                 strip_begin(0, LCD_W, sy, sy + STRIP_H, 0);
-                text_clip(0, 0, text[0], LCD_W, 0xffff, 0x0000, 1);
+                clip_layout(0, text[0], LCD_W, 1);
+                lay_draw(0, 0xffff, 1, -1, 0);
             }
         t[i] = ticks() - t0;
     }
