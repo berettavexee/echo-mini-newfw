@@ -16,9 +16,9 @@ CFLAGS = -mcpu=cortex-m3 -mthumb -Os -g -ffreestanding -fno-builtin -nostdlib \
          -ffunction-sections -fdata-sections -Wall -Wextra $(WARN) -Isrc $(EXTRA)
 # Our code only (not third_party): stricter warnings
 WARN   = -Wshadow -Wmissing-prototypes -Wcast-qual -Wundef
-LDFLAGS = -T link.ld -Wl,--gc-sections -Wl,-Map=$(BUILD)/fw.map -nostdlib -lgcc
+LDFLAGS = -T link.ld -Wl,--gc-sections -Wl,--emit-relocs -Wl,-Map=$(BUILD)/fw.map -nostdlib -lgcc
 
-SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/settings.c src/resume.c src/uidraw.c src/main.c src/install.c src/usbmode.c src/uac.c src/remote.c src/perf.c src/storage.c src/charge.c src/mp4.c src/font.c src/rtc.c src/probe.c src/crash.c src/lang.c src/fatwrite.c src/library.c src/libbuild.c src/libui.c src/libview.c src/libbrowse.c src/qfile.c src/qscreen.c $(BUILD)/font_ascii.c
+SRCS = src/start.c src/board.c src/lcd.c src/emmc.c src/mshc.c src/sd.c src/sdtest.c src/keys.c src/fat.c src/update.c src/usb.c src/msc.c src/log.c src/i2c.c src/audio.c src/hifi.c src/player.c src/tags.c src/ui.c src/browser.c src/queue.c src/playback.c src/playscreen.c src/menu.c src/settings.c src/resume.c src/uidraw.c src/main.c src/install.c src/usbmode.c src/uac.c src/remote.c src/perf.c src/storage.c src/charge.c src/mp4.c src/font.c src/rtc.c src/probe.c src/crash.c src/lang.c src/fatwrite.c src/library.c src/libbuild.c src/libui.c src/libview.c src/libbrowse.c src/qfile.c src/qscreen.c src/ovl.c $(BUILD)/font_ascii.c
 OBJS = $(patsubst %.c,$(BUILD)/%.o,$(notdir $(SRCS)))
 
 all: $(OUT)

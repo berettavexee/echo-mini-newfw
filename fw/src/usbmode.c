@@ -1,5 +1,6 @@
 /* USB disk mode: the user volume for the computer (msc.c over usb.c), and its status screen */
 #include <stdint.h>
+#include "ovl.h"
 #include "board.h"
 #include "emmc.h"
 #include "fat.h"
@@ -149,7 +150,7 @@ static int newest_write(const struct fat_dirent *e, void *ctx)
 }
 
 /* After a read/write session the clock may be set from what the computer wrote (rtc_from_fat) */
-void sys_usb(int writable)
+void sys_usb_ovl(int writable)
 {
     usb_mode(writable);
     uint32_t newest = 0;

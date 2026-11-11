@@ -10,6 +10,7 @@
  * in 0.5 dB steps. The USB runs from the controller's interrupt (usb_irq): the packets go into the
  * ring there; what the loop shares with it (the ring when no packet comes, the format, the DMA's
  * position) is done with the interrupt blocked. */
+#include "ovl.h"
 #include "ui_priv.h"
 #include "sys_priv.h"
 #include "usb.h"
@@ -854,7 +855,7 @@ static void hid_poll(void)
     log_printf("uac: remote: %s sent (%d), %u reports taken", what, r, usb.int_in_sent);
 }
 
-void uac_mode(void)
+void uac_mode_ovl(void)
 {
     sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);

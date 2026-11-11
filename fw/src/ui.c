@@ -290,8 +290,11 @@ static void menu_action(int m, int *scr)
         play_stop(STOP_NOW);                    /* the rest needs the audio and core B */
         if (m == M_USB_RO || m == M_USB_RW)
             sys_usb(m == M_USB_RW);
-        else if (m == M_USB_DAC)
+        else if (m == M_USB_DAC) {
             uac_mode();
+            dir_load(&path[depth].dir);         /* (the USB overlay was over it, ovl.h) */
+            b_dirty = 1;
+        }
         else if (m == M_INSTALL)
             sys_install();
         else if (m == M_SYSTEM)

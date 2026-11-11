@@ -6,6 +6,7 @@
  * hwcfg3 01340480 (FIFO of 308 words, 11-bit transfer size: at most 2047 bytes per transfer),
  * hwcfg4 09e04061 (one shared TX FIFO for all IN endpoints), RX FIFO 147 words, non-periodic
  * TX FIFO 128 words (one 512-byte packet). Enumerates at high speed. */
+#include "ovl.h"
 #include "usb.h"
 #include "board.h"
 #include "regs.h"
@@ -709,7 +710,7 @@ int usb_in(const void *buf, uint32_t len)
 #define IRQ_USB 5
 static int irq_on;
 
-void OTG_IRQHandler(void)
+void usb_isr_ovl(void)
 {
     uint32_t t0 = ticks();
     if (irq_on)

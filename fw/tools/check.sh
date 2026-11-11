@@ -1,7 +1,8 @@
 #!/bin/sh
 # check.sh [--full]: the automatic checks of the firmware (make check, make check-full).
 #   - the image builds, warnings as errors (the stricter WARN of the Makefile on our code);
-#   - BSS leaves at least 2 KiB before the DAC ring;
+#   - BSS leaves at least 2 KiB before the DAC ring; the code's room is printed;
+#   - the code overlays keep their rules (tools/ovlcheck.py: entered only through ovl.c's gates);
 #   - the log formats match their arguments (log.h, LOG_FORMAT_CHECK);
 #   - the strings shown are marked for translation, po/newfw.pot is up to date (tools/mkpot.py),
 #     the translations keep the printf conversions and fit in a catalogue (tools/mklang.py);
@@ -38,6 +39,16 @@ if [ -f $C/prod/fw.elf ]; then
     ROOM=$((0x03020000 - 0x$END))
     if [ $ROOM -lt 2048 ]; then bad "BSS: $ROOM bytes left before the DAC ring"
     else printf 'ok    BSS: %u bytes left before the DAC ring\n' $ROOM; fi
+    END=$(arm-none-eabi-nm $C/prod/fw.elf | awk '$3 == "_sidata" { print $1 }')
+    DATA=$(arm-none-eabi-size -A $C/prod/fw.elf | awk '$1 == ".data" { print $2 }')
+    printf 'ok    code: %u bytes left before the directory listing\n' \
+        $((0x03078000 - 0x$END - DATA))
+    if python3 tools/ovlcheck.py $C/prod/fw.elf $C/prod/ovl.o > $C/ovlcheck.log; then
+        printf 'ok    overlays (%s)\n' "$(grep -c '^ovlcheck: \.ovl' $C/ovlcheck.log) checked"
+    else
+        bad "overlays (see fw/$C/ovlcheck.log)"
+        grep FAIL $C/ovlcheck.log | head -10
+    fi
 fi
 
 if [ "$1" = "--full" ]; then

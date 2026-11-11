@@ -826,3 +826,7 @@ msgstr "Mettre à jour la bibliothèque"
 #: src/libbrowse.c
 msgid "SD card not readable (FAT32 or exFAT only)"
 msgstr "Carte SD illisible (FAT32 ou exFAT seulement)"
+
+#: src/ovl.c
+msgid "This part of the firmware is damaged: install it again"
+msgstr "Cette partie du micrologiciel est abîmée : réinstallez-le"
