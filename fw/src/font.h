@@ -18,6 +18,6 @@ extern const uint8_t font_ascent;
 int font_init(void);                    /* reads the tables from FW1 (else FW2): 0, or < 0 */
 /* The record of code point c ('?' when the font does not have it); valid until the next call */
 const uint8_t *font_glyph(uint32_t c);
-uint32_t font_misses(void);             /* groups of 16 glyphs read from the eMMC so far */
+uint32_t font_misses(void);             /* sectors of the font read from the eMMC so far */
 
 #endif

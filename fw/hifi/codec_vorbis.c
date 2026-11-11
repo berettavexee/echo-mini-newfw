@@ -5,7 +5,7 @@
  * duplicated; the end is trimmed by Tremor from the granule of the last page, the beginning
  * here (start_trim()). The stream ends with its last page (flag 4): zeros or garbage after it
  * are not read.
- * Codebook cache: decoding the setup header takes about 2 M instructions (re/REPORT.md §38). The
+ * Codebook cache: decoding the setup header takes about 2 M instructions (the study's REPORT.md §38). The
  * tracks of an album share their identification and setup headers, so the decoded vorbis_info
  * and the heap blocks below it are kept in .noinit (not cleared when core B restarts), with a
  * copy of both headers and a checksum; an OPEN whose headers are the same bytes, with the

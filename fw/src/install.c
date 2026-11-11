@@ -153,7 +153,7 @@ static void firmware_menu(void)
         *p = 0;
         sys_line(18, b, FG);
         int r = fw_check(&l.f[sel], &info, progress);
-        log_printf("install: %s, %u bytes: check %d (%s)", l.name[sel], l.f[sel].size, r,
+        log_text("install: %s, %u bytes: check %d (%s)", l.name[sel], l.f[sel].size, r,
                    r ? upd_error(r) : "valid");
         if (r) {
             sys_line(112, upd_title(r), WARN);
@@ -169,14 +169,15 @@ static void firmware_menu(void)
         p = log_format(b, b + sizeof b - 1, T("valid image, %s, %u MiB"), date, info.fw_size >> 20);
         *p = 0;
         sys_line(36, b, FG);
-        sys_line(54, info.two_copies ? T("writes FW2, then FW1") : T("too big for FW2: writes FW1 only"), FG);
+        sys_line(54, info.two_copies ? T("writes FW2, then FW1") :
+                                       T("too big for FW2: writes FW1 only"), FG);
         unsigned mv = battery_mv();
         if (!vbus() && mv < 3600) {
             p = log_format(b, b + sizeof b - 1, T("Battery too low (%u %%)"), battery_pct(mv));
             *p = 0;
             sys_line(80, b, WARN);
             sys_line(98, T("plug the USB cable"), FG);
-            log_printf("install: battery %u mV: refused", mv);
+            log_text("install: battery %u mV: refused", mv);
             sys_line(154, T("BACK: return"), DIM);
             while (key_edge() != KEY_BACK)
                 wdt_kick();
@@ -189,12 +190,12 @@ static void firmware_menu(void)
         if (k == KEY_BACK)
             continue;
         sys_line(154, "", DIM);
-        log_printf("install: writing %s: fw_end %x, %u bytes, %s", l.name[sel], info.fw_end,
+        log_text("install: writing %s: fw_end %x, %u bytes, %s", l.name[sel], info.fw_end,
                    info.fw_size, info.two_copies ? "FW2 then FW1" : "FW1 only");
         log_flush();
         uint32_t t0 = millis();
         r = fw_install(&l.f[sel], &info, progress);
-        log_printf("install: result %d (%s) in %u ms", r, r ? upd_error(r) : "ok", millis() - t0);
+        log_text("install: result %d (%s) in %u ms", r, r ? upd_error(r) : "ok", millis() - t0);
         log_flush();
         if (r) {
             sys_line(112, upd_title(r), WARN);

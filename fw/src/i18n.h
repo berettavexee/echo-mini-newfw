@@ -1,6 +1,7 @@
 /* Interface languages (ETUDE §112). The text shown on the screen is written in English in the
  * sources, marked for translation; tools/mkpot.py extracts the marked strings into po/newfw.pot,
- * the template of the translations (gettext PO files, po/<language>.po, kept up to date on Weblate).
+ * the template of the translations (gettext PO files, po/<language>.po, kept up to date on
+ * Weblate).
  *
  *   T("text")    shown on the screen: translated where it is used (a literal only)
  *   N_("text")   marked only, in a table of strings: tr() where the string is shown

@@ -373,6 +373,7 @@ static struct fat_file own_file;                /* the track open (non-blocking 
 struct player_heard player_heard;
 static struct { int on; uint32_t end, frames, fb; } tail;
 static struct { int on; uint32_t end, t0; } drain;
+static const uint32_t zero[256];                /* 1 KiB of silence, behind a track's end */
 
 static void heard_publish(void)                 /* the track opened last is heard from now on */
 {
@@ -415,8 +416,9 @@ void player_drop_tail(void)
  * clock goes up only when that ring really goes down (below 3/4 and falling by more than 4 KiB in
  * a window) or when the load stays above 85 % for two windows: then at least to the slowest level
  * that would keep the load at 75 % (60 % up to 0.42). Down one level after 1 s in which a lower
- * level would do. The top level from the start of a track (load, open) until the DAC ring is full (0.36 went up on
- * every peak: Opus switched 29 times in 2 min between 133 and 200 MHz, ETUDE §24). */
+ * level would do. The top level from the start of a track (load, open) until the DAC ring is full
+ * (0.36 went up on every peak: Opus switched 29 times in 2 min between 133 and 200 MHz,
+ * ETUDE §24). */
 static const uint8_t gov_div[] = { 8, 7, 6, 5, 4, 3, 2 };   /* 50 57 67 80 100 133 200 MHz */
 #define GOV_LEVELS ((int)sizeof gov_div)
 static int player_clock;                               /* 0: automatic, else a fixed divider */
@@ -581,9 +583,9 @@ static void gov_window(void)
 static void gov_report(const char *name)
 {
     uint32_t mean = gov.sum_ms ? (uint32_t)(gov.wsum_mhz10 / gov.sum_ms) : 0;
-    log_printf("clock: %s: core B %s, used mean %u.%u MHz, max %u.%u MHz (window), max load %u.%u %%; "
-               "ms at 50/57/67/80/100/133/200 MHz: %u %u %u %u %u %u %u; %u changes (%u up, %u "
-               "down, %u for the ring); lowest fill %u ms", name,
+    log_printf("clock: %s: core B %s, used mean %u.%u MHz, max %u.%u MHz (window), max load "
+               "%u.%u %%; ms at 50/57/67/80/100/133/200 MHz: %u %u %u %u %u %u %u; %u changes "
+               "(%u up, %u down, %u for the ring); lowest fill %u ms", name,
                player_clock ? "fixed" : "automatic", mean / 10, mean % 10, gov.max_mhz10 / 10,
                gov.max_mhz10 % 10, gov.max_load / 10, gov.max_load % 10, gov.ms[0], gov.ms[1],
                gov.ms[2], gov.ms[3], gov.ms[4], gov.ms[5], gov.ms[6], gov.changes, gov.ups,
@@ -612,7 +614,6 @@ static void chain_done(void)
 void player_chain_end(void)
 {
     if (dac.running) {
-        static const uint32_t zero[256];
         uint32_t t0 = ticks(), end = audio.wr;  /* the end of the last track's frames */
         uint32_t lim = drain_limit_us();
         while (audio_free() < sizeof zero && ticks() - t0 < lim) {
@@ -634,7 +635,6 @@ void player_chain_end(void)
  * counted) */
 static int drain_step(void)
 {
-    static const uint32_t zero[256];
     audio_update();
     if (!drain.on) {
         drain.on = 1;
@@ -830,8 +830,8 @@ static int open_finish(void)
     player.bps = c->bits;
     player.length_ms = player.rate ? (uint32_t)((uint64_t)c->total_frames * 1000 / player.rate) : 0;
     log_printf("player: format: %u Hz, %u ch, %u bits, %u-byte frames, %u ms, after %u bytes of "
-               "input%s", player.rate, player.channels, player.bps, c->frame_bytes, player.length_ms,
-               c->in_rd, c->codec == HP_CODEC_VORBIS && (c->error_info >> 31) ?
+               "input%s", player.rate, player.channels, player.bps, c->frame_bytes,
+               player.length_ms, c->in_rd, c->codec == HP_CODEC_VORBIS && (c->error_info >> 31) ?
                ", codebooks from the cache" : "");
     /* core B decodes into its output ring while the DACs are set up */
     command(HP_CMD_PLAY);
@@ -1030,16 +1030,16 @@ static void perf_report(const char *name)
                                       "ALAC", "MPC" };
     const char *codec = player.codec < sizeof cn / sizeof *cn ? cn[player.codec] : "?";
     if (!ps.full) {
-        log_printf("perf: %s [%s %u/%u]: gap max %u ms (%s %u ms), loop gap max %u ms (%s %u ms); DAC "
-                   "ring never full", name, codec, player.rate, player.bps, a->max / 1000, a->max_ph ? a->max_ph : "-",
-                   a->max_ph_us / 1000, l->max / 1000, l->max_ph ? l->max_ph : "-",
-                   l->max_ph_us / 1000);
+        log_printf("perf: %s [%s %u/%u]: gap max %u ms (%s %u ms), loop gap max %u ms (%s %u "
+                   "ms); DAC ring never full", name, codec, player.rate, player.bps, a->max / 1000,
+                   a->max_ph ? a->max_ph : "-", a->max_ph_us / 1000, l->max / 1000,
+                   l->max_ph ? l->max_ph : "-", l->max_ph_us / 1000);
         return;
     }
     int32_t dmin = audio.min_fill > 0 ? audio.min_fill : 0;
     log_printf("perf: %s [%s %u/%u]: gap max %u ms (%s %u ms), loop gap max %u ms (%s %u ms); "
-               "DAC min %u ms; in min %u B (%u ms); out min %u B max %u B; in empty %u; laps lost %u; "
-               "core B underruns %u (%u B), min %u ms",
+               "DAC min %u ms; in min %u B (%u ms); out min %u B max %u B; in empty %u; laps "
+               "lost %u; core B underruns %u (%u B), min %u ms",
                name, codec,
                player.rate, player.bps, a->max / 1000,
                a->max_ph ? a->max_ph : "-", a->max_ph_us / 1000, l->max / 1000,

@@ -79,7 +79,8 @@ static int write_run(uint32_t sector, uint32_t count, const void *buf)
 
 int emmc_write_fw(uint32_t sector, uint32_t count, const void *buf)
 {
-    if (!emmc.p || sector < EMMC_FW1 || sector + count > EMMC_FW1 + emmc.p || sector + count < sector)
+    if (!emmc.p || sector < EMMC_FW1 || sector + count > EMMC_FW1 + emmc.p ||
+        sector + count < sector)
         return EMMC_EPROTECT;
     return write_run(sector, count, buf);
 }

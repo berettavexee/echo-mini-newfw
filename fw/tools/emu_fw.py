@@ -5,7 +5,7 @@
             [--trace-lcd] [--elf build/fw.elf] [--disk DISK.IMG] [--keys MS:KEY,...]
             [--shots MS:OUT.png,...] [--expect-fw FILE]
 
-The loader is reproduced from re/newfw/ETUDE.md 2.2: header check against its copy at fw_end,
+The loader is reproduced from ETUDE.md 2.2: header check against its copy at fw_end,
 overlay table at [0x6c], code and data of entries 0-2 copied, BSS cleared, then SP, PC from the
 vector table at the start of the data of entry 0, r0 = table, r1 = SP, r2 = reset.
 Models: CRU (PLL locked), SARADC (value per channel), GPIO inputs (Power key, panel variant
@@ -141,6 +141,25 @@ class Panel:
             self.x0, self.x1 = self.args[0] << 8 | self.args[1], self.args[2] << 8 | self.args[3]
         if self.cmd == 0x2b and len(self.args) == 4:
             self.y0, self.y1 = self.args[0] << 8 | self.args[1], self.args[2] << 8 | self.args[3]
+
+    def stream(self, pixels):
+        """pixels from the VOP's FIFO (DMA, ETUDE §134): on from the window's current place"""
+        if self.cmd != 0x2c:
+            return
+        x0, x1 = self.x0, self.x1
+        i, n = 0, len(pixels)
+        while i < n:
+            k = min(n - i, x1 - self.x + 1)
+            r = self.y - 35
+            if 0 <= r < 170:
+                lo, hi = max(self.x, 0), min(self.x + k, 320)
+                if hi > lo:
+                    self.fb[r][lo:hi] = pixels[i + lo - self.x:i + hi - self.x]
+            self.pixels += k
+            i += k
+            self.x += k
+            if self.x > x1:
+                self.x, self.y = x0, self.y + 1
 
     def fill(self, x, y, w, h, color):
         """lcd_fill() at once (emu_fw's hook): the same window, command and pixels"""
@@ -593,6 +612,40 @@ def main():
         return bytes([0, 0, bcd(t.second) | (0x80 if rtc["vl"] else 0), bcd(t.minute), bcd(t.hour),
                       bcd(t.day), (t.weekday() + 1) % 7, bcd(t.month), bcd(t.year % 100)]) + bytes(7)
 
+    # DMAC1 channel 0 into the VOP's FIFO (lcd.c, ETUDE §134), at once: its blocks, from its LLP
+    # (the first block in memory too), each word sent as 4 bytes as VOP_CON says (4 phases:
+    # half-words swapped with bit 4, the bytes of each with bit 5; the high byte goes first)
+    def screen_dma(uc):
+        con = regs.get(0x60070000, 0)
+        llp, seen, blocks = regs.get(0x60000010, 0), set(), []
+        if not llp:
+            blocks.append((regs.get(0x60000000, 0), regs.get(0x60000018, 0),
+                           regs.get(0x6000001c, 0)))
+        while llp and llp not in seen:
+            seen.add(llp)
+            sar, dar, nxt, ctl, ctlh = struct.unpack("<5I", uc.mem_read(llp, 20))
+            blocks.append((sar, ctl, ctlh))
+            llp = nxt if ctl & 0x18000000 else 0
+        state["screen_dma"] = state.get("screen_dma", 0) + 1
+        for sar, ctl, ctlh in blocks:
+            n = ctlh & 0xfff
+            if (ctl >> 9) & 3 == 2:                              # source fixed: a fill
+                words = [struct.unpack("<I", uc.mem_read(sar, 4))[0]] * n
+            else:
+                words = list(struct.unpack(f"<{n}I", uc.mem_read(sar, 4 * n)))
+            if con & 0x800:                                      # bypass: a byte a word
+                for w in words:
+                    panel.data(w & 0xff)
+                continue
+            px = []
+            for w in words:
+                if con & 0x10:
+                    w = (w & 0xffff) << 16 | w >> 16
+                if con & 0x20:
+                    w = (w & 0x00ff00ff) << 8 | (w >> 8) & 0x00ff00ff
+                px += (w >> 16, w & 0xffff)
+            panel.stream(px)
+
     def periph(base):
         def rd(uc, off, size, _):
             a = base + off
@@ -622,6 +675,8 @@ def main():
                 return 0
             if a == 0x500100e8:
                 return 2 if opt("--vbus", "0") == "1" else 0
+            if a == 0x600003a0:                                  # DMAC1 ChEnReg (channel 0 done)
+                return state.get("chen", 0)
             if a == 0x600001b8 and "dma" in state:               # DMAC1 ch5 SAR: moves with time
                 d = state["dma"]                                 # [base, total, t, us x bytes]
                 dbase, total = d[0], d[1]
@@ -672,6 +727,15 @@ def main():
                 if ch is not None and sh.b:
                     sh.b.deliver(ch)
                 return
+            if a == 0x600003a0:                                  # DMAC1 ChEnReg: the channels on
+                en = state.get("chen", 0)
+                for ch in range(8):
+                    if val >> (8 + ch) & 1:
+                        en = en | (1 << ch) if val >> ch & 1 else en & ~(1 << ch)
+                state["chen"] = en
+                if val & 0x100 and val & 1:                      # channel 0: the screen's (lcd.c)
+                    screen_dma(uc)
+                    state["chen"] &= ~1
             if a == 0x600003a0 and val & 0x2000:                 # DMAC1 ChEnReg, channel 5
                 if val & 0x20:
                     dbase, total, llp, seen = regs.get(0x600001b8, 0), 0, regs.get(0x600001c8, 0), set()

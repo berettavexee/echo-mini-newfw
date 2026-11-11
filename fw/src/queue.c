@@ -410,7 +410,8 @@ void q_from_lib(int kind, uint32_t param, int start, const char *name)
     q_n = n;
     slots_clear();
     q_shuffle_new(-1);
-    q_cur = start >= 0 && start < q_n ? start : play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;
+    q_cur = start >= 0 && start < q_n ? start :
+            play_mode == MODE_SHUFFLE && q_n > 1 ? shuf_at(0) : 0;
     if (play_mode == MODE_SHUFFLE && start >= 0)
         q_shuffle_new(q_cur);
     copy_name(q_folder, name, sizeof q_folder);

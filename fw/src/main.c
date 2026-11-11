@@ -52,11 +52,11 @@ char *put_hex(char *p, uint32_t v, int digits)
     return p;
 }
 
-/* One text line, padded with the background up to the right edge */
+/* One text line, padded with the background up to the right edge (one pass of strips; a text
+ * too long ends with an ellipsis) */
 void sys_line(int y, const char *s, uint16_t fg)
 {
-    int x = lcd_text(4, y, s, fg, BG);
-    lcd_fill(x, y, LCD_W - x, 16, BG);
+    lcd_text_clip(4, y, s, LCD_W, fg, BG);
 }
 
 /* Status lines are redrawn only when their text or colour changed: every pixel goes through
@@ -287,6 +287,10 @@ void sys_idle(void)
                    c == 1 ? "" : c ? " (not set)" : " (none)",
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) / 10 : 0,
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) % 10 : 0);
+        log_printf("lcd: DMA mode %d: %u transfers, %u KiB, waits %u ms (max %u us), %u failures",
+                   lcd_dma_mode, lcd_dma.xfers, lcd_dma.bytes >> 10, lcd_dma.wait_us / 1000,
+                   lcd_dma.wait_max, lcd_dma.fails);
+        lcd_dma.wait_max = 0;
     }
     sys_power_poll(now, 0);
 }
@@ -391,8 +395,8 @@ void sys_screen_set(int on)
     if (on) {
         if (clock_is_low) {
             clock_low(0);                       /* the screen at full speed (ui.c power_service) */
-            log_printf("screen: clocks back on the PLL, core %u Hz against the crystal (%u expected)",
-                       clock_measure(50), cpu_hz);
+            log_printf("screen: clocks back on the PLL, core %u Hz against the crystal "
+                       "(%u expected)", clock_measure(50), cpu_hz);
         }
         lcd_wake_lit();                         /* not waited: lcd_service() lights it 120 ms */
     } else {                                    /* later, the first frame drawn meanwhile */
@@ -482,6 +486,12 @@ int main(void)
     storage_init();
     font_init();
     lang_init();                                /* (the language: with the settings, ui_main) */
+#ifdef ECHO_LCDCAL
+    lcd_calibrate();
+#endif
+#ifdef ECHO_LCDPERF
+    lcd_perf_probe();
+#endif
     rtc_init();
     log_printf("battery %u mV, usb %d, charge pin %d, jack 3.5 %d 4.4 %d, power key %d",
                battery_mv(), vbus(), gpio_get(PIN_CHARGING), gpio_get(PIN_JACK35),
@@ -560,7 +570,8 @@ void fault_screen(const uint32_t *frame, uint32_t exc)
     p = put_hex(p, REG(0xe000ed38), 8);
     *p = 0;
     lcd_text(4, 44, b, FG, RGB(128, 0, 0));
-    lcd_text(4, 84, EN("any key: restart   Power 2 s: off"), FG, RGB(128, 0, 0));   /* the fault screen: English */
+    /* the fault screen: English */
+    lcd_text(4, 84, EN("any key: restart   Power 2 s: off"), FG, RGB(128, 0, 0));
     lcd_backlight(1);
     /* no SysTick here: busy-wait on the ADC (about 20 us per read) */
     for (unsigned n = 0;;) {

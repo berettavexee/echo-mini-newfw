@@ -1,6 +1,6 @@
 /* RKNanoD peripheral addresses and register offsets used by the firmware.
  * Names follow the RKNanoD TRM; values were checked against the stock firmware and RECHO
- * (re/newfw/ETUDE.md). Registers of the CRU and the GRF take a write mask in bits 31:16. */
+ * (ETUDE.md). Registers of the CRU and the GRF take a write mask in bits 31:16. */
 #ifndef REGS_H
 #define REGS_H
 
@@ -71,6 +71,13 @@
 #define VOP_TIMING          (VOP_BASE + 0x08)
 #define VOP_CMD             (VOP_BASE + 0x28)
 #define VOP_DATA            (VOP_BASE + 0x2c)
+#define VOP_LCD_SIZE        (VOP_BASE + 0x0c)   /* FIFO mode: (height - 1) << 12 | (width - 1) */
+#define VOP_FIFO_WM         (VOP_BASE + 0x10)
+#define VOP_SRT             (VOP_BASE + 0x14)
+#define VOP_INT_CLEAR       (VOP_BASE + 0x1c)
+#define VOP_INT_STATUS      (VOP_BASE + 0x20)   /* bit 3: frame done (raw) */
+#define VOP_STATUS          (VOP_BASE + 0x24)   /* bit 0: working */
+#define VOP_START           (VOP_BASE + 0x30)
 #define VOP_CON_BYPASS      (1u << 11)          /* one byte per DATA write */
 #define VOP_CON_SPLIT2      (1u << 1)           /* one RGB565 pixel per DATA write, 2 phases */
 #define GATE_HCLK_VOP       (7 * 16 + 15)       /* clock gate number (CLKGATE7 bit 15) */

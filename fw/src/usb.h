@@ -24,9 +24,9 @@ struct usb_state {
 
 /* A class other than mass storage: its descriptors and requests. setup() gets the class requests
  * and SET_INTERFACE / GET_INTERFACE: it returns -1 to stall, 0 for no data, or the number of
- * bytes to send from 'reply' (at most USB_REPLY_MAX); a request with data from the host (SET_CUR) comes to
- * setup_out() once the data is in. iso_out() gets each packet of the isochronous OUT endpoint: n
- * bytes to read from usb_rx_word(), (n + 3) / 4 words, all of them. */
+ * bytes to send from 'reply' (at most USB_REPLY_MAX); a request with data from the host (SET_CUR)
+ * comes to setup_out() once the data is in. iso_out() gets each packet of the isochronous OUT
+ * endpoint: n bytes to read from usb_rx_word(), (n + 3) / 4 words, all of them. */
 #define USB_REPLY_MAX 128
 
 struct usb_class {

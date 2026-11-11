@@ -1,7 +1,8 @@
 # Nouveau firmware ECHO MINI : étude de faisabilité (étape 1)
 
-Document de travail local, en français, comme `re/REPORT.md`. Rien de ce dossier n'est publié. Le
-SDK Rockchip (`re/sdk_ref/`) et le TRM (`re/doc_rknanod/`) ont servi de référence de lecture : on n'en
+Document de travail en français, publié avec le dépôt (l'étude du firmware d'origine, `ref/REPORT.md`,
+reste locale). Le
+SDK Rockchip (`ref/sdk_ref/`) et le TRM (`ref/doc_rknanod/`) ont servi de référence de lecture : on n'en
 recopie rien, on ne cite que des noms et des adresses observés dans le firmware.
 
 ## 0. Objectif et architecture visée
@@ -1064,7 +1065,7 @@ en deux copies, RECHO par exemple).
 | 0.7→0.8 | entrée en mode USB par VOL− 3 s : le chargeur répond mal (PLL et attentes mémoire laissées à 200 MHz) | 0.8 : retour au quartz (valeurs de RECHO `0x030516c4`) avant tout redémarrage |
 | 0.8 | installée par RECHO ; **installateur validé sur l'appareil** : `RECHO010.IMG` (5 Mio) vérifiée (FAT32, CRC), écrite dans FW2 puis FW1 avec relecture, redémarrage sous RECHO | — |
 
-Écriture : par le mode USB du chargeur avec `re/newfw/flash/flash.sh` (local, non publié). Le Rockusb du chargeur se bloque après une erreur de transfert tant que son point d'accès IN n'est pas vidé ; `rkdiag.py` (lecture seule) le débloque avant chaque étape.
+Écriture : par le mode USB du chargeur avec `flash/flash.sh` (local, non publié). Le Rockusb du chargeur se bloque après une erreur de transfert tant que son point d'accès IN n'est pas vidé ; `rkdiag.py` (lecture seule) le débloque avant chaque étape.
 
 ## 12. Étape 4 : USB en stockage de masse, image 0.9 (2026-10-18)
 - `usb.c` : DWC2 en mode esclave, interrogé (sans interruptions), FIFO d'émission partagée ;
@@ -1738,7 +1739,7 @@ de 32 Kio, sortie du cœur B portée à 96 Kio.
 - **Émulation** : WAV identique au bit près (132 300 trames), MP3 à 2 LSB de ffmpeg ; anneau du
   DAC plein 279 ms après le démarrage (sortie du cœur B : 94 Ko d'avance), 0 manque.
 - **Outils** : le scratchpad de la session a été vidé ; environnement Python, disques et
-  médias de test dans `re/newfw/work/` (local, jamais publié). `fw/tools/mkdisk.py` refait un
+  médias de test dans `work/` (local, jamais publié). `fw/tools/mkdisk.py` refait un
   disque de test, `fw/tools/pcmcmp.py` compare deux PCM.
 - **FLAC 24 bits / 96 kHz, blocs de 8 192** (émulation 0.30) : 288 000 trames **identiques au bit
   près** à ffmpeg (trames de 32 bits), tas de dr_flac 70 Ko (sous la limite de 112 Ko), anneau du
@@ -2007,14 +2008,14 @@ celle d'origine). Repris de RECHO : seulement l'ergonomie décrite sur sa page (
 - **OPEN Vorbis** : de 41 à 55 ms et de 95 à 155 Ko lus, contre 17 ms pour l'Opus. `pg_packet` copiait les 16 premiers Ko de l'en-tête de commentaires, puis sautait le reste par pas de 255 octets. Ces sauts restaient presque toujours dans ce que le cœur A avait déjà lu (32 Ko d'avance par `feed`), si bien que la pochette était lue en entier.
 
 **0.41** :
-- `hifi/oggpage.c` : `pg_packet(buf, max)` ne lit que les `max` premiers octets. Le reste est sauté par un seul `in_seek` par page, ce qui fait sauter le cœur A au-delà de son anneau. Même méthode que pour le firmware d'origine (`re/REPORT.md` §38).
+- `hifi/oggpage.c` : `pg_packet(buf, max)` ne lit que les `max` premiers octets. Le reste est sauté par un seul `in_seek` par page, ce qui fait sauter le cœur A au-delà de son anneau. Même méthode que pour le firmware d'origine (`ref/REPORT.md` §38).
 - En-tête de commentaires : seuls 7 octets sont lus (Vorbis) ou 8 (Opus, le magic `OpusTags` est vérifié dans tous les cas).
 - `ogg_end_granule` (cœur A) n'est pas modifié : il part déjà d'une fenêtre de 8 Ko, parcourue en remontant.
 - Indicateur de batterie : « CHG » pendant la charge et « USB » une fois chargée (`charging()`, `board.c`).
 - Vérification en émulation (Vorbis 173 Ko de pochette, puis Opus 205 Ko, tronqués à environ 245 Ko) : PCM identique octet pour octet à l'ancien lecteur Ogg (277 000 trames), mais **lecture identique elle aussi** : 237 893 octets lus, ouverture inchangée. ffmpeg découpe l'en-tête de commentaires en pages de 4 123 octets, alors que le cœur A lit 8 Ko par lecture et jusqu'à 32 Ko d'avance. Un saut d'une page reste donc dans ce qui est déjà lu. Le gain n'existe que pour des pages plus grandes que cette avance.
-- Sur ce firmware, il resterait donc à aller plus loin : soit faire parcourir les en-têtes de page par le cœur A avant le démarrage du cœur B (peu de gain : une petite lecture par page de 4 Ko au lieu de lectures contiguës), soit garder les codebooks décodés d'une piste à l'autre quand l'en-tête de configuration est identique, ce qui est le cas sur tout un album. Les codebooks coûtent environ 2 M d'instructions (QEMU, `re/REPORT.md` §38), soit sans doute la plus grande part des 41 à 55 ms mesurées.
+- Sur ce firmware, il resterait donc à aller plus loin : soit faire parcourir les en-têtes de page par le cœur A avant le démarrage du cœur B (peu de gain : une petite lecture par page de 4 Ko au lieu de lectures contiguës), soit garder les codebooks décodés d'une piste à l'autre quand l'en-tête de configuration est identique, ce qui est le cas sur tout un album. Les codebooks coûtent environ 2 M d'instructions (QEMU, `ref/REPORT.md` §38), soit sans doute la plus grande part des 41 à 55 ms mesurées.
 
-**Journal de la 0.41 sur l'appareil** (`work/logs/20261022_2211/`, 35 min). Installée par le firmware d'origine sous le nom `HIFIEC74.IMG`, puisqu'il ne cherche que `ECHOMINI.IMG` et `HIFIEC00`–`97.IMG` (`re/REPORT.md` §5). Enchaînement des 11 fichiers CH\* sans décrochage, FLAC 24 bits / 96 kHz compris.
+**Journal de la 0.41 sur l'appareil** (`work/logs/20261022_2211/`, 35 min). Installée par le firmware d'origine sous le nom `HIFIEC74.IMG`, puisqu'il ne cherche que `ECHOMINI.IMG` et `HIFIEC00`–`97.IMG` (`ref/REPORT.md` §5). Enchaînement des 11 fichiers CH\* sans décrochage, FLAC 24 bits / 96 kHz compris.
 
 | Fichier | OPEN (cœur B) | Lu | Tags (cœur A) |
 |---|---|---|---|
@@ -3702,7 +3703,7 @@ Plus aucune fréquence de la table ne repose sur un VCO hors de la plage éprouv
 
 ## 91. Les CS43131 comparés au datasheet (2026-11-01)
 
-Datasheet public de Cirrus Logic (DS1155F2) gardé en référence locale (`re/doc_cs43131/`, hors du dépôt, comme le TRM). Page de documentation : `docs/CS43131.md` (câblage, séquence, comparaison des firmwares).
+Datasheet public de Cirrus Logic (DS1155F2) gardé en référence locale (`ref/doc_cs43131/`, hors du dépôt, comme le TRM). Page de documentation : `docs/CS43131.md` (câblage, séquence, comparaison des firmwares).
 
 **Constat** : l'origine, RECHO, EchoPod, ReChord et nous appliquons la même séquence, qui est presque mot pour mot l'exemple « I2S en mode mono » du datasheet (§5.13.4) ; le « bloc non documenté » `0x18xxxx` est la séquence d'activation du mode mono (§5.12.1). Écarts relevés :
 - `HP_OUT_CTL_1` : `10` (1 V pleine échelle) chez nous, RECHO et ReChord ; `31` (2 V) à l'origine ; EchoPod propose les deux. **Décision : on reste à 1 V.**
@@ -4564,3 +4565,154 @@ Les annonces à l'insertion de la carte sont abandonnées : il faudrait lire l'i
 ## 130. Version 0.103 (2026-11-10)
 
 Publiée à la demande de l'utilisateur : `rework` fusionnée dans `main`. C'est une étape fonctionnelle majeure : la bibliothèque musicale est utilisable de bout en bout. Contenu depuis la 0.102 : l'index construit sur l'appareil (§126 : 18 003 morceaux en 3 à 4 min, « no change » en 3 s, l'ancien index en RAM, BACK maintenu l'arrête), les vues (§127), la file de lecture sur l'eMMC `NEWFWQ.DAT`, le mode file et l'écran Play queue (§128), la carte (§129 : son numéro de série dans la file et l'index, la mise à jour proposée pour une autre carte, les pistes d'une carte illisible gardées ; une seule carte gérée), les erreurs de lecture dites une fois. Le code est celui des images de test essayées sur l'appareil (0.102b1 à b15, la dernière le 2026-11-10, et 2 h 45 d'usage réel de la b13) ; seuls le numéro de version et la date changent. La suite demande un travail de fond (organisation du projet, puis favoris et paroles) : la prochaine version n'est pas attendue avant une semaine au moins.
+
+## 131. Mémoire, étape 0 : la police lue sur l'eMMC (0.103m1, 2026-11-11)
+
+Première étape du plan mémoire discuté le 2026-11-11 (le projet est limité par la RAM du cœur A ; les overlays viendront ensuite). Constat de départ, build 0.103 : il restait **2 Kio de BSS**, 1,6 Kio de `.screenram`, 2,3 Kio de `.dirbuf` et 21 Kio de code ; c'est la place des données qui manque le plus, pas celle du code. Les réglages (`struct settings`, 18 octets, déjà dans le secteur de reprise) ne gagneraient rien à une base clé-valeur sur l'eMMC.
+
+**La police** (`font.c`) gardait en BSS les tables de son blob : la table des suites (`first`, 17,6 Kio), l'index des glyphes (`index_`, 8,8 Kio), le décalage de chaque groupe de 16 glyphes (`group`, 10,4 Kio) et un tampon de 2 Kio. Désormais :
+- la table des suites et l'index restent sur l'eMMC (dans l'image, format du blob inchangé), lus à travers un cache de 3 secteurs ; en RAM, le premier point de code de chaque bloc de 128 suites (140 octets) ;
+- les décalages des groupes restent en RAM sous forme compacte : 16 bits chacun depuis une base de 32 bits tous les 64 groupes (5,3 Kio ; 64 groupes de 16 enregistrements de 52 octets au plus tiennent sous 64 Kio). Les laisser sur l'eMMC coûtait une lecture de plus par glyphe manquant en CJK : les groupes d'un texte japonais tombent chacun dans un secteur différent de cette table de 10 Kio ;
+- le cache des glyphes (256 enregistrements) est indexé par **point de code** et non plus par numéro de glyphe : un glyphe déjà affiché ne demande ni recherche ni lecture (le titre qui défile toutes les 33 ms) ; un caractère absent de la police y est gardé comme « ? » ; un groupe lu (une commande eMMC, comme avant) range ses 16 glyphes, leurs points de code retrouvés dans les suites voisines (la police japonaise a 2 916 suites de moins de 4 glyphes : ne garder que la suite du caractère demandé doublait les lectures), sans jamais écraser la place du caractère demandé.
+
+**BSS : 36,6 Kio de moins** (fin de la BSS de `0x0301f718` à `0x030180f8` : 31,8 Kio libres avant `0x03020000`, contre 2 Kio). Code : 208 octets de moins (avec le tampon de silence partagé, ci-dessous).
+
+**Test sur PC** `tools/font_test.c` (dans `make check`) : le blob de la build servi comme FW1 ; les 37 690 glyphes demandés dans un ordre aléatoire (les caches vidés sans cesse), chacun comparé à l'enregistrement lu directement dans le blob ; les points de code absents (entre deux suites, avant la première, au-delà de U+10FFFF) donnent « ? » ; avec 20 % de lectures eMMC en échec, un glyphe est juste ou « ? », jamais un autre ; un en-tête abîmé est refusé. Coût mesuré sur le texte des catalogues (toutes les chaînes de `ja.po` à la suite, deux fois, le pire cas pour un cache de 256) : 1 480 lectures pour 1 443 caractères non ASCII contre 614 avant (`zh_CN.po` : 1 835 contre 714 ; `fr.po` : 26 contre 14), soit environ une lecture d'un secteur de plus par caractère CJK nouveau (≈ 0,12 ms selon le modèle de l'émulateur, `--mmc-lat` 100 µs + 20 µs par secteur) ; rien de plus pour un caractère déjà affiché. Un cache de tables de 6, 8 ou 12 secteurs ne ramène ce chiffre qu'à 1 215, 1 104 et 892 : 3 secteurs suffisent.
+
+**0.103m1 sur l'appareil** (`work/hwlog/2026-11-11_0.103m1/`) : installée, la police lue à 0,773 s du démarrage (0,774 s en b15) ; langues française, japonaise et chinoise, puis le dossier « Test alphabets » (18 pistes : coréen, grec, russe, polonais, vietnamien, hébreu, arabe, thaï, chinois simplifié et traditionnel, japonais) : affichage correct, aucun défaut relevé par l'utilisateur ; plus long dessin par piste identique à la b15 à 0-2 ms près (japonais 20 ms contre 19, coréen 17 contre 15), aucune erreur.
+
+**Le reste de l'étape 0** :
+- le tampon de silence de 1 Kio de `player.c`, présent deux fois dans les constantes, est partagé (1 Kio de code) ;
+- **LTO** essayé sur une copie : 1,6 Kio de code seulement (138 968 à 137 352 octets), au prix d'attributs `used` sur ce que l'assembleur de `start.c` appelle (`boot_regs`, `wdt_fired`, `fault_screen`) et sur `memset`, `memcpy`, `memcmp` : non retenu ; `-Oz` ne change rien face à `-Os` ;
+- **journal par jetons** (≈ 10 Kio de chaînes de format dans le code) : pas fait, décision à prendre (ci-dessous).
+
+**Journal par jetons : deux façons, une décision à prendre.** Les formats ne seraient plus dans le code chargé : une macro range chaque format dans une section non chargée et passe son adresse (le jeton) ; l'anneau du journal garde le jeton, l'heure et les arguments (les `%s` recopiés). Gain : environ 10 Kio de code, et l'anneau de 12 Kio garde environ trois fois plus de lignes. Reste à savoir qui remet le texte :
+- (a) **le firmware, au vidage vers `NEWFWLOG.TXT`**, en lisant les formats dans l'image sur l'eMMC (comme la police) : le fichier reste du texte, `readlog.py` et les tests de l'émulateur ne changent pas. Limite : pendant une installation, la copie qui porte les formats est réécrite ; les lignes écrites après sa réécriture ne peuvent plus être remises en texte (une marque de build dans le blob le détecte : elles sortent alors en jeton brut, décodables avec l'ELF), et ce sont justement les lignes du résultat de l'installation ; quelques lectures eMMC à chaque vidage ;
+- (b) **sur le PC** (`readlog.py --elf`) : rien à lire sur l'appareil, mais le fichier devient binaire et ne se lit plus sans l'ELF de chaque version qui y a écrit (garder `fw.elf` avec chaque image d'essai, le joindre aux versions publiées).
+
+## 132. Écran : ce que coûte une image, avant la DMA (0.103lp, 0.103m2, 2026-11-11)
+
+Question de l'utilisateur : dessiner seulement ce qui change et envoyer l'écran par DMA, comme les autres firmwares. Le dessin partiel existe depuis la 0.60 (§39) ; ce qui coûte est l'envoi octet par octet au VOP par le cœur A (un écran complet = 108 800 octets ; 11 à 19 ms par dessin complet, 3,9 ms par dessin partiel de l'écran de lecture). Le TRM (chap. 15) décrit la FIFO du VOP alimentée par DMA (RGB565 deux pixels par mot, échange d'octets, et YUV420 converti en RGB : utile pour des pochettes). Avant d'engager la DMA, une image de mesure dit quelle part du temps est le bus et quelle part le calcul des pixels, celle qui resterait au cœur A.
+
+**Image de mesure** `make EXTRA=-DECHO_LCDPERF` (version 0.103lp, ajoutée aux variantes de `check.sh --full`) : au démarrage, après la police, `lcd_perf_probe()` (`lcd.c`) chronomètre trois fois chacun : un remplissage uni de l'écran (le bus seul) ; 10 lignes de texte latin puis CJK envoyées comme aujourd'hui ; les mêmes lignes calculées dans une bande en RAM (320 × 16, 10 Kio) sans rien envoyer ; puis 10 bandes en RAM envoyées par le CPU. Lignes `lcdperf:` du journal. L'émulateur ne sert ici qu'à vérifier que la mesure tourne (son horloge suit les appels à `ticks()`, pas le travail).
+
+**Défaut trouvé en route (0.103m2)** : dans l'émulateur, la ligne CJK de la mesure relisait l'eMMC à chaque passage. Deux causes, la seconde la plus coûteuse : 夜 (U+591C) et 서 (U+C11C) tombaient dans la même case du cache à correspondance directe et se chassaient ; et chaque groupe lu rangeait ses 15 voisins par-dessus des glyphes qu'on venait de dessiner. Le cache passe à **2 voies** (128 ensembles, la moins récente remplacée) et un voisin lu d'avance ne prend qu'une place libre ou celle d'un autre voisin jamais dessiné. `font_test` : la ligne de la mesure redessinée 30 fois ne lit plus rien (179 lectures pour une paire de caractères avec le cache de la 0.103m1) ; catalogues dessinés deux fois : `ja.po` 736 puis 459 lectures (614 puis 608 avec les tables en RAM de la 0.103, 1 480 puis 1 467 en 0.103m1), `zh_CN.po` 928 puis 585 (714 puis 708). RAM : 384 octets de plus.
+
+**Résultats sur l'appareil (0.103lp, `work/hwlog/2026-11-11_0.103lp/`)**, cœur A à 200 MHz, `VOP_TIMING` `0x3083` :
+
+| Mesure (3 fois) | Temps | Par unité |
+|---|---|---|
+| remplissage uni de l'écran, 108 800 octets (le bus seul) | 8,16 ms | 75 ns par octet (13,3 Mo/s) |
+| 10 lignes latines envoyées comme aujourd'hui (102 400 octets) | 18,6 ms | |
+| les mêmes, calculées en RAM seulement | 10,2 ms | 200 ns par pixel (≈ 40 cycles) |
+| 10 bandes en RAM envoyées par le CPU | 10,25 ms | |
+| 10 lignes CJK envoyées (1er passage, glyphes lus sur l'eMMC / suivants) | 25,2 / 17,1 ms | |
+| les mêmes en RAM seulement | 9,2 ms | |
+
+Lecture :
+- **le calcul des pixels coûte autant que le bus** : 18,6 ms ≈ 10,2 ms de calcul + 8 ms de bus, sans recouvrement (le CPU attend le VOP à chaque octet). Une DMA seule ramènerait le dessin de 10 lignes à environ 10 ms de cœur A (−45 %), pas plus ;
+- **le calcul est lent** : environ 40 cycles par pixel (`draw_glyph_cols` teste chaque pixel : bornes, bit, choix de la couleur, deux écritures). Un dessin des lignes d'un glyphe par octets de bits (table de 8 pixels, deux couleurs par mot, sans test par pixel) devrait descendre vers 5 à 10 cycles par pixel : environ 1,5 à 2,5 ms pour 10 lignes. Gain logiciel pur, vérifiable sur l'émulateur pixel pour pixel, utile avec ou sans DMA ;
+- le bus (75 ns par octet) est proche de la limite de la dalle (cycle d'écriture minimal du ST7789 : 66 ns) : rien à gagner à le serrer ;
+- les deux ensemble (calcul rapide dans une bande, puis DMA) : environ 2 à 3 ms de cœur A pour un écran complet au lieu de 13 à 19 ms, moins de 1 ms pour un dessin partiel au lieu de 3,9 ms ;
+- le correctif du cache des glyphes est confirmé : la ligne CJK coûte 25,2 ms au premier passage (glyphes lus), puis 17,1 ms à chaque passage suivant, sans aucune lecture.
+
+## 133. Mémoire, étape 0 : le journal par jetons (0.103t1, 2026-11-11)
+
+Option A du §131, décidée par l'utilisateur, avec les lignes de l'installation en texte.
+
+**Principe** (`log.h`, `log.c`) : `log_printf` devient une macro ; le format va dans la section `logfmt`, placée à l'adresse 0 et jamais chargée (`link.ld`, `INFO`) : l'adresse d'un format est son décalage, le jeton. `_Generic` dit à la compilation quels arguments sont des chaînes (descripteur de 32 bits : leur nombre, 24 au plus, puis un bit par argument ; un appel de `player.c` en a 20). L'anneau garde deux sortes d'entrées : les lignes de texte (`log_text`, les 4 lignes de `install.c`) et les enregistrements (0x01, temps, jeton sur 2 octets, descripteur, arguments : 4 octets ou chaîne recopiée avec son 0 ; 256 octets au plus, comme une ligne de texte). `mkimg.py` range la section dans l'image (« NLFM », version, CRC, longueur, puis les formats ; en-tête +0x1e8, à zéro dans l'en-tête d'origine ; refus d'un format de 256 octets ou plus). Au vidage vers `NEWFWLOG.TXT`, chaque enregistrement devient texte avec son format lu dans l'image (FW1, sinon FW2) à travers un cache de 2 secteurs, vidé à chaque vidage.
+
+**Quand les formats ne sont plus là** : l'anneau note le CRC des formats de ce démarrage (`fmt_cur`, lu à `log_attach`), et pour les entrées d'un démarrage précédent encore dans l'anneau (`bound`) celui de ce démarrage-là (`fmt_prev`) ; le CRC des formats de l'image est relu à chaque vidage. S'il diffère (une installation a réécrit l'image, une autre image mise par un outil extérieur), l'enregistrement est écrit brut : `?log 063c "A.WAV" ac44 …`, que `readlog.py --elf FW.ELF` remet en texte. L'anneau perd ses entrées les plus anciennes entières (plus jamais un enregistrement coupé). Anneau « NLG3 » : l'ancien (NLG2) est remis à zéro une fois.
+
+**Tests** : `log_test` compilé deux fois (texte, et `-DLOG_TOKENS` avec les formats en mémoire) : `check.sh` compare les deux journaux produits, identiques à la ligne brute près ; formats changés entre deux vidages : la ligne sort brute, puis la suivante en texte. Émulateur : `?log` interdit dans tous les tests ; les 30 tests passent (les premiers essais ont trouvé deux défauts : un format de 206 octets au-delà du tampon de lecture, et une limite de 63 octets par chaîne qui coupait les étiquettes longues ; corrigés).
+
+**Gains** (build 0.103t1 contre 0.103) : code 130 964 octets contre 139 176 (place libre dans la fenêtre de code : 31,0 Kio contre 23,0) ; les 10,7 Kio de formats hors de la mémoire chargée ; BSS : 1,8 Kio de plus pour la lecture des formats (tampons de vidage). Avec la police (§131, §132) : BSS libre 30 328 octets contre 2 280 en 0.103.
+
+## 134. Écran : calcul rapide des glyphes et envoi par DMA (0.103d1, 2026-11-11, nuit, émulateur)
+
+Travail fait en autonomie à la demande de l'utilisateur (« implémente le rendu DMA, je vérifierai sur l'appareil demain matin »), d'après les mesures du §132.
+
+**Le calcul** (`lcd.c`) : une ligne de texte est dessinée dans une **bande en RAM** (320 × 8 pixels au plus, deux bandes de 5 Kio : l'une se dessine pendant que l'autre part), puis envoyée d'un bloc. Une ligne de 16 pixels fait deux bandes, le titre en grand quatre. Les fonctions publiques ne changent pas (`lcd_text_clip_x`, `lcd_text_scroll`, `lcd_text`, `lcd_glyph`) : chacune exécute son corps une fois par bande, ce qui tombe hors de la bande n'est pas écrit ; `lcd_text_clip_x` fait d'abord un passage à vide pour connaître le x atteint (des points de suspension peuvent finir au-delà de `xmax`, comme avant). `draw_glyph_cols` lit chaque ligne du glyphe en un mot de 32 bits (bit 31 : la colonne `xo`), puis chaque pixel n'est plus que le bit de tête et un décalage ; les lignes vides du glyphe sont des suites de fond ; l'échelle 2 garde une boucle à part.
+
+**L'envoi** : canal 0 du DMAC1 (celui du DAC est le 5, de priorité plus haute), requête 14 (VOP), mots de 32 bits à deux pixels, rafales de 4, chaîne de blocs de 2 048 mots au plus. Pour chaque envoi : la fenêtre par des commandes en mode bypass, le VOP attendu au repos (TRM 15.6.1), puis le VOP en mode FIFO (`VOP_CON`), `VOP_LCD_SIZE`, `VOP_START`, et le canal lancé ; le CPU repart aussitôt. Un remplissage (`lcd_fill`) part par DMA depuis un mot fixe (source non incrémentée) : rien à calculer. L'envoi suivant, toute commande à la dalle (`cmd()`), un changement d'horloge (`clock_low`) et la remise à zéro du DMAC1 par le DAC (`audio.c`) attendent d'abord la fin de l'envoi en cours (`lcd_sync`) : fin = canal arrêté, et VOP au repos ou son « image finie » levée. Un envoi pas fini en 50 ms : le canal arrêté, le VOP remis à zéro, le CPU écrit l'écran pour toujours, l'écran est redessiné en entier (`lcd_lost`, `ui.c`), une ligne de journal avec l'état des registres. Au démarrage, `dma_init` essaie un petit envoi noir (aucun ordre d'octets en jeu) avec la destination sur le maître AHB 2 (comme le canal du DAC), sinon le 1, sinon le CPU. L'écran de faute écrit toujours par le CPU (`lcd_wake_fault` arrête la DMA). Journal, chaque minute : `lcd: DMA mode M: N transfers, K KiB, waits … ms (max … us), F failures`.
+
+**L'inconnue : l'ordre des octets.** Le TRM dit, pour deux pixels RGB565 par mot rangés comme en mémoire, `sw_mcu_hw_swap` = 1 et quatre phases (`VOP_CON` = `0x16`, mode 1, celui par défaut) ; il ne dit pas dans quel ordre partent les quatre octets. Les quatre ordres possibles sont les modes 1 à 4 (`0x16`, `0x06`, `0x36`, `0x26` : demi-mots échangés ou non, octets échangés ou non). L'émulateur suit la lecture du mode 1 (octet de poids fort du premier pixel en tête) ; seul l'appareil tranchera.
+
+**Mémoire** : bandes 10 Kio, liste de blocs 280 octets : BSS libre 19,7 Kio (30,3 Kio en 0.103t1). Code : +2,1 Kio.
+
+**Tests** :
+- `lcd_test` (sur PC, dans `make check`) : tous les glyphes du blob (37 690 et l'ASCII), aux échelles 1 et 2, la cellule entière puis coupée à gauche et à droite, dans des bandes de 8 puis de 3 lignes placées n'importe où : 1,33 milliard de pixels comparés au calcul de la 0.103 (gardé dans le test comme référence), aucun différent ;
+- `tools/shotcmp.py` (émulateur) : la même suite de touches sur deux images (niveau du haut, un dossier aux noms en sept écritures, l'écran de lecture avec le titre en grand, le menu, la file, les réglages, l'écran système), captures comparées octet pour octet : la 0.103m2 commitée (ancien calcul, CPU) contre la 0.103d1 (DMA) : 7 écrans sur 7 identiques, avec et sans le raccourci de l'émulateur pour `lcd_fill` (`--no-fast-fill` : les remplissages par DMA réellement exécutés) ; la 0.103d1 compilée sans DMA (`LCD_NO_DMA`) contre la 0.103d1 : identiques ;
+- l'émulateur modélise le canal 0 (sa chaîne de blocs, source fixe ou non, l'ordre des octets selon `VOP_CON`) et l'état des canaux (`ChEnReg`) ; les 30 tests `emutest` passent ; dans l'émulateur, une minute au niveau du haut : 49 envois, 303 Kio, 0 échec.
+
+**Image d'essai** `NEWFWD1C.IMG` (0.103d1c, `EXTRA="-DECHO_LCDCAL -DECHO_LCDPERF"`) : au démarrage, une **page de test** : la ligne « ref » dessinée par le CPU (sept barres de couleur et « Abc 123 東京 » jaune sur bleu), puis les lignes 1 à 4 dessinées par DMA dans les modes 1 à 4, et « 5 » (aucune : le CPU). Une inversion des octets se voit sur les couleurs des barres ; une inversion des paires de pixels sur le texte (lettres en dents de scie). VOL+ / VOL- déplacent la marque, PLAY confirme ; sans touche pendant 30 s, le mode 1. Le choix vaut pour cette session (journal : `lcd: screen test: …`), puis les mesures `lcdperf:` (CPU puis DMA : remplissage, 10 lignes latines et CJK), puis l'usage normal dans le mode choisi.
+
+**À relever demain sur l'appareil** : la ligne qui ressemble à « ref » (ou aucune) ; si l'une est juste, l'usage normal (navigateur, lecture, titres qui défilent, réglages, mise en veille et réveil de l'écran, une lecture longue) sans défaut d'affichage ; puis le journal : `lcd: DMA to the VOP …`, `lcd: screen test …`, `lcdperf:`, les lignes `ui: draw …` (à comparer aux 13,4 ms par dessin complet et 3,9 ms par dessin partiel de la 0.103lp) et `lcd: DMA mode …` (échecs : 0 attendu).
+
+## 135. La DMA de l'écran sur l'appareil : échec de 0.103d1c, ce que fait RECHO, image de diagnostic 0.103d2c (2026-11-11)
+**Résultat de 0.103d1c** (`work/hwlog/2026-11-11_0.103d1c/`) : l'essai du démarrage (deux lignes noires de 320 pixels) passe, puis le premier vrai envoi (un carré 22 × 12 de la page de test) ne finit jamais : canal DMA arrêté (`en 0`), mais `VOP_STATUS` = `0x1b80001` (« working ») et `INT_STATUS` = `0x10` (FIFO vide, jamais « image finie ») au bout de 50 ms. Le repli CPU prend la main, la page de test est sautée (aucun mode DMA à choisir). Même chose aux deux démarrages. Le journal par jetons, lui, fonctionne (aucune ligne brute).
+
+**Régression du chemin CPU** : 10 lignes latines en 23,8 ms (18,6 ms en 0.103lp), le calcul seul en 12,7 ms (10,2 ms). Les bandes refont le décodage UTF-8 et la recherche des glyphes à chaque bande, plus un passage pour la largeur : à reprendre (décoder une fois par ligne).
+
+**RECHO 0.10.0** (`HIFIEC90.IMG`, lu pour l'information seulement ; rien n'est repris) alimente l'écran par DMA (« lcd: push adma », journaux sans échec). Sa fonction d'envoi d'une bande :
+- bandes toujours en pleine largeur (320 pixels), fenêtre par commandes en mode bypass ;
+- `FIFO_WM` = `0x808`, `LCD_SIZE` = `(h − 1) << 12 | 319`, puis `VOP_CON` = `0x16` (notre mode 1), changé seulement VOP au repos et après une pause ;
+- **pas de `VOP_START`** (une option, désactivée par défaut) ;
+- DMAC1 canal 0, un seul bloc, `CTL` = `0x0210d924` : rafales de 16, **source sur le maître AHB 2, destination sur le maître 1** (nous : rafales de 4, destination sur le maître 2) ; `CFG` `0x800`, `CFG_HI` `0x7007` comme nous ;
+- fin jugée sur la DMA seule (`RawTfr`) ; l'attente du VOP au repos ne vient qu'avant l'envoi suivant (12 µs après la fin, puis `VOP_STATUS` bit 0) ; un VOP encore « working » à ce moment est compté, et provoque une remise à zéro de la dalle.
+- Il connaît aussi un envoi `dma16` (`VOP_CON` `0x02`, deux phases, demi-mots de 16 bits).
+
+**0.103d2 / 0.103d2c** : l'envoi suit cet ordre (`FIFO_WM`, `LCD_SIZE`, VOP au repos, `VOP_CON`), et la manière de faire devient une variante : `VOP_START` ou non, maîtres de la source et de la destination, longueur des rafales. Variante 0 = celle de RECHO ; la 5 = celle de 0.103d1. Au démarrage, `dma_try` essaie les variantes dans l'ordre sur trois envois (deux lignes, un carré 22 × 12, deux lignes) et garde la première qui passe. L'image de test 0.103d2c journalise d'abord chaque variante sur six envois (lignes, carrés, bandes depuis la RAM, écran entier) : état du VOP avant, à la fin de la DMA, et au retour au repos (ou non, 20 ms), lignes `lcddiag:`. Puis la page de test (choix de l'ordre des octets) et les mesures `lcdperf:`. Émulateur : 30 tests passent ; la série complète tourne et se décode.
+
+**0.103d2c sur l'appareil** (photos de l'utilisateur ; journal pas encore relevé) : la DMA tourne enfin. Page de test : la ligne 1 (`VOP_CON` `0x16`) a les bonnes couleurs et le bon ordre des pixels ; la 2 a les pixels échangés deux à deux ; la 3 et la 4 les octets échangés. Dans le navigateur, certains noms (« 1000mods », « Aerosmith », « Air ») sont dessinés avec leurs pixels échangés deux à deux, d'autres (« AC/DC », « A Perfect Circle ») sont justes : les bandes de **largeur impaire**. Le VOP compte les pixels par lignes de la largeur de `LCD_SIZE` ; une ligne impaire finit au milieu d'un mot, et tout ce qui suit est décalé d'un pixel (RECHO n'envoie que des bandes de 320 pixels). **0.103d3** : une largeur impaire est déclarée au VOP comme des lignes de `h` pixels (pair, puisque `w × h` l'est) ; la dalle replie elle-même les lignes selon sa fenêtre. La page de test de 0.103d3c dessine le texte d'essai sur 139 pixels (largeur impaire).
+
+**0.103d3c / 0.103d4c sur l'appareil.** Avec 0.103d3c, la ligne 1 de la page de test (texte de 139 pixels, largeur impaire) est juste, mais l'usage est instable ; le journal n'a pourtant aucun échec (2 377 envois). Cause retenue : sans `VOP_START`, le bit « working » du VOP ne monte jamais, et le canal DMA s'arrête quand le FIFO a pris les derniers mots, pas quand la dalle les a reçus ; les commandes de la fenêtre suivante partaient pendant que le FIFO se vidait. **0.103d4** attend 20 µs après l'arrêt du canal (RECHO : 12 µs), puis le VOP au repos, avant de repasser en bypass ; le PLAY qui valide la page de test n'est plus transmis à l'interface. Essai de l'utilisateur (`work/hwlog/2026-11-11_0.103d4c/`) : ligne 1 sans défaut, défilements des menus plus fluides qu'avant, ni glitch, ni déchirement, ni balayage visible ; aucun échec DMA. Retenus : variante 0 (sans `VOP_START`, source sur le maître 2, destination sur le maître 1, rafales de 16), mode 1 (`VOP_CON` `0x16`), largeur impaire déclarée comme des lignes de `h` pixels, 20 µs de vidange du FIFO.
+
+## 136. Le calcul des glyphes rattrapé (0.103g1, 2026-11-11)
+Mesures de 0.103d4 sur l'appareil : 10 lignes latines calculées en 12,7 ms (10,2 ms en 0.103), soit l'essentiel du temps de dessin une fois l'envoi confié à la DMA (écran de lecture partiel : 3,6 ms pour 3,9 ms en 0.103lp). Deux coûts :
+- **Chaque pixel de chaque cellule était écrit**, fond ou texte, après le remplissage de la bande par le fond : 9 instructions par pixel (une lecture sur la pile, un saut), plus la lecture de la ligne du glyphe octet par octet avec une multiplication et une division par l'échelle à chaque ligne.
+- **Chaque bande refaisait tout** : décodage UTF-8, mesure de la ligne (`lcd_text_width_x`) pour savoir s'il faut une ellipse, recherche des glyphes ; plus une passe à blanc pour connaître le x atteint. Une ligne de 16 pixels (deux bandes) était parcourue trois fois, mesure comprise.
+
+**0.103g1** : la ligne est mise en page une seule fois (`clip_layout`, `scroll_layout` : points de code et x, au plus 160 glyphes), puis dessinée dans chaque bande (`lay_draw`). On garde les points de code et pas les pointeurs de glyphes : un glyphe rencontré plus loin peut prendre la place d'un autre dans le cache de la police. `draw_glyph_cols` n'écrit plus que les pixels du glyphe : la bande est déjà remplie du fond, qui est la couleur du texte dans tous les appels, et les cellules d'une ligne ne se recouvrent jamais. Seules les lignes du glyphe sont parcourues ; leur mot de 32 bits est lu selon la largeur du glyphe ; seuls les bits à 1 sont visités (`clz`) ; aucune division. Coût : 1,3 Kio de BSS (18 448 octets libres).
+
+Vérifications : `lcd_test` (bandes remplies du fond comme dans les fonctions de texte) : 1 334 226 000 pixels identiques à l'ancien calcul ; `shotcmp` contre 0.103d4 : 7 écrans sur 7 identiques ; 30 tests de l'émulateur. Les gains réels se mesurent sur l'appareil (`lcdperf:`, `ui: draw`).
+
+**Résultats sur l'appareil (0.103g1c, `work/hwlog/2026-11-11_0.103g1c/`)** : 10 lignes latines calculées en 6,6 ms (12,7 en 0.103d4, 10,2 en 0.103) ; avec la DMA, 7,3 ms en latin comme en CJK (14,2 et 11,0) ; écrites par le CPU, 15,4 ms (23,8 ; 18,6 en 0.103lp). Usage : écran de lecture, dessin partiel 2,7 ms (3,6 ; 3,9 en 0.103lp), complet 7,8 à 8,3 ms (13,4 en 0.103lp) ; navigateur en défilement 8,0 à 9,0 ms, complet 9,9 à 10,4 ms (14,0 en 0.103lp). Aucun échec DMA. Le défilement du navigateur est désormais limité par le bus : une bande se calcule en 0,33 ms environ et s'envoie en 0,38 ms (5 Kio), le cœur A attend la DMA (2,7 s par minute de défilement).
+
+## 137. Overlays, étape 1 : l'USB sur la liste du dossier (0.103o1, 2026-11-11)
+**Correction de la proposition.** Une zone d'overlay prise sur la fenêtre de code ne libère rien tant qu'un seul overlay l'occupe : elle fait sa taille. Le gain annoncé pour l'étape 1 (environ 12 Kio) supposait déjà l'option 4 ; c'est elle qui est faite : l'overlay USB occupe la place de la liste du dossier (`.dirbuf`, 96 Kio), qui ne sert pas pendant une session USB et que l'interface relisait déjà après une session de disque.
+
+**Ce qui passe en overlay** : le code et les constantes de `usb.c`, `msc.c`, `uac.c` et `usbmode.c` (13 632 octets) ; leurs données et leur BSS restent résidentes. Code libre avant la liste : 42 472 octets (29 776 en 0.103g1). BSS libre : 18 444 octets (inchangé : les secteurs lus en chemin vont dans les 512 derniers octets de la zone).
+
+**Édition des liens** (`link.ld`) : `OVERLAY 0x03078000 : NOCROSSREFS AT (0x20000000) { .dirbuf {…} .ovl_usb {…} }`. La liste et l'overlay sont deux alternatives à la même adresse ; `NOCROSSREFS` fait refuser par l'éditeur de liens toute référence de l'une à l'autre (le code USB ne touche jamais la liste). L'adresse de chargement 0x20000000 ne correspond à aucune mémoire : le chargeur IDB ne voit pas l'overlay, `mkimg.py` le prend par son nom.
+
+**Image** (`mkimg.py`) : après les formats du journal, un secteur « NOVL » (version 1, l'étiquette de la build, le nombre d'overlays, puis pour chacun : décalage, taille, CRC-32, adresse), puis les overlays alignés sur 512 ; en-tête +0x1e0 = {décalage, longueur} (zéro dans l'en-tête d'origine). L'étiquette (CRC-32 du code et des overlays) est aussi écrite dans le code, au symbole `ovl_tag` : un overlay n'est chargé que par le code de la même build.
+
+**Chargement** (`ovl.c`) : `ovl_load()` lit la table dans FW1 puis FW2, refuse une autre build (étiquette), une autre disposition (adresse), une table incohérente, vérifie le CRC. Les portes : `sys_usb()` et `uac_mode()` chargent l'overlay puis appellent `sys_usb_ovl()` / `uac_mode_ovl()` ; au retour, l'overlay est considéré comme parti (la liste est relue : `ui.c` le faisait après le disque USB, il le fait maintenant aussi après la carte son). Un échec : « This part of the firmware is damaged: install it again » 3 s, retour au menu. L'interruption USB (`OTG_IRQHandler`, dans la table des vecteurs résidente) devient une porte : elle appelle `usb_isr_ovl()` si l'overlay USB est là, sinon masque l'interruption.
+
+**Contrôles** :
+- `tools/ovlcheck.py` (dans `make check`), sur l'ELF lié avec `--emit-relocs` : (1) le code et les données résidents n'atteignent un overlay que depuis une porte (les fonctions globales de `ovl.o`) ; (2) un overlay n'atteint rien de ce qui vit à ses adresses (un autre overlay, la liste) ; (3) aucune donnée (table des vecteurs, tables de constantes) ne pointe dans un overlay. Essai de mutation : un appel direct de `uac_mode_ovl()` depuis `ui.c` est refusé (règle 1).
+- Émulateur : `uac-power` (chargement de l'overlay), `uac-back` (carte son quittée par BACK, la liste relue), `usb-disk` (disque USB quitté par BACK, la liste relue), `ovl-bad` (un octet de l'overlay changé sur l'eMMC : « CRC mismatch », le message, aucune faute).
+
+Le premier chargement prend 13 ms dans l'émulateur (le temps réel de l'eMMC reste à mesurer sur l'appareil : ligne `ovl: USB from FW1 in … us`).
+
+**0.103o1 sur l'appareil : le disque USB en faute.** La carte son USB marche (`work/tools/uactest.py` : 15 formats joués sans décrochage, de 44,1 à 192 kHz en 16 et 32 bits, avant que l'utilisateur ne quitte le mode). Le disque USB, en lecture seule comme en lecture-écriture, finit sur l'écran de faute : `pc 03078110` (`fifo_write`, `usb.c`, au début de l'overlay), `lr 03078d5b` (`usb_in`), `cfsr 00008200` (bus fault, `bfar c1e00020`). Cause : le tampon de transfert de `msc.c` (64 Kio) était à 0x03078000, l'adresse fixe de `shared.h` (§25), soit sur le code de l'overlay USB : le premier transfert l'écrasait. Ni `NOCROSSREFS` ni `ovlcheck.py` ne le voyaient (une adresse écrite en dur, aucune relocation), ni l'émulateur (pas d'hôte USB, aucun transfert).
+**0.103o2** : les tampons de `shared.h` deviennent des symboles de `link.ld` : `__shared_usb` à 0x0307c000 (après les 16 Kio réservés au code de l'overlay, `ASSERT`), `__shared_upd` à 0x0308c000. Règle 4 d'`ovlcheck.py` : un overlay ne vise aucune adresse fixe (symbole absolu de l'éditeur de liens) à l'intérieur de son propre code. Essai de mutation : le tampon remis à 0x03078000, la règle 4 le refuse.
+
+**0.103o2 sur l'appareil (`work/hwlog/2026-11-11_0.103o2*`)** : installée depuis RECHO (renommée `ECHOMINI.IMG` : RECHO installe ce nom au démarrage). Disque USB en lecture seule : 520 s, 21 558 secteurs lus, aucune erreur ; carte son USB : `uactest.py`, 12 formats sur 12 joués sans décrochage (16 et 32 bits, 44,1 à 192 kHz), 86 s, sortie par BACK ; disque USB en lecture-écriture : 8 Mio écrits en 1,9 s, relus identiques après démontage et remontage. Chargement de l'overlay : 4,0 ms (3,9 ms en 0.103o1, une fois 26,5 ms). Aucune faute.
+
+## 138. Passe qualité (0.103q1, 2026-11-11)
+Relecture de `fw/src` (22 100 lignes) : pas de TODO, un seul CRC-32 et un seul décodeur UTF-8. Changements, sans effet visible sauf l'ellipse de `sys_line` :
+- **Code mort** : `fatw_yield` (un point d'appel que personne n'assignait), `qf_written()` (jamais appelée). `perf_reset()`, `fat_list_root()` et `lib_clus()` ne servent qu'aux tests sur PC ou au fuzzing : gardées, avec un commentaire qui le dit.
+- **`fw_blob()`** (`emmc.h`) : la recherche d'un bloc dans l'image (en-tête de FW1 puis FW2, signature, {décalage, longueur} à une place de l'en-tête, identifiant du premier secteur) était écrite cinq fois (police, langues, formats du journal, paquet des codecs, overlays), avec des vérifications qui avaient divergé. `hifi.c` ne vérifie plus le compte {1} de la place du paquet d'images (une longueur nulle est refusée de toute façon).
+- **`bytes.h`** partout : `library.c` et `libbuild.c` avaient leurs propres `le16`/`le32`/`put32`/`put16`, `usb.c`, `uac.c` et `update.c` l'expression à la main ; ajout de `put_le16`/`put_le32`.
+- **`tags.c`** : les cascades de `if` qui reconnaissent les trames ID3v2.2, ID3v2.3/2.4 et les blocs RIFF INFO deviennent trois tables (`tag_id`) et deux fonctions (`tag_what`, `tag_dst`).
+- **`sys_line()`** : un seul `lcd_text_clip` (une passe de bandes) au lieu de `lcd_text` puis `lcd_fill` ; un texte trop long finit par une ellipse.
+- **DMA de l'écran** : en production, seule la variante validée (§135) est essayée au démarrage ; les autres, et les modes 2 à 4 de `VOP_CON`, ne servent qu'à la version de test `ECHO_LCDCAL`. `lcd_sync()` réécrite selon son fonctionnement réel (fin du canal, 20 µs pour la FIFO, puis « working » pour les variantes de test avec `VOP_START`) ; ses commentaires et ceux de `dma_con` corrigés.
+- **Visibilité** : `lcd_waking`, `ent_name`, `loop_24m` et `loop_pll` deviennent `static`.
+- **Commentaires** : deux commentaires déplacés par d'anciennes éditions remis à leur place (`fat.h` : celui de `fat_dirty()` était sur `fat_forget()` ; `ui.h` : celui de `play_level` sur `ui_power_off()`) ; `board.h` : une ligne de 168 caractères à deux commentaires séparée.
+- **Lignes de plus de 100 caractères** : 75 remises en forme ; `make check` les refuse désormais dans `src/`.
+Code libre : 42 828 octets (+348). Vérifications : `make check`, les 33 tests de l'émulateur, `shotcmp` contre 0.103o2, la version de test `ECHO_LCDCAL` compilée.
+
+## 139. Version 0.104 (2026-11-11)
+Publiée à la demande de l'utilisateur : `rework` fusionnée dans `main`. Contenu depuis la 0.103, sans fonction nouvelle pour l'utilisateur mais une interface plus rapide et de la place pour la suite : la police et les formats du journal hors de la RAM (§131, §133), l'écran par DMA (§134-§135), le calcul des glyphes (§136 : texte deux fois plus rapide, écran de lecture complet de 13,4 à 8 ms, partiel de 3,9 à 2,7 ms), le premier overlay de code, l'USB sur la liste du dossier (§137 : place pour le code de 29 à 42 Kio), la passe qualité (§138). **0.103q1 sur l'appareil (`work/hwlog/2026-11-11_0.103q1/`)** : 25 min de lecture avec les cinq codecs (50 ouvertures de piste), puis 43 min de disque USB en lecture-écriture (197 018 secteurs lus, 4 121 écrits, aucune erreur, overlay chargé en 4,0 ms) ; DMA de l'écran : aucun échec ; aucune faute. Le code est celui de 0.103q1 ; seul le numéro de version change. Suite : un hôte USB simulé dans l'émulateur (feuille de route, émulateur, point 5).

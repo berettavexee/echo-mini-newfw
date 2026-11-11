@@ -3,7 +3,7 @@
 
   mkimg.py build/fw.elf OUT.IMG [--date YYYY-MM-DD] [--pack codecs.bin]
 
-Layout (format in re/REPORT.md section 2, loader in re/newfw/ETUDE.md section 2.2):
+Layout (format in the study's REPORT.md section 2, loader in ETUDE.md section 2.2):
   0x000      header (512 bytes): BCD date, "RKnanoFW" at 0x1f8, fw_end at 0x1f4, code part at 0x6c
   0x200      code part: overlay table {base, n, n x 8 words}, then at +0x200 the code
   fw_end     copy of the header (the loader compares it with the header)
@@ -16,18 +16,28 @@ fw_end; header +0x148 = {1, offset, length} (the stock image-pack slot). The fon
 (tools/mkfusion.py) follows it, 512-aligned; header +0x80 = {offset, length} (the stock 16 px
 font slot, count at +0x74 = 2 as in the stock header). The languages' catalogues
 (tools/mklang.py) follow it, 512-aligned; header +0x78 = {offset, length} (the stock 12 px font
-slot, empty otherwise; src/lang.c).
+slot, empty otherwise; src/lang.c). The log's formats (the ELF's section "logfmt", src/log.h)
+follow them, 512-aligned: "NLFM", version 1, CRC-32 of the formats, their length, then the
+formats; header +0x1e8 = {offset, length} (zero in the stock header). The code overlays
+(src/ovl.h, the ELF's sections .ovl_*, stored at 0x20000000 by link.ld) follow, 512-aligned:
+a sector "NOVL", version 1, the build's tag, their count, then for each {offset, size, CRC-32,
+address}; each overlay 512-aligned after it; header +0x1e0 = {offset, length}.
+The tag (CRC-32 of the code part and the overlays) is also written into the code, at the symbol
+ovl_tag: an overlay is only loaded by the code it was built with.
 """
 import datetime
 import os
 import struct
 import sys
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rkcrc import rkcrc                                            # noqa: E402
 
 BASE = 0x03050000
 CODE_IN_PART = 0x200
+OVL_LMA = 0x20000000
+OVERLAYS = [".ovl_usb"]                         # ids 1, 2...: src/ovl.h's order
 
 
 def elf(path):
@@ -46,6 +56,16 @@ def elf(path):
     return e, segs, secs
 
 
+def symbol(e, secs, name):
+    """the value of a symbol of the ELF's .symtab"""
+    st, sn = secs[".symtab"], secs[".strtab"]
+    for i in range(st[5] // 16):
+        nm, value = struct.unpack_from("<II", e, st[4] + 16 * i)
+        if e[sn[4] + nm:].split(b"\0")[0].decode() == name:
+            return value
+    sys.exit(f"no symbol {name} in the ELF")
+
+
 def main():
     src, dst = sys.argv[1], sys.argv[2]
     a = sys.argv
@@ -53,7 +73,7 @@ def main():
     e, segs, secs = elf(src)
 
     # code region image: every PT_LOAD placed at its load (physical) address inside CODE
-    loads = [s for s in segs if s[0] == 1 and s[4]]
+    loads = [s for s in segs if s[0] == 1 and s[4] and s[3] < OVL_LMA]
     lo = min(s[3] for s in loads)
     hi = max(s[3] + s[4] for s in loads)
     if lo != BASE or hi > 0x03080000:
@@ -77,6 +97,27 @@ def main():
     if not BASE <= vec[1] & ~1 < hi or not vec[1] & 1:
         sys.exit("reset vector is not a Thumb address in the code")
 
+    # the overlays: their bytes, the table, the tag (also written into the code)
+    ovls = [secs[n] for n in OVERLAYS if n in secs]
+    ovl = b""
+    if ovls:
+        body, entries = b"", []
+        for n, sh in zip(OVERLAYS, ovls):
+            b = e[sh[4]:sh[4] + sh[5]]
+            room = symbol(e, secs, f"__{n[1:]}_end") - sh[3]
+            if sh[3] != symbol(e, secs, f"__{n[1:]}_start") or len(b) > room - 512:
+                sys.exit(f"{n}: not at its region's address, or larger than it")
+            entries.append((512 + len(body), len(b), zlib.crc32(b), sh[3]))
+            body += b + bytes(-len(b) % 512)
+        tag = zlib.crc32(body, zlib.crc32(code)) or 1
+        at = symbol(e, secs, "ovl_tag") - lo
+        if struct.unpack_from("<I", code, at)[0] != 0x4741544f:
+            sys.exit("ovl_tag: not the placeholder")
+        struct.pack_into("<I", code, at, tag)
+        table = struct.pack("<4I", 0x4c564f4e, 1, tag, len(ovls))
+        table += b"".join(struct.pack("<4I", *x) for x in entries)
+        ovl = table + bytes(512 - len(table)) + body
+
     code_load = BASE + CODE_IN_PART
     ent0 = (code_load, BASE, len(code), code_load + d_lma - lo, d_vma, d_size, b_vma, b_size)
     table = struct.pack("<2I", BASE, 3) + struct.pack("<8I", *ent0) + bytes(64)
@@ -88,7 +129,16 @@ def main():
     font_off = (pack_off + len(pack) + 511) & ~511
     lang = open(a[a.index("--lang") + 1], "rb").read() if "--lang" in a else b""
     lang_off = (font_off + len(font) + 511) & ~511
-    fw_end = (lang_off + len(lang) + 0x3fff) & ~0x3fff
+    logfmt = b""
+    if "logfmt" in secs:                        # the log's formats (src/log.h): not loaded
+        sh = secs["logfmt"]
+        fmts = e[sh[4]:sh[4] + sh[5]]
+        if max(len(f) for f in fmts.split(b"\0")) >= 256:
+            sys.exit("a log format of 256 bytes or more: log.c's FMT_MAX")
+        logfmt = struct.pack("<4I", 0x4d464c4e, 1, zlib.crc32(fmts) or 1, len(fmts)) + fmts
+    fmt_off = (lang_off + len(lang) + 511) & ~511
+    ovl_off = (fmt_off + len(logfmt) + 511) & ~511
+    fw_end = (ovl_off + len(ovl) + 0x3fff) & ~0x3fff
     size = (fw_end + 0x104000) & ~0xfffff
     bcd = lambda v: int(str(v), 16)
     hdr = bytearray(0x200)
@@ -104,6 +154,10 @@ def main():
     if font:                                    # our font blob, in the 16 px font slot
         struct.pack_into("<I2I2I", hdr, 0x74, 2, lang_off if lang else 0, len(lang), font_off,
                          len(font))
+    if logfmt:                                  # the log's formats
+        struct.pack_into("<2I", hdr, 0x1e8, fmt_off, len(logfmt))
+    if ovl:                                     # the code overlays
+        struct.pack_into("<2I", hdr, 0x1e0, ovl_off, len(ovl))
     struct.pack_into("<I", hdr, 0x1f4, fw_end)
     hdr[0x1f8:0x200] = b"RKnanoFW"
 
@@ -113,11 +167,17 @@ def main():
     img[pack_off:pack_off + len(pack)] = pack
     img[font_off:font_off + len(font)] = font
     img[lang_off:lang_off + len(lang)] = lang
+    img[fmt_off:fmt_off + len(logfmt)] = logfmt
+    img[ovl_off:ovl_off + len(ovl)] = ovl
     img[fw_end:fw_end + 0x200] = hdr
     img += struct.pack("<I", rkcrc(bytes(img)))
     open(dst, "wb").write(img)
     print(f"  entry 0: code 0x{BASE:08x}+0x{len(code):x}, data 0x{d_vma:08x}+0x{d_size:x} "
           f"(load copy at 0x{d_lma:08x}), bss 0x{b_vma:08x}+0x{b_size:x}")
+    if logfmt:
+        print(f"  log formats: {len(logfmt) - 16} bytes at 0x{fmt_off:x}")
+    for n, sh in zip(OVERLAYS, ovls):
+        print(f"  overlay {n[5:]}: {sh[5]} bytes at 0x{sh[3]:08x}")
     print(f"wrote {dst}: {len(img)} bytes, fw_end 0x{fw_end:x}, date {date}, "
           f"CRC 0x{rkcrc(bytes(img[:-4])):08x}")
 

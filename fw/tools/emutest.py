@@ -28,9 +28,23 @@ EMU, MKDISK, READLOG, MKBAD = (os.path.join(TOOLS, n) for n in
                                ("emu_fw.py", "mkdisk.py", "readlog.py", "mkbadimg.py"))
 VOL_SECTOR = 0x81000
 GOLDBERG = os.path.join(TOOLS, "..", "..", "testdata", "goldberg", "variatio4-5s.flac")
-ALWAYS_FORBID = [r"EXCEPTION", r"!! WRITE OUTSIDE", r"(?i)hard ?fault"]
+ALWAYS_FORBID = [r"EXCEPTION", r"!! WRITE OUTSIDE", r"(?i)hard ?fault",
+                 r"\?log [0-9a-f]{4}"]          # a token record not made text (src/log.h)
 LOW_ORDER = r"!! HIFIACC order"                 # orders 1 and 2, wrong on the device (ETUDE §66,
                                                 # §116): never sent, but by the benches (hwtest)
+
+
+def damage_overlays(disk):
+    """one byte changed in each overlay of each image copy on the disk (its table: "NOVL")"""
+    d = bytearray(open(disk, "rb").read())
+    at = d.find(b"NOVL")
+    while at >= 0:
+        if at % 512 == 0 and struct.unpack_from("<I", d, at + 4)[0] == 1:
+            for i in range(struct.unpack_from("<I", d, at + 12)[0]):
+                off = struct.unpack_from("<I", d, at + 16 + 16 * i)[0]
+                d[at + off + 100] ^= 0x40
+        at = d.find(b"NOVL", at + 4)
+    open(disk, "wb").write(d)
 
 
 def keys(*seq):
@@ -86,8 +100,31 @@ TESTS = {
                                              "9000:2:5:1,11500:2:5:0"],
                       keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(6)],
                                 (6000, "PLAY")),
-                      expect=[r"uac: start", r"screen off", r"uac: exit \(Power 2 s\)",
-                              r"power off \(Power 2 s\)"]),
+                      expect=[r"ovl: USB from FW1 in \d+ us", r"uac: start", r"screen off",
+                              r"uac: exit \(Power 2 s\)", r"power off \(Power 2 s\)"]),
+    # the sound card left by BACK held: its overlay was over the directory listing (ETUDE §137),
+    # read again for the browser
+    "uac-back": dict(files={"A.WAV": "wav"}, ms=12000,
+                     emu_args=["--vbus", "1", "--power", "1", "--gpio-at", "1500:2:5:0"],
+                     keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(6)],
+                               (6000, "PLAY"), (8000, "BACK", 1500)),
+                     expect=[r"ovl: USB from FW1 in \d+ us", r"uac: start", r"uac: exit \(BACK\)",
+                             r"ui: folder [0-9a-f]+: \d+ entries"]),
+    # the USB disk (read only, no host in the emulator) left by BACK: the listing read again
+    "usb-disk": dict(files={"A.WAV": "wav"}, ms=20000,
+                     emu_args=["--vbus", "1", "--power", "1", "--gpio-at", "1500:2:5:0"],
+                     keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(4)],
+                               (6000, "PLAY"), (8000, "BACK", 300)),
+                     expect=[r"ovl: USB from FW1 in \d+ us", r"usb: read only disk",
+                             r"ui: card to be set up again", r"ui: folder [0-9a-f]+: \d+ entries"]),
+    # the same with the USB overlay damaged in the image on the eMMC: a message, no fault
+    "ovl-bad": dict(files={"A.WAV": "wav"}, ms=12000,
+                    emu_args=["--vbus", "1", "--power", "1", "--gpio-at", "1500:2:5:0"],
+                    prep=lambda disk, tmp: damage_overlays(disk),
+                    keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(6)],
+                              (6000, "PLAY")),
+                    expect=[r"ovl: USB: FW1: CRC mismatch", r"ui: card to be set up again"],
+                    forbid=[r"uac: start"]),
     # the fault tests (ECHO_FAULT builds only: Power alone, core B faults, then is stuck; with
     # VOL- held, core A faults; with VOL+ held, core A is stuck). fault-a: the record written
     # on the internal memory by core A's fault handler, then logged and shown once by the next

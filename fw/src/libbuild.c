@@ -15,6 +15,7 @@
  * The order of the strings in STRS differs from mklib.py's (which needs all of them first):
  * the content is the same, every answer of the reader too (the emulator's tests compare them). */
 #include <stdint.h>
+#include "bytes.h"
 #include "board.h"
 #include "emmc.h"
 #include "fat.h"
@@ -247,10 +248,6 @@ static int put(int w, uint32_t off, const void *src, uint32_t n)
     return 0;
 }
 
-static void put32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
-static void put16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
-static uint32_t get32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
-static uint32_t get16(const uint8_t *p) { return p[0] | p[1] << 8; }
 
 /* a string of the half's STRS (ref) into sbuf[k] */
 static const char *str_at(uint32_t ref, int k)
@@ -445,10 +442,10 @@ static void fp_add(const struct fat_dirent *e, uint32_t codec)
 {
     uint8_t k[18];
     k[0] = e->vol;
-    put32(k + 1, e->vol == FAT_VOL_SD ? card_now : 0);
-    put32(k + 5, e->cluster);
-    put32(k + 9, e->size);
-    put32(k + 13, e->mtime);
+    put_le32(k + 1, e->vol == FAT_VOL_SD ? card_now : 0);
+    put_le32(k + 5, e->cluster);
+    put_le32(k + 9, e->size);
+    put_le32(k + 13, e->mtime);
     k[17] = (uint8_t)codec;
     uint32_t h = 0x811c9dc5;
     for (int i = 0; i < 18; i++)
@@ -503,21 +500,21 @@ static int scan_cb(const struct fat_dirent *e, void *ctx)
     }
     uint8_t r[REC] = { 0 };
     uint32_t aid = id[0], alid = id[1], gid = id[2];
-    put32(r, e->cluster);
-    put32(r + 4, e->size);
-    put32(r + 8, e->mtime);
-    put32(r + 12, str_add(title));
-    put32(r + 16, str_add(e->name));
-    put32(r + 20, noff[id[3]]);
-    put16(r + 24, gid);
-    put16(r + 26, track);
-    put16(r + 28, year);
+    put_le32(r, e->cluster);
+    put_le32(r + 4, e->size);
+    put_le32(r + 8, e->mtime);
+    put_le32(r + 12, str_add(title));
+    put_le32(r + 16, str_add(e->name));
+    put_le32(r + 20, noff[id[3]]);
+    put_le16(r + 24, gid);
+    put_le16(r + 26, track);
+    put_le16(r + 28, year);
     r[30] = (uint8_t)disc;
     r[31] = (uint8_t)codec;
     r[32] = e->vol;
     r[33] = e->contig;
-    put16(r + 34, aid);
-    put16(r + 36, alid);
+    put_le16(r + 34, aid);
+    put_le16(r + 36, alid);
     gmark[gid / 8] |= (uint8_t)(1 << (gid % 8));
     trk[b.n] = (struct bt){ (uint16_t)aid, (uint16_t)alid, (uint16_t)track, (uint8_t)disc, 0 };
     if (T0 + b.strs + 4096 >= HALF - REC * (b.n + 1)) {
@@ -655,15 +652,15 @@ static int cmp_track(uint32_t x, uint32_t y)
     uint8_t r[REC], s[REC];
     if (rec_read(x, r) || rec_read(y, s))
         return 0;
-    const uint8_t *f = (const uint8_t *)str_at(get32(r + 16), 0),
-                  *g = (const uint8_t *)str_at(get32(s + 16), 1);
+    const uint8_t *f = (const uint8_t *)str_at(le32(r + 16), 0),
+                  *g = (const uint8_t *)str_at(le32(s + 16), 1);
     for (; *f == *g && *f; f++, g++)
         ;
     if (*f != *g)
         return *f < *g ? -1 : 1;
     if (r[32] != s[32])
         return r[32] < s[32] ? -1 : 1;
-    return get32(r) < get32(s) ? -1 : get32(r) > get32(s);
+    return le32(r) < le32(s) ? -1 : le32(r) > le32(s);
 }
 
 static uint32_t trks;                           /* TRKS's offset in the half */
@@ -689,9 +686,9 @@ static const char *song_title(uint32_t i, int avoid)
     uint8_t t[8];
     const char *s = "";
     if (!rd(trks + 36 * i + 12, t, 8)) {
-        s = str_at(get32(t), 0);
+        s = str_at(le32(t), 0);
         if (!*s)
-            s = str_at(get32(t + 4), 0);
+            s = str_at(le32(t + 4), 0);
     }
     copy(tc[c].s, s, sizeof tc[c].s);
     tc[c].i = i;
@@ -771,9 +768,9 @@ static int song_sort(uint32_t n)
                 uint8_t r[8];
                 const char *t = "";
                 if (!rd(HALF - REC * (i + 1) + 12, r, 8)) {
-                    t = str_at(get32(r), 0);
+                    t = str_at(le32(r), 0);
                     if (!*t)
-                        t = str_at(get32(r + 4), 0);
+                        t = str_at(le32(r + 4), 0);
                 }
                 lib_key(t, 0, tkey[k], TKEY, depth * TKEY);
                 if (i % 1024 == 0)
@@ -923,10 +920,10 @@ static int write_index(struct lb_result *res)
             uint8_t *t = tw + 36 * (twi[j] & 0xffff);
             for (int q = 0; q < 24; q++)                /* cluster, size, mtime, 3 strings */
                 t[q] = r[q];
-            put16(t + 24, 0);                           /* (the album: below) */
-            put16(t + 26, gidx[get16(r + 24)]);
-            put16(t + 28, get16(r + 26));
-            put16(t + 30, get16(r + 28));
+            put_le16(t + 24, 0);                           /* (the album: below) */
+            put_le16(t + 26, gidx[le16(r + 24)]);
+            put_le16(t + 28, le16(r + 26));
+            put_le16(t + 30, le16(r + 28));
             t[32] = r[30];
             t[33] = r[31];
             t[34] = r[32];
@@ -939,11 +936,11 @@ static int write_index(struct lb_result *res)
             int newalb = k == n || !k || trk[i].aa != trk[j].aa || trk[i].album != trk[j].album;
             if (newalb && k) {                          /* the album before: closed */
                 uint8_t a[16] = { 0 };
-                put32(a, noff[trk[j].album]);
-                put32(a + 4, first);
-                put16(a + 8, k - first);
-                put16(a + 10, rank_a[trk[j].aa]);
-                put16(a + 12, year);
+                put_le32(a, noff[trk[j].album]);
+                put_le32(a + 4, first);
+                put_le16(a + 8, k - first);
+                put_le16(a + 10, rank_a[trk[j].aa]);
+                put_le16(a + 12, year);
                 if (put(2, albs + 16 * nalb, a, 16))
                     return LB_EIO;
                 uint32_t ar = rank_a[trk[j].aa];
@@ -967,7 +964,7 @@ static int write_index(struct lb_result *res)
                 ng = 0;
             }
             uint8_t *t = tw + 36 * (k - k0);
-            uint32_t gi = get16(t + 26), y = get16(t + 30);
+            uint32_t gi = le16(t + 26), y = le16(t + 30);
             if (y && (!year || y < year))
                 year = y;
             uint32_t g = 0;
@@ -984,7 +981,7 @@ static int write_index(struct lb_result *res)
                 }
                 gseen[ng++] = gi;
             }
-            put16(t + 24, nalb);
+            put_le16(t + 24, nalb);
         }
         if (put(1, trks + 36 * k0, tw, 36 * m))
             return LB_EIO;
@@ -996,9 +993,9 @@ static int write_index(struct lb_result *res)
     uint32_t arts = albs + 16 * nalb, gens = arts + 8 * nart, galb = gens + 12 * ngen;
     for (uint32_t i = 0; i < nart; i++) {
         uint8_t a[8];
-        put32(a, noff[art_name[i]]);
-        put16(a + 4, art_tab[i] >> 16);
-        put16(a + 6, art_tab[i] & 0xffff);
+        put_le32(a, noff[art_name[i]]);
+        put_le16(a + 4, art_tab[i] >> 16);
+        put_le16(a + 6, art_tab[i] & 0xffff);
         if (put(2, arts + 8 * i, a, 8))
             return LB_EIO;
     }
@@ -1016,15 +1013,15 @@ static int write_index(struct lb_result *res)
             gen_tab[2 * (p >> 16)] = ngalb;
         gen_tab[2 * (p >> 16) + 1]++;
         uint8_t a[2];
-        put16(a, p & 0xffff);
+        put_le16(a, p & 0xffff);
         if (put(2, galb + 2 * ngalb++, a, 2))
             return LB_EIO;
     }
     for (uint32_t g = 0; g < ngen; g++) {
         uint8_t a[12];
-        put32(a, noff[gen_name[g]]);
-        put32(a + 4, gen_tab[2 * g]);
-        put32(a + 8, gen_tab[2 * g + 1]);
+        put_le32(a, noff[gen_name[g]]);
+        put_le32(a + 4, gen_tab[2 * g]);
+        put_le32(a + 8, gen_tab[2 * g + 1]);
         if (put(1, gens + 12 * g, a, 12))
             return LB_EIO;
     }
@@ -1043,9 +1040,9 @@ static int write_index(struct lb_result *res)
         uint8_t r[8];                                   /* both read going one way */
         const char *t = "";
         if (!rd(HALF - REC * (i + 1) + 12, r, 8)) {
-            t = str_at(get32(r), 0);
+            t = str_at(le32(r), 0);
             if (!*t)
-                t = str_at(get32(r + 4), 0);
+                t = str_at(le32(r + 4), 0);
         }
         lib_key(t, 0, tkey[ps[i]], TKEY, 0);
         if (i % 64 == 0 && sprog(i, n))
@@ -1058,7 +1055,7 @@ static int write_index(struct lb_result *res)
         return b.err;
     for (uint32_t k = 0; k < n; k++) {
         uint8_t a[4];
-        put32(a, order[k]);
+        put_le32(a, order[k]);
         if (put(0, song + 4 * k, a, 4))
             return LB_EIO;
     }
@@ -1068,7 +1065,7 @@ static int write_index(struct lb_result *res)
         uint8_t t[36];
         if (rd(trks + 36 * i, t, 36))
             return LB_EIO;
-        ckey[i] = (uint32_t)t[34] << 31 | get32(t);
+        ckey[i] = (uint32_t)t[34] << 31 | le32(t);
         order[i] = (uint16_t)i;
         if (i % 256 == 0 && sprog(i, n))
             return b.err;
@@ -1082,8 +1079,8 @@ static int write_index(struct lb_result *res)
         if (k % 256 == 0 && sprog(k, n))
             return b.err;
         uint8_t a[8];
-        put32(a, ckey[order[k]]);
-        put32(a + 4, order[k]);
+        put_le32(a, ckey[order[k]]);
+        put_le32(a + 4, order[k]);
         if (put(0, clus + 8 * k, a, 8))
             return LB_EIO;
     }
@@ -1095,8 +1092,8 @@ static int write_index(struct lb_result *res)
         if (v && !sdvol.mounted && !keeping && !cnt[1])
             continue;
         uint8_t a[12] = { (uint8_t)v };
-        put32(a + 4, v ? card_now : 0);
-        put32(a + 8, cnt[v]);
+        put_le32(a + 4, v ? card_now : 0);
+        put_le32(a + 8, cnt[v]);
         if (put(0, vols + 12 * nvol++, a, 12))
             return LB_EIO;
     }
@@ -1109,14 +1106,14 @@ static int write_index(struct lb_result *res)
                    cn[NSEC] = { nvol, b.names, n, nart, nalb, ngen, ngalb, n, n };
     uint8_t h[T0];
     __builtin_memcpy(h, "NWLI", 4);
-    put32(h + 4, 1);
-    put32(h + 8, NSEC);
-    put32(h + 12, len);
+    put_le32(h + 4, 1);
+    put_le32(h + 8, NSEC);
+    put_le32(h + 12, len);
     for (int k = 0; k < NSEC; k++) {
         __builtin_memcpy(h + 16 + 16 * k, ids + 4 * k, 4);
-        put32(h + 20 + 16 * k, off[k]);
-        put32(h + 24 + 16 * k, sz[k]);
-        put32(h + 28 + 16 * k, cn[k]);
+        put_le32(h + 20 + 16 * k, off[k]);
+        put_le32(h + 24 + 16 * k, sz[k]);
+        put_le32(h + 28 + 16 * k, cn[k]);
     }
     if (put(1, 0, h, T0) || flush(0) || flush(1) || flush(2))
         return LB_EIO;
@@ -1140,17 +1137,17 @@ static int write_index(struct lb_result *res)
     ctag[1] = 0xffffffff;
     if (emmc_read(b.file, 1, hd))
         return LB_EIO;
-    uint32_t gen = __builtin_memcmp(hd, "NEWFWLIB", 8) ? 0 : get32(hd + 16);
+    uint32_t gen = __builtin_memcmp(hd, "NEWFWLIB", 8) ? 0 : le32(hd + 16);
     if (__builtin_memcmp(hd, "NEWFWLIB", 8))
         lib_empty_header(hd);
-    put32(hd + 12, b.half);
-    put32(hd + 16, gen + 1);
-    put32(hd + 36, n);                          /* the tracks of the half in use (the status) */
-    put32(hd + 40, fp_a);                       /* the files' fingerprint */
-    put32(hd + 44, fp_b);
-    put32(hd + 20 + 8 * b.half, len);
-    put32(hd + 24 + 8 * b.half, ~crc);
-    put32(hd + 508, ~lib_crc(0xffffffffu, hd, 508));
+    put_le32(hd + 12, b.half);
+    put_le32(hd + 16, gen + 1);
+    put_le32(hd + 36, n);                          /* the tracks of the half in use (the status) */
+    put_le32(hd + 40, fp_a);                       /* the files' fingerprint */
+    put_le32(hd + 44, fp_b);
+    put_le32(hd + 20 + 8 * b.half, len);
+    put_le32(hd + 24 + 8 * b.half, ~crc);
+    put_le32(hd + 508, ~lib_crc(0xffffffffu, hd, 508));
     if (emmc_write_user(b.file, 1, hd))
         return LB_EIO;
     res->artists = nart;
@@ -1177,8 +1174,8 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
     uint8_t *hd = (uint8_t *)dirs;              /* (not yet in use) */
     if (emmc_read(first, 1, hd))
         return LB_EIO;
-    uint32_t act = get32(hd + 12), old_n = get32(hd + 36), old_a = get32(hd + 40),
-             old_b = get32(hd + 44);
+    uint32_t act = le32(hd + 12), old_n = le32(hd + 36), old_a = le32(hd + 40),
+             old_b = le32(hd + 44);
     b.half = act == 0 ? 1 : 0;
     b.hb = first + 1 + HALF_SEC * (uint32_t)b.half;
     struct lib_io io = { old_read, 0 };
@@ -1234,8 +1231,8 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
             if (v == 1 && n)
                 old_card = s;
         if (sdvol.mounted && old_card != sdvol.serial)
-            log_printf("library: another card (%08x, the index's %08x): its tags read", sdvol.serial,
-                       old_card);
+            log_printf("library: another card (%08x, the index's %08x): its tags read",
+                       sdvol.serial, old_card);
     }
     keeping = b.old && old_card && !sdvol.mounted;     /* no card read: the index's kept */
     card_now = sdvol.mounted ? sdvol.serial : keeping ? old_card : 0;

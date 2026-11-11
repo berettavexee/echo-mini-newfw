@@ -8,8 +8,9 @@
 /* The ladder is RC filtered: pressing VOL-, VOL+ or Play sweeps channel 1 down through the
  * Menu range for a few ms. A key counts once its class has been the same for 30 ms. A key held
  * (0.53, ETUDE §34): a release counts after 60 ms (a loose contact of Play reads none for a few
- * ms; VOL+/VOL-: 30 ms, quick clicks leave 50-60 ms between them, 0.54), VOL+ <-> VOL- (the chord) after 100 ms, and another key not at all until a release (a loose
- * contact of Play sweeps up through Menu and Back: these read as Back presses in 0.52). */
+ * ms; VOL+/VOL-: 30 ms, quick clicks leave 50-60 ms between them, 0.54), VOL+ <-> VOL- (the chord)
+ * after 100 ms, and another key not at all until a release (a loose contact of Play sweeps up
+ * through Menu and Back: these read as Back presses in 0.52). */
 #define KEY_SETTLE_US   30000
 #define KEY_RELEASE_US  60000
 #define KEY_CHORD_US   100000

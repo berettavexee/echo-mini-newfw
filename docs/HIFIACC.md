@@ -8,9 +8,10 @@ map), §66 (on-device comparison) and §67 (use in the FLAC decoder).
 Status: the **LPC filter used by FLAC** is understood, verified bit-exact on the device and used
 by this firmware since version 0.85. The **FFT** is mapped, measured on the device and used since
 version 0.88 for the IMDCT of the Vorbis decoder, and since 0.92 for the FFTs inside the IMDCT
-of the AAC decoder. The **ALAC filter** and the **APE filters** are mapped from the stock
-firmware's ALAC and APE modules (below; not yet verified on the device). The MAC is not mapped:
-no stock module uses it.
+of the AAC decoder. The **ALAC filter**, mapped from the stock firmware's ALAC module, is
+verified on the device for orders 3 to 30 and used by our ALAC decoder since version 0.101. The
+**APE filters** are mapped from the stock APE module (below; not yet verified on the device).
+The MAC is not mapped: no stock module uses it.
 
 ## What it is
 
@@ -250,7 +251,7 @@ the FFT, the data memory reads as `0x0badf00d`.
 - The meaning of the configuration word `0x01080108`.
 - The MAC (function 4, term count at bit 18 of `+0x30`, result at `+0x34`/`+0x38`): the FFT's
   sequence gives 0, and no stock module uses it.
-- The ALAC and APE filters: mapped from the stock firmware (above), to verify on the device.
+- The APE filters: mapped from the stock firmware (above), to verify on the device.
 - Driving the FIFOs directly from the CPU (above), which may suit small blocks.
 - The MP3 accelerators SYNTH and Imdct36 are separate blocks: see `MP3ACC.md`.
 

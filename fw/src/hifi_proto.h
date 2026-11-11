@@ -118,7 +118,8 @@ struct hp_ctl {
     uint32_t pcm_wr;                    /* B: bytes written (A: where to start) */
     uint32_t pcm_rd;                    /* B: bytes the DMA has read (A: its value at the start) */
     uint32_t pcm_pos;                   /* B: the DMA's offset in the ring at the last look */
-    uint32_t pcm_t;                     /* B: TIMER1 then (laps the position hides, from the time) */
+    /* B: TIMER1 then (laps the position hides, from the time) */
+    uint32_t pcm_t;
     uint32_t pcm_bps;                   /* A: bytes a second the DMA reads (0: the DMA stands) */
     uint32_t pcm_ur, pcm_lost;          /* B: underruns (the DMA overtook core B), bytes */
     uint32_t pcm_min;                   /* B: the lowest fill seen, bytes (after pcm_min_from) */

@@ -364,6 +364,10 @@ msgstr ""
 msgid "clock set"
 msgstr ""
 
+#: src/ovl.c
+msgid "This part of the firmware is damaged: install it again"
+msgstr ""
+
 #: src/playback.c
 msgid "album"
 msgstr ""

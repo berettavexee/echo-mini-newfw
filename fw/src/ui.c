@@ -290,8 +290,11 @@ static void menu_action(int m, int *scr)
         play_stop(STOP_NOW);                    /* the rest needs the audio and core B */
         if (m == M_USB_RO || m == M_USB_RW)
             sys_usb(m == M_USB_RW);
-        else if (m == M_USB_DAC)
+        else if (m == M_USB_DAC) {
             uac_mode();
+            dir_load(&path[depth].dir);         /* (the USB overlay was over it, ovl.h) */
+            b_dirty = 1;
+        }
         else if (m == M_INSTALL)
             sys_install();
         else if (m == M_SYSTEM)
@@ -349,7 +352,8 @@ void ui_main(void)
     fat_root(VOL_TOP, &path[0].dir);
     path[0].sel = path[0].top = 0;
     if (sd_present())
-        sd_open();                              /* the card mounted at once (0.99r26, ETUDE §106): */
+        /* the card mounted at once (0.99r26, ETUDE §106): */
+        sd_open();
     resume_load();                              /* nothing plays yet; the language set */
     copy_name(path[0].name, T("Storage"), sizeof path[0].name);
     if (!depth && !dir_n) {                     /* nothing saved: the internal volume */
@@ -412,6 +416,12 @@ void ui_main(void)
             lcd_text_clip(8, 88, crash_text[0], LCD_W - 8, DIM, BG);
             lcd_text_clip(8, 108, crash_text[1], LCD_W - 8, DIM, BG);
             lcd_text_clip(8, 134, T("details: NEWFWLOG.TXT"), LCD_W - 8, DIM, BG);
+        }
+        if (lcd_lost) {                         /* the DMA failed (lcd.c): all drawn again */
+            lcd_lost = 0;
+            full = b_dirty = 1;
+            if (scr_n)
+                scr_stack[scr_n - 1]->shown();
         }
         if (banner_ms && millis() - banner_ms > 3000) {
             banner_ms = 0;
@@ -491,7 +501,8 @@ void ui_main(void)
                 seek_begin();
                 r = UI_FULL;
             }
-        } else if (ev != EV_NONE && sk_on && scr == SCR_PLAYING && !(k == KEY_MENU && ev == EV_LONG))
+        } else if (ev != EV_NONE && sk_on && scr == SCR_PLAYING &&
+                   !(k == KEY_MENU && ev == EV_LONG))
             r = seek_key(&e);
         else if (ev != EV_NONE) {
             if (sk_on)
@@ -526,7 +537,8 @@ void ui_main(void)
                 full = b_dirty = 1;
         } else if (!sys_screen_is_off() && !banner_ms) {
             uint32_t since = ticks() - t_draw;
-            if (((full || quick) && since >= 33000) || since > (scr == SCR_PLAYING ? 250000u : 500000u)) {
+            if (((full || quick) && since >= 33000) ||
+                since > (scr == SCR_PLAYING ? 250000u : 500000u)) {
                 t_draw = ticks();
                 int whole = scr == SCR_BROWSER ? b_dirty : full;
                 if (scr == SCR_BROWSER) {

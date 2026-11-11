@@ -1,8 +1,8 @@
 /* The play queue on the internal memory (ETUDE §128): NEWFWQ.DAT, created by the firmware at the
  * root (one run of clusters, fatwrite.c), a header then two halves of QF_MAX entries of 64 bytes:
  * a track's cluster, size, flags (codec, F_SD, F_CONTIG), its card's serial (version 2, 0.102b13:
- * a track of another card is never read at its cluster on the card in) and its name. A new queue is written
- * into the half not in use, then the header names it (a power cut leaves the queue before);
+ * a track of another card is never read at its cluster on the card in) and its name. A new queue is
+ * written into the half not in use, then the header names it (a power cut leaves the queue before);
  * tracks added at the end are written after the last one, then the header counts them. The
  * entries are read one sector at a time (8 a sector), never the whole queue: it needs no RAM. */
 #include "ui_priv.h"
@@ -246,11 +246,6 @@ static int put_s(const struct entry *e, const char *name, uint32_t serial)
 int qf_put(const struct entry *e, const char *name)
 {
     return put_s(e, name, e->flags & F_SD ? card_serial() : 0);
-}
-
-uint32_t qf_written(void)
-{
-    return qf.writing ? qf.wn : 0;
 }
 
 /* the session's entries made the queue (the header written last), or dropped */

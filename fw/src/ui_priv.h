@@ -84,7 +84,6 @@ struct listing {
 };
 int list_load(struct listing *l, const struct fat_dir *d);
 extern int dir_n;
-const char *ent_name(int i);                    /* the i-th entry shown, sorted */
 const struct entry *ent(int i);
 int dir_load(const struct fat_dir *d);
 void dir_of_entry(const struct entry *e, struct fat_dir *d);
@@ -108,7 +107,8 @@ void path_root(int v);                          /* path[1]: the root of a volume
 int sd_open(void);                              /* the card set up and mounted, 0: ready */
 int sd_card_bad(void);                          /* the card in failed to mount (until changed) */
 void sd_forget(void);                           /* set up again at the next access */
-int sd_watch(void);                             /* the detect switch: 1 redraw, 2 playback stopped */
+/* the detect switch: 1 redraw, 2 playback stopped */
+int sd_watch(void);
 
 #define ROWS   9
 #define ROW_Y0 18
@@ -261,7 +261,8 @@ struct settings {
     uint8_t swap_vol;                           /* VOL+ and VOL- swapped (the volume) */
     int8_t rg_pre;                              /* ReplayGain preamp, dB */
     uint8_t uac_vol;                            /* USB sound card's volume + 1, 0: the playback's */
-    uint8_t uac_remote;                         /* USB sound card: the keys sent to the host (HID) */
+    /* USB sound card: the keys sent to the host (HID) */
+    uint8_t uac_remote;
     char lang[8];                               /* the interface's language: its code (lang.h), */
                                                 /* "" English (0.101) */
     uint8_t hide_clock;                         /* the clock not shown (§120): 0 in a block of */

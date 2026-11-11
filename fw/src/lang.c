@@ -51,19 +51,11 @@ static int pack_read(uint32_t off, void *dst, uint32_t n)
 int lang_init(void)
 {
     n_dir = cur = 0;
-    for (int k = 0; k < 2; k++) {
-        uint32_t img = EMMC_FW1 + (k ? emmc.r : 0);     /* FW1, then FW2 (as the font) */
-        const uint8_t *hb = (const uint8_t *)sec;
-        if (emmc_read(img, 1, sec) || hb[0x1f8] != 'R' || hb[0x1ff] != 'W')
+    for (int k = 0; k < 2; k++) {                   /* FW1, then FW2 (as the font) */
+        uint32_t len;
+        if (fw_blob(k, 0x78, 0x504c574e, sec, &pack_lba, &len) || sec[1] != 1)  /* "NWLP" */
             continue;
-        uint32_t off = sec[0x78 / 4], len = sec[0x7c / 4];
-        if (!len || off % 512)
-            continue;
-        pack_lba = img + off / 512;
-        uint32_t h[4];
-        if (pack_read(0, h, sizeof h) || h[0] != 0x504c574e || h[1] != 1)   /* "NWLP" */
-            continue;
-        uint32_t n = h[2] < LANG_MAX ? h[2] : LANG_MAX;
+        uint32_t n = sec[2] < LANG_MAX ? sec[2] : LANG_MAX;
         if (pack_read(16, dir, n * sizeof *dir))
             continue;
         for (uint32_t i = 0; i < n; i++) {

@@ -1,5 +1,6 @@
 /* USB disk mode: the user volume for the computer (msc.c over usb.c), and its status screen */
 #include <stdint.h>
+#include "ovl.h"
 #include "board.h"
 #include "emmc.h"
 #include "fat.h"
@@ -60,7 +61,8 @@ static void usb_mode(int writable)
 
     sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    sys_line(0, writable ? T("USB disk (read/write)") : T("USB disk (read only)"), writable ? WARN : TITLE);
+    sys_line(0, writable ? T("USB disk (read/write)") : T("USB disk (read only)"),
+             writable ? WARN : TITLE);
     if (storage_err || volume_err || emmc_sectors(&total) || total <= vol.base) {
         sys_line(36, T("No FAT32 volume on the internal memory"), WARN);
         sys_line(54, T("nothing to share over USB"), FG);
@@ -149,7 +151,7 @@ static int newest_write(const struct fat_dirent *e, void *ctx)
 }
 
 /* After a read/write session the clock may be set from what the computer wrote (rtc_from_fat) */
-void sys_usb(int writable)
+void sys_usb_ovl(int writable)
 {
     usb_mode(writable);
     uint32_t newest = 0;

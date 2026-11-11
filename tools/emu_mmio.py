@@ -23,7 +23,7 @@ from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_BLOC
 from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
                                UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_PC)
 
-sys.path.insert(0, __file__.rsplit("/", 3)[0])
+sys.path.insert(0, __file__.rsplit("/", 2)[0] + "/ref")
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from rknanofw import overlays                                     # noqa: E402
 from periph_map import PERIPH                                     # noqa: E402

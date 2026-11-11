@@ -10,6 +10,8 @@
  * in 0.5 dB steps. The USB runs from the controller's interrupt (usb_irq): the packets go into the
  * ring there; what the loop shares with it (the ring when no packet comes, the format, the DMA's
  * position) is done with the interrupt blocked. */
+#include "bytes.h"
+#include "ovl.h"
 #include "ui_priv.h"
 #include "sys_priv.h"
 #include "usb.h"
@@ -240,9 +242,9 @@ static void diag_log(uint32_t dt)
     *p = 0;
     uint32_t hz10 = dt ? (uint32_t)((uint64_t)diag.frames * 10000000 / dt) : 0;
     if (dt)
-        log_printf("uac: host %u.%u Hz over %u ms; frames per packet %s(other %u); peaks L %u R %u; "
-               "feedback step %d", hz10 / 10, hz10 % 10, dt / 1000, b, diag.other, diag.peak_l,
-               diag.peak_r, diag.step);
+        log_printf("uac: host %u.%u Hz over %u ms; frames per packet %s(other %u); peaks L %u "
+                   "R %u; feedback step %d", hz10 / 10, hz10 % 10, dt / 1000, b, diag.other,
+                   diag.peak_l, diag.peak_r, diag.step);
     diag.frames = diag.other = diag.peak_l = diag.peak_r = 0;
     for (int i = 0; i < DIAG_SIZES; i++)
         diag.count[i] = 0;
@@ -396,7 +398,7 @@ static void uac_setup_out(const uint8_t *s, const uint8_t *d, uint32_t n)
     if (req != 0x01)                                    /* SET_CUR only (UAC2: CUR, also 1) */
         return;
     if (usb.high_speed && (index >> 8) == CLOCK_ID) {  /* UAC2: the clock's rate */
-        uint32_t f = d[0] | d[1] << 8 | (uint32_t)d[2] << 16 | (uint32_t)d[3] << 24;
+        uint32_t f = le32(d);
         for (int i = 0; n >= 4 && cs == 1 && i < N_RATES2; i++)
             if (f == rates2[i])
                 new_rate(f);
@@ -413,7 +415,7 @@ static void uac_setup_out(const uint8_t *s, const uint8_t *d, uint32_t n)
         host_mute = d[0] != 0;
         vol_changed = 1;
     } else if (cs == 2 && n >= 2) {
-        int v = (int16_t)(d[0] | d[1] << 8);
+        int v = (int16_t)le16(d);
         host_vol = (int16_t)(v < VOL_MIN ? VOL_MIN : v > 0 ? 0 : v);
         vol_changed = 1;
     }
@@ -854,7 +856,7 @@ static void hid_poll(void)
     log_printf("uac: remote: %s sent (%d), %u reports taken", what, r, usb.int_in_sent);
 }
 
-void uac_mode(void)
+void uac_mode_ovl(void)
 {
     sys_status_reset();
     lcd_fill(0, 0, LCD_W, LCD_H, BG);

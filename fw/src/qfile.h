@@ -17,7 +17,6 @@ int qf_get(uint32_t i, struct entry *e, char *name, int max);
 int qf_begin(void);
 int qf_append(void);
 int qf_put(const struct entry *e, const char *name);
-uint32_t qf_written(void);
 int qf_end(int keep);
 int qf_insert(uint32_t at, uint32_t n, int (*put)(uint32_t k, void *ctx), void *ctx);
 

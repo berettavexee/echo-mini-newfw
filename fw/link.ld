@@ -17,10 +17,12 @@ _estack = 0x03004000;
 
 SECTIONS
 {
+    /* The overlays' modules (ovl.h, ETUDE §137): their code and constants not here but in their
+     * overlay below; their data and BSS stay with the others */
     .text : {
         KEEP(*(.text.reset))
-        *(.text*)
-        *(.rodata*)
+        *(EXCLUDE_FILE(*usb.o *msc.o *uac.o *usbmode.o) .text*)
+        *(EXCLUDE_FILE(*usb.o *msc.o *uac.o *usbmode.o) .rodata*)
         . = ALIGN(4);
     } > CODE
 
@@ -60,10 +62,24 @@ SECTIONS
 
     /* The directory listing, 96 KiB above the code up to the loader's data and stack and over
      * them (dead once we run): not loaded, not cleared (ETUDE §25). The play queue's listing was
-     * at 0x03070000 until 0.102 (ETUDE §127: in .screenram since, the code 32 KiB more) */
-    .dirbuf 0x03078000 (NOLOAD) : {
-        KEEP(*(.dirbuf))
+     * at 0x03070000 until 0.102 (ETUDE §127: in .screenram since, the code 32 KiB more).
+     * The USB overlay (ovl.h, ETUDE §137) takes its place during a USB session (the listing read
+     * again after): stored at 0x20000000 (no memory: tools/mkimg.py takes it by name into the
+     * image, the loader never sees it); NOCROSSREFS: the USB code never touches the listing */
+    OVERLAY 0x03078000 : NOCROSSREFS AT (0x20000000)
+    {
+        .dirbuf { KEEP(*(.dirbuf)) }
+        .ovl_usb { *usb.o(.text* .rodata*) *msc.o(.text* .rodata*) *uac.o(.text* .rodata*)
+                   *usbmode.o(.text* .rodata*) }
     }
+    /* In a USB session: the overlay's code in the first 16 KiB, msc.c's transfer buffer (64 KiB)
+     * after it; in an installation, update.c's buffers (2 x 8 KiB); ovl.c reads its sectors into
+     * the last 512 bytes (shared.h) */
+    __ovl_usb_start = ADDR(.ovl_usb);
+    __ovl_usb_end = 0x03090000;
+    __shared_usb = 0x03078000 + 0x4000;
+    __shared_upd = 0x03078000 + 0x14000;
+    ASSERT(SIZEOF(.ovl_usb) <= 0x4000, "the USB overlay reaches msc.c's buffer (shared.h)")
     ASSERT(SIZEOF(.dirbuf) <= 0x18000, "directory listing larger than 96 KiB")
     /* The queue's folders (ETUDE §79), 48 KiB of PMU-SRAM up to the log ring (0x0309c000): not
      * loaded, not cleared */
@@ -72,6 +88,14 @@ SECTIONS
     }
     ASSERT(SIZEOF(.pmusram) <= 0xc000, "queue folders reach the log ring (0x0309c000)")
     ASSERT(_sidata + SIZEOF(.data) <= 0x03078000, "code reaches the directory listing (0x03078000)")
+
+    /* The log's formats (log.h, ETUDE §133): never loaded, at address 0 (a format's address is
+     * its offset, the token the ring keeps); tools/mkimg.py stores them in the image */
+    logfmt 0 (INFO) : {
+        __start_logfmt = .;
+        KEEP(*(logfmt))
+    }
+    ASSERT(SIZEOF(logfmt) < 0x10000, "log formats over 64 KiB (16-bit tokens)")
 
     /DISCARD/ : { *(.ARM.exidx*) *(.ARM.attributes) *(.comment) }
 }

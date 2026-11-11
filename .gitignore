@@ -3,6 +3,8 @@ loader/
 work/
 fwbase/
 flash/
+ref
+CLAUDE.md
 # build output
 fw/build/
 __pycache__/

@@ -1,6 +1,7 @@
 /* The library index (library.h, docs/LIBRARY.md). The sort key's tables are the same as in
  * fw/tools/mklib.py: the host test (fw/tools/library_test.c) checks that both sort alike. */
 #include <stdint.h>
+#include "bytes.h"
 #include "library.h"
 
 #define HALF   (4u << 20)
@@ -76,8 +77,6 @@ static int rd(uint32_t off, void *buf, uint32_t n)
     return 0;
 }
 
-static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
-static uint32_t le16(const uint8_t *p) { return p[0] | p[1] << 8; }
 
 /* ---- CRC-32 (zlib's), four bits at a time ---- */
 static const uint32_t crc_t[16] = {
@@ -194,7 +193,8 @@ int lib_open(const struct lib_io *io)
         if (rd(lib.half + 16 + 16 * i, e, 16))
             return -1;
         for (int k = 0; k < NSECT; k++)
-            if (!__builtin_memcmp(e, sect_id + 4 * k, 4)) {  /* others: a later version's, ignored */
+            /* others: a later version's, ignored */
+            if (!__builtin_memcmp(e, sect_id + 4 * k, 4)) {
                 uint32_t o = le32(e + 4), l = le32(e + 8), n = le32(e + 12);
                 if (o > len || l > len - o || (o & 3) ||
                     (sect_size[k] && n > l / sect_size[k]))

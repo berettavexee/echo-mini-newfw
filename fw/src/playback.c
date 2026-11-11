@@ -141,7 +141,8 @@ void fail_text(int code, uint32_t why, const char **what, const char **hint)
     case PLAYER_EUNSUPPORTED:
         *what = why_text[why < sizeof why_text / sizeof *why_text ? why : HP_WHY_NONE];
         *hint = why == HP_WHY_CHANNELS ? N_("Convert it to stereo") :
-                why == HP_WHY_HEAAC || why == HP_WHY_AAC_TYPE ? N_("Convert it to AAC-LC, MP3 or Opus") :
+                why == HP_WHY_HEAAC || why == HP_WHY_AAC_TYPE ?
+                    N_("Convert it to AAC-LC, MP3 or Opus") :
                 N_("Convert it to FLAC, MP3, AAC-LC or Opus");
         break;
     case HIFI_EREAD:
@@ -263,7 +264,8 @@ static int q_open(int i, int chain)
     int was_on = audio.on;
     int async = chain == 2 || seek_async;       /* a chained track, a seek: the loop goes on */
     seek_async = 0;                             /* while core B reads the headers (0.99r25); */
-    player_ogg_hint(tg_next.ogg_end_page, tg_next.ogg_end_seg);  /* core B skips the comment header */
+    /* core B skips the comment header */
+    player_ogg_hint(tg_next.ogg_end_page, tg_next.ogg_end_seg);
     pp = perf_begin("open");                    /* one chosen: waited for (its failure shown) */
     int r = player_open(&f, flags & F_CODEC, PLAY_CHAIN | (async ? PLAY_ASYNC : 0));
     perf_end(pp);

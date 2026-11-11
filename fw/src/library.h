@@ -39,7 +39,7 @@ int lib_track(uint32_t i, struct lib_track *t);
 int lib_volume(uint32_t i, uint32_t *volume, uint32_t *serial, uint32_t *tracks);
 /* By volume and first cluster (CLUS): entry i (key vol << 31 | cluster), or the track of a file;
  * 0, or -1 (none) */
-int lib_clus(uint32_t i, uint32_t *key, uint32_t *track);
+int lib_clus(uint32_t i, uint32_t *key, uint32_t *track);   /* (tools/library_test.c) */
 int lib_find(uint32_t volume, uint32_t cluster, uint32_t *track);
 /* lib_find() helped by the key of every 64th entry, kept in buf (max words): 0, or -1 (too
  * many, or a read: lib_find() then searches the whole section); until lib_close() */
