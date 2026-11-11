@@ -5,7 +5,7 @@
 #   - the log formats match their arguments (log.h, LOG_FORMAT_CHECK);
 #   - the strings shown are marked for translation, po/newfw.pot is up to date (tools/mkpot.py),
 #     the translations keep the printf conversions and fit in a catalogue (tools/mklang.py);
-#   - the host tests of log.c, msc.c, remote.c, perf.c and library.c pass;
+#   - the host tests of log.c, msc.c, remote.c, perf.c, library.c and font.c pass;
 #   - ruff (or pyflakes) and codespell find nothing (when installed);
 #   - the functions of ours the linker drops (dead code) are listed, not refused.
 # --full also builds the test variants (ECHO_HWTEST, ECHO_HWSYN, ECHO_NO_HWFFT, ECHO_FFTCMP,
@@ -82,6 +82,14 @@ if python3 tools/mklib.py --json tools/library_fixture.json -o $C/lib.dat \
     printf 'ok    library_test\n'
 else
     bad "library_test (see fw/$C/library_test.log)"; tail -5 $C/library_test.log
+fi
+
+# the font read from the eMMC (ETUDE §131): every glyph of the blob, reads failing, the catalogues
+if cc -O1 -Wall -Werror -Isrc -I$C/prod -o $C/font_test tools/font_test.c > $C/font_test.log 2>&1 &&
+    $C/font_test $C/prod/font.bin po/ja.po >> $C/font_test.log 2>&1; then
+    printf 'ok    font_test\n'
+else
+    bad "font_test (see fw/$C/font_test.log)"; tail -5 $C/font_test.log
 fi
 
 if [ "$1" = "--full" ]; then

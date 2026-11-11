@@ -373,6 +373,7 @@ static struct fat_file own_file;                /* the track open (non-blocking 
 struct player_heard player_heard;
 static struct { int on; uint32_t end, frames, fb; } tail;
 static struct { int on; uint32_t end, t0; } drain;
+static const uint32_t zero[256];                /* 1 KiB of silence, behind a track's end */
 
 static void heard_publish(void)                 /* the track opened last is heard from now on */
 {
@@ -612,7 +613,6 @@ static void chain_done(void)
 void player_chain_end(void)
 {
     if (dac.running) {
-        static const uint32_t zero[256];
         uint32_t t0 = ticks(), end = audio.wr;  /* the end of the last track's frames */
         uint32_t lim = drain_limit_us();
         while (audio_free() < sizeof zero && ticks() - t0 < lim) {
@@ -634,7 +634,6 @@ void player_chain_end(void)
  * counted) */
 static int drain_step(void)
 {
-    static const uint32_t zero[256];
     audio_update();
     if (!drain.on) {
         drain.on = 1;
