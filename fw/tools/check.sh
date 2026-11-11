@@ -9,7 +9,7 @@
 #   - ruff (or pyflakes) and codespell find nothing (when installed);
 #   - the functions of ours the linker drops (dead code) are listed, not refused.
 # --full also builds the test variants (ECHO_HWTEST, ECHO_HWSYN, ECHO_NO_HWFFT, ECHO_FFTCMP,
-# ECHO_PROBE, SD_WALK) and the fuzzing harnesses (tools/fuzz/build.sh), so that they do not rot.
+# ECHO_PROBE, ECHO_LCDPERF, SD_WALK) and the fuzzing harnesses (tools/fuzz/build.sh), so that they do not rot.
 # Each build has its own folder under build/check/; build/ itself is left alone.
 set -e
 cd "$(dirname "$0")/.."
@@ -42,7 +42,7 @@ fi
 
 if [ "$1" = "--full" ]; then
     say "test variants"
-    for v in ECHO_HWTEST ECHO_HWSYN ECHO_NO_HWFFT ECHO_FFTCMP ECHO_PROBE SD_WALK; do
+    for v in ECHO_HWTEST ECHO_HWSYN ECHO_NO_HWFFT ECHO_FFTCMP ECHO_PROBE ECHO_LCDPERF SD_WALK; do
         build "$v" "-D$v"
     done
 fi

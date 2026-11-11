@@ -12,6 +12,7 @@
 extern int lcd_ready;
 
 void lcd_init(void);
+void lcd_perf_probe(void);       /* test build ECHO_LCDPERF: the screen's costs, logged */
 void lcd_fill(int x, int y, int w, int h, uint16_t color);
 int lcd_text(int x, int y, const char *s, uint16_t fg, uint16_t bg);
 /* UTF-8 */

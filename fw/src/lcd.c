@@ -332,6 +332,98 @@ int lcd_text(int x, int y, const char *s, uint16_t fg, uint16_t bg)
     return x;
 }
 
+#ifdef ECHO_LCDPERF
+/* Test build (make EXTRA=-DECHO_LCDPERF, ETUDE §132): what a frame costs core A today, split
+ * into the bus (a plain fill) and the pixels' computation (the same text into a RAM band, sent
+ * nowhere: what would be left to core A with the screen fed by DMA). Each measure 3 times. */
+static uint16_t band[16 * LCD_W];
+
+/* draw_glyph_cols into the band (row y of the band = 0), pixels byte-swapped as on the bus */
+static int band_glyph(int x, const uint8_t *g, uint16_t fg, uint16_t bg)
+{
+    int adv = g[0], w = g[1], h = g[2], xo = (int8_t)g[3], yo = (int8_t)g[4];
+    int bpr = (w + 7) / 8, top = font_ascent - yo - h;
+    const uint8_t *bits = g + 5;
+    uint16_t f = (uint16_t)(fg >> 8 | fg << 8), b = (uint16_t)(bg >> 8 | bg << 8);
+    if (!adv || x + adv > LCD_W)
+        return 0;
+    for (int r = 0; r < FONT_LINE; r++) {
+        int gy = r - top;
+        const uint8_t *row = gy >= 0 && gy < h ? bits + gy * bpr : 0;
+        uint16_t *d = band + r * LCD_W + x;
+        for (int c = 0; c < adv; c++) {
+            int gx = c - xo;
+            d[c] = row && gx >= 0 && gx < w && (row[gx >> 3] & (0x80 >> (gx & 7))) ? f : b;
+        }
+    }
+    return adv;
+}
+
+static void band_text(const char *s, uint16_t fg, uint16_t bg)
+{
+    int x = 0;
+    while (*s)
+        x += band_glyph(x, font_glyph(utf8_next(&s)), fg, bg);
+    uint16_t b = (uint16_t)(bg >> 8 | bg << 8);
+    for (int r = 0; r < FONT_LINE; r++)
+        for (int c = x; c < LCD_W; c++)
+            band[r * LCD_W + c] = b;
+}
+
+static void perf_line(const char *what, uint32_t t[3])
+{
+    log_printf("lcdperf: %s: %u, %u, %u us", what, t[0], t[1], t[2]);
+}
+
+void lcd_perf_probe(void)
+{
+    static const char *const text[2] = {
+        "The quick brown fox jumps over the lazy dog 0123456789 ABCDEFGHIJ",
+        "\xe6\x9d\xb1\xe4\xba\xac\xe3\x81\xae\xe5\xa4\x9c \xe9\xbe\x8d\xe8\x88\x87\xe9\xb3\xb3"
+        "\xe5\x87\xb0 \xec\x84\x9c\xec\x9a\xb8\xec\x9d\x98 \xeb\xb0\xa4 \xe3\x81\xb2\xe3\x82\x89"
+        "\xe3\x81\x8c\xe3\x81\xaa\xe3\x83\xbb\xe3\x82\xab\xe3\x82\xbf\xe3\x82\xab\xe3\x83\x8a",
+    };
+    uint32_t t[3], t0;
+    log_printf("lcdperf: VOP timing %x, con %x; a frame is %u bytes", REG(VOP_TIMING),
+               REG(VOP_CON), LCD_W * LCD_H * 2);
+    for (int i = 0; i < 3; i++) {               /* the bus alone: the whole screen, one colour */
+        t0 = ticks();
+        lcd_fill(0, 0, LCD_W, LCD_H, i == 1 ? 0xf800 : 0x001f);
+        t[i] = ticks() - t0;
+    }
+    perf_line("fill 320x170 (bus alone)", t);
+    for (int k = 0; k < 2; k++) {
+        for (int i = 0; i < 3; i++) {           /* 10 lines of text, as the screens draw them */
+            t0 = ticks();
+            for (int l = 0; l < 10; l++)
+                lcd_text_clip(0, l * FONT_LINE, text[k], LCD_W, 0xffff, 0x0000);
+            t[i] = ticks() - t0;
+        }
+        perf_line(k ? "text 10 lines CJK, to the panel" : "text 10 lines Latin, to the panel", t);
+        for (int i = 0; i < 3; i++) {           /* the same lines into the RAM band only */
+            t0 = ticks();
+            for (int l = 0; l < 10; l++)
+                band_text(text[k], 0xffff, 0x0000);
+            t[i] = ticks() - t0;
+        }
+        perf_line(k ? "text 10 lines CJK, into RAM only" : "text 10 lines Latin, into RAM only", t);
+    }
+    for (int i = 0; i < 3; i++) {               /* the band to the panel by the CPU (16-bit) */
+        t0 = ticks();
+        for (int l = 0; l < 10; l++) {
+            window(0, l * FONT_LINE, LCD_W - 1, l * FONT_LINE + FONT_LINE - 1);
+            for (int n = 0; n < FONT_LINE * LCD_W; n++) {
+                dat((uint8_t)band[n]);
+                dat((uint8_t)(band[n] >> 8));
+            }
+        }
+        t[i] = ticks() - t0;
+    }
+    perf_line("10 RAM bands to the panel by the CPU", t);
+    lcd_fill(0, 0, LCD_W, LCD_H, 0x0000);
+}
+#endif
+
 /* The backlight: at 100 % (and off) a GPIO, below on PWM0 channel 0 at 10 kHz (pin function 1),
  * as the stock firmware does (ETUDE §3.3). PCLK is the core clock / 4 (board.c); the screen is
  * never on while the clocks are on the crystal (sys_screen_set). The steps in the stock

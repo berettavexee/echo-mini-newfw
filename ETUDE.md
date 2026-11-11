@@ -4589,3 +4589,29 @@ Première étape du plan mémoire discuté le 2026-11-11 (le projet est limité 
 **Journal par jetons : deux façons, une décision à prendre.** Les formats ne seraient plus dans le code chargé : une macro range chaque format dans une section non chargée et passe son adresse (le jeton) ; l'anneau du journal garde le jeton, l'heure et les arguments (les `%s` recopiés). Gain : environ 10 Kio de code, et l'anneau de 12 Kio garde environ trois fois plus de lignes. Reste à savoir qui remet le texte :
 - (a) **le firmware, au vidage vers `NEWFWLOG.TXT`**, en lisant les formats dans l'image sur l'eMMC (comme la police) : le fichier reste du texte, `readlog.py` et les tests de l'émulateur ne changent pas. Limite : pendant une installation, la copie qui porte les formats est réécrite ; les lignes écrites après sa réécriture ne peuvent plus être remises en texte (une marque de build dans le blob le détecte : elles sortent alors en jeton brut, décodables avec l'ELF), et ce sont justement les lignes du résultat de l'installation ; quelques lectures eMMC à chaque vidage ;
 - (b) **sur le PC** (`readlog.py --elf`) : rien à lire sur l'appareil, mais le fichier devient binaire et ne se lit plus sans l'ELF de chaque version qui y a écrit (garder `fw.elf` avec chaque image d'essai, le joindre aux versions publiées).
+
+## 132. Écran : ce que coûte une image, avant la DMA (0.103lp, 0.103m2, 2026-11-11)
+
+Question de l'utilisateur : dessiner seulement ce qui change et envoyer l'écran par DMA, comme les autres firmwares. Le dessin partiel existe depuis la 0.60 (§39) ; ce qui coûte est l'envoi octet par octet au VOP par le cœur A (un écran complet = 108 800 octets ; 11 à 19 ms par dessin complet, 3,9 ms par dessin partiel de l'écran de lecture). Le TRM (chap. 15) décrit la FIFO du VOP alimentée par DMA (RGB565 deux pixels par mot, échange d'octets, et YUV420 converti en RGB : utile pour des pochettes). Avant d'engager la DMA, une image de mesure dit quelle part du temps est le bus et quelle part le calcul des pixels, celle qui resterait au cœur A.
+
+**Image de mesure** `make EXTRA=-DECHO_LCDPERF` (version 0.103lp, ajoutée aux variantes de `check.sh --full`) : au démarrage, après la police, `lcd_perf_probe()` (`lcd.c`) chronomètre trois fois chacun : un remplissage uni de l'écran (le bus seul) ; 10 lignes de texte latin puis CJK envoyées comme aujourd'hui ; les mêmes lignes calculées dans une bande en RAM (320 × 16, 10 Kio) sans rien envoyer ; puis 10 bandes en RAM envoyées par le CPU. Lignes `lcdperf:` du journal. L'émulateur ne sert ici qu'à vérifier que la mesure tourne (son horloge suit les appels à `ticks()`, pas le travail).
+
+**Défaut trouvé en route (0.103m2)** : dans l'émulateur, la ligne CJK de la mesure relisait l'eMMC à chaque passage. Deux causes, la seconde la plus coûteuse : 夜 (U+591C) et 서 (U+C11C) tombaient dans la même case du cache à correspondance directe et se chassaient ; et chaque groupe lu rangeait ses 15 voisins par-dessus des glyphes qu'on venait de dessiner. Le cache passe à **2 voies** (128 ensembles, la moins récente remplacée) et un voisin lu d'avance ne prend qu'une place libre ou celle d'un autre voisin jamais dessiné. `font_test` : la ligne de la mesure redessinée 30 fois ne lit plus rien (179 lectures pour une paire de caractères avec le cache de la 0.103m1) ; catalogues dessinés deux fois : `ja.po` 736 puis 459 lectures (614 puis 608 avec les tables en RAM de la 0.103, 1 480 puis 1 467 en 0.103m1), `zh_CN.po` 928 puis 585 (714 puis 708). RAM : 384 octets de plus.
+
+**Résultats sur l'appareil (0.103lp, `work/hwlog/2026-11-11_0.103lp/`)**, cœur A à 200 MHz, `VOP_TIMING` `0x3083` :
+
+| Mesure (3 fois) | Temps | Par unité |
+|---|---|---|
+| remplissage uni de l'écran, 108 800 octets (le bus seul) | 8,16 ms | 75 ns par octet (13,3 Mo/s) |
+| 10 lignes latines envoyées comme aujourd'hui (102 400 octets) | 18,6 ms | |
+| les mêmes, calculées en RAM seulement | 10,2 ms | 200 ns par pixel (≈ 40 cycles) |
+| 10 bandes en RAM envoyées par le CPU | 10,25 ms | |
+| 10 lignes CJK envoyées (1er passage, glyphes lus sur l'eMMC / suivants) | 25,2 / 17,1 ms | |
+| les mêmes en RAM seulement | 9,2 ms | |
+
+Lecture :
+- **le calcul des pixels coûte autant que le bus** : 18,6 ms ≈ 10,2 ms de calcul + 8 ms de bus, sans recouvrement (le CPU attend le VOP à chaque octet). Une DMA seule ramènerait le dessin de 10 lignes à environ 10 ms de cœur A (−45 %), pas plus ;
+- **le calcul est lent** : environ 40 cycles par pixel (`draw_glyph_cols` teste chaque pixel : bornes, bit, choix de la couleur, deux écritures). Un dessin des lignes d'un glyphe par octets de bits (table de 8 pixels, deux couleurs par mot, sans test par pixel) devrait descendre vers 5 à 10 cycles par pixel : environ 1,5 à 2,5 ms pour 10 lignes. Gain logiciel pur, vérifiable sur l'émulateur pixel pour pixel, utile avec ou sans DMA ;
+- le bus (75 ns par octet) est proche de la limite de la dalle (cycle d'écriture minimal du ST7789 : 66 ns) : rien à gagner à le serrer ;
+- les deux ensemble (calcul rapide dans une bande, puis DMA) : environ 2 à 3 ms de cœur A pour un écran complet au lieu de 13 à 19 ms, moins de 1 ms pour un dessin partiel au lieu de 3,9 ms ;
+- le correctif du cache des glyphes est confirmé : la ligne CJK coûte 25,2 ms au premier passage (glyphes lus), puis 17,1 ms à chaque passage suivant, sans aucune lecture.

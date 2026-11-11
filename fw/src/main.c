@@ -482,6 +482,9 @@ int main(void)
     storage_init();
     font_init();
     lang_init();                                /* (the language: with the settings, ui_main) */
+#ifdef ECHO_LCDPERF
+    lcd_perf_probe();
+#endif
     rtc_init();
     log_printf("battery %u mV, usb %d, charge pin %d, jack 3.5 %d 4.4 %d, power key %d",
                battery_mv(), vbus(), gpio_get(PIN_CHARGING), gpio_get(PIN_JACK35),

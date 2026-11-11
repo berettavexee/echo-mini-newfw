@@ -3,7 +3,7 @@
  * the first code point of every 128th run (140 bytes); the run table itself (first code point
  * and first glyph of each run of consecutive codes, 24 KiB) is read from the eMMC when needed,
  * through a cache of 3 sectors (ETUDE §131: until 0.103 the tables took 37 KiB of the BSS).
- * The records live in a direct-mapped cache of 256, by code point: a glyph drawn again reads
+ * The records live in a cache of 256 (2 ways), by code point: a glyph drawn again reads
  * nothing, a code point the font lacks is kept as '?'. A missing glyph reads its group of 16
  * records (under 800 bytes) in one eMMC command; finding its run, and the code points of the
  * group's other glyphs, costs up to 2 or 3 sectors more on a cold cache, usually none. */
@@ -31,7 +31,12 @@ static uint32_t nranges, nglyphs, ngroups, ntop, base, blen, o_first, o_index, o
                 recs_len;
 static int ready;
 
+/* 2 ways of 128 sets, by code point (set = cp % SETS, at 2 set and 2 set + 1): two code points
+ * of the same set, drawn together, no longer chase each other out (夜 U+591C and 서 U+C11C) */
+#define SETS       (CACHE / 2)
 static struct { uint32_t tag; uint8_t rec[REC_MAX]; } cache[CACHE];   /* tag = code point + 1 */
+static uint8_t mru[SETS];                       /* the way used last in each set */
+static uint8_t used[CACHE];                     /* drawn since it came in (not only read ahead) */
 static uint32_t sec_lba[SECS], sec_next;        /* lba 0: empty (the blob is past FW1) */
 static uint32_t sec[SECS][512 / 4];
 static uint32_t rbuf[3 * 512 / 4];              /* a group's records (under 800 bytes) */
@@ -174,11 +179,55 @@ static int find(uint32_t c, uint32_t *i, uint32_t *r)
     return 0;
 }
 
-/* reads the group of glyph i (in run r, at place i_k) into the cache, in one eMMC command, each
- * glyph at the place of its code point (found in the runs around r) */
-static int fill(uint32_t i, uint32_t r, uint32_t i_k)
+/* the cache entry of cp, or -1 */
+static int lookup(uint32_t cp)
 {
-    uint32_t g = i / GROUP, j = g * GROUP, f, a, b;
+    uint32_t k = cp % SETS * 2;
+    for (int w = 0; w < 2; w++)
+        if (cache[k + w].tag == cp + 1) {
+            mru[cp % SETS] = (uint8_t)w;
+            used[k + w] = 1;
+            return (int)(k + w);
+        }
+    return -1;
+}
+
+/* cp's record (n bytes) into the cache. Asked for (ahead = 0): over the way used least. Read
+ * ahead with it (the rest of its group, ahead = 1): only into a free way or one read ahead and
+ * never drawn, so that a line drawn again and again keeps its glyphs (ETUDE §132). NULL: not
+ * kept. */
+static uint8_t *put(uint32_t cp, const uint8_t *rec, uint32_t n, int ahead)
+{
+    uint32_t k0 = cp % SETS * 2;
+    int k = -1;
+    for (int w = 0; w < 2 && k < 0; w++)
+        if (cache[k0 + w].tag == cp + 1)
+            k = (int)k0 + w;
+    if (k < 0 && !ahead)
+        k = (int)k0 + !mru[cp % SETS];
+    for (int w = 0; w < 2 && k < 0; w++)
+        if (!cache[k0 + w].tag || !used[k0 + w])
+            k = (int)k0 + w;
+    if (k < 0)
+        return 0;
+    if (!ahead) {
+        mru[cp % SETS] = (uint8_t)(k & 1);
+        used[k] = 1;
+    } else if (cache[k].tag != cp + 1) {
+        used[k] = 0;
+    }
+    for (uint32_t x = 0; x < n; x++)
+        cache[k].rec[x] = rec[x];
+    cache[k].tag = cp + 1;
+    return cache[k].rec;
+}
+
+/* reads the group of glyph i (code point c, in run r) into the cache, in one eMMC command, each
+ * glyph by its code point (found in the runs around r); c's last, so that it is kept */
+static int fill(uint32_t i, uint32_t c, uint32_t r)
+{
+    uint32_t g = i / GROUP, j = g * GROUP, f, a, b, ni = 0;
+    const uint8_t *qi = 0;
     if (g >= ngroups)
         return -1;
     uint32_t p = gbase[g / GBASE] + gdelta[g];
@@ -203,15 +252,18 @@ static int fill(uint32_t i, uint32_t r, uint32_t i_k)
         uint32_t n = (uint32_t)(5 + q[2] * ((q[1] + 7) / 8));
         if (p + n > e || n > REC_MAX || j < a)
             return -1;
-        uint32_t cp = f + (j - a), k = cp % CACHE;
-        if (k != i_k || j == i) {               /* (never over glyph i's place) */
-            for (uint32_t x = 0; x < n; x++)
-                cache[k].rec[x] = q[x];
-            cache[k].tag = cp + 1;
+        if (j == i) {
+            qi = q;
+            ni = n;
+        } else {
+            put(f + (j - a), q, n, 1);
         }
         q += n;
         p += n;
     }
+    if (!qi)
+        return -1;
+    put(c, qi, ni, 0);
     return 0;
 }
 
@@ -227,18 +279,14 @@ const uint8_t *font_glyph(uint32_t c)
         return font_ascii + font_ascii_off[c - 0x20];
     if (!ready || c > 0x10ffff)
         return q;
-    uint32_t k = c % CACHE, i, r;
-    if (cache[k].tag == c + 1)                  /* (a code point the font lacks too: '?') */
+    uint32_t i, r;
+    int k = lookup(c);                          /* (a code point the font lacks too: '?') */
+    if (k >= 0)
         return cache[k].rec;
     int found = find(c, &i, &r);
-    if (found == 1) {                               /* not in the font: '?' kept as c's glyph */
-        uint32_t n = (uint32_t)(5 + q[2] * ((q[1] + 7) / 8));
-        for (uint32_t b = 0; b < n; b++)
-            cache[k].rec[b] = q[b];
-        cache[k].tag = c + 1;
-        return cache[k].rec;
-    }
-    if (found == 0 && !fill(i, r, k) && cache[k].tag == c + 1)
+    if (found == 1)                             /* not in the font: '?' kept as c's glyph */
+        return put(c, q, (uint32_t)(5 + q[2] * ((q[1] + 7) / 8)), 0);
+    if (found == 0 && !fill(i, c, r) && (k = lookup(c)) >= 0)
         return cache[k].rec;
     return q;
 }

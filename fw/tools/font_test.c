@@ -183,6 +183,29 @@ int main(int argc, char **argv)
                r_old[0], r_new[1], r_old[1], n_rec);
     }
 
+    /* a line drawn again and again (a scrolling title, 30 times a second): read once, then
+     * never. Two of its code points share a cache set (夜 U+591C, 서 U+C11C); the groups read
+     * for its glyphs bring their neighbours, which must not push its glyphs out (ETUDE §132:
+     * 東京の夜 龍與鳳凰 서울의 밤 ひらがな・カタカナ, the screen test's line) */
+    fail_pct = 0;
+    {
+        static const uint32_t line[] = { 0x6771, 0x4eac, 0x306e, 0x591c, 0x9f8d, 0x8207, 0x9cf3,
+                                         0x51f0, 0xc11c, 0xc6b8, 0xc758, 0xbc24, 0x3072, 0x3089,
+                                         0x304c, 0x306a, 0x30fb, 0x30ab, 0x30bf, 0x30ab, 0x30ca };
+        for (uint32_t k = 0; k < sizeof line / 4; k++)
+            font_glyph(line[k]);
+        uint32_t r0 = n_reads;
+        for (int round = 0; round < 30; round++)
+            for (uint32_t k = 0; k < sizeof line / 4; k++)
+                if (is_q(font_glyph(line[k]))) {
+                    printf("FAIL U+%04X gives '?'\n", line[k]);
+                    fails++;
+                }
+        printf("%s a CJK line drawn 30 times more: %u eMMC reads\n", n_reads == r0 ? "ok  " : "FAIL",
+               n_reads - r0);
+        fails += n_reads != r0;
+    }
+
     /* a damaged header: refused, ASCII only */
     fail_pct = 0;
     memcpy(img + BLOB_OFF + 12, &(uint32_t){ 100000 }, 4);           /* runs > RANGES_MAX */
