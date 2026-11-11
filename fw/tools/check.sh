@@ -60,7 +60,13 @@ if [ "$1" = "--full" ]; then
 fi
 
 say "line length"
-LONG=$(awk 'length > 100 { print FILENAME ":" FNR }' src/*.c src/*.h)
+# (characters, not bytes: awk counts bytes without a UTF-8 locale, as in the CI's container)
+LONG=$(python3 -c '
+import sys
+for f in sys.argv[1:]:
+    for n, line in enumerate(open(f, encoding="utf-8"), 1):
+        if len(line.rstrip("\n")) > 100:
+            print(f"{f}:{n}")' src/*.c src/*.h)
 if [ -z "$LONG" ]; then echo "ok    no line of src/ over 100 characters"
 else bad "lines over 100 characters:"; echo "$LONG" | head -10; fi
 
