@@ -14,6 +14,7 @@
 #include "regs.h"
 #include "hifi_proto.h"
 #include "hifi.h"
+#include "lcd.h"
 
 #define DAC0 0x60
 #define DAC1 0x66
@@ -332,6 +333,7 @@ static void clocks_i2s(void)
 
 static void dma_start(void)
 {
+    lcd_sync();                                 /* the screen's channel done: DMAC1 is reset */
     REG(CH_EN) = 1u << (8 + 5);                 /* channel 5 off while it is reprogrammed */
     REG(CRU_CLKGATE(7)) = 0xffff0000;           /* hclk_dma and the rest of gate register 7 */
     REG(CRU_SOFTRST(1)) = 0x00010001;           /* DMAC1 reset */

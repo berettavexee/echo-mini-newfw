@@ -1,6 +1,14 @@
 /* Firmware log (see log.h). Ring in PMU-SRAM at 0x0309c000 (12 KiB, the free area of the
  * memory plan, kept across resets), then NEWFWLOG.TXT, written in place through the
- * emmc_write_log() fence (the file's own sectors only). */
+ * emmc_write_log() fence (the file's own sectors only).
+ * The ring holds two kinds of entries: text lines ending with '\n' (log_text), and token
+ * records (log_printf, ETUDE §133): 0x01, the time (ms, 4 bytes), the format's offset in the
+ * section "logfmt" (2 bytes), the descriptor (4 bytes, log.h), then each argument: 4 bytes, or
+ * a string and its 0. They become text when the ring is written into the file, with the formats
+ * read from the image on the eMMC (header +0x1e8, tools/mkimg.py). The ring notes which formats
+ * its records need (the CRC of the image's formats): the records of a boot before (bound) with
+ * the formats of that boot's firmware, then this boot's; a record whose formats are no longer in
+ * the image is written raw. */
 #include <stdarg.h>
 #include "log.h"
 #include "board.h"
@@ -9,15 +17,23 @@
 
 #define RING_ADDR   0x0309c000u
 #define RING_BYTES  0x3000u
-#define RING_MAGIC  0x32474c4eu                 /* "NLG2" (0.68: the note word added) */
-#define DATA_BYTES  (RING_BYTES - 20)
+#define RING_MAGIC  0x33474c4eu                 /* "NLG3" (0.103t1: the token records) */
+#define DATA_BYTES  (RING_BYTES - 32)
 #define FLUSH_US    5000000u                    /* at most every 5 s ... */
 #define FLUSH_BYTES 2048u                       /* ... or as soon as this much is pending */
+#define REC         0x01                        /* a token record's first byte */
+#define REC_HEAD    11
+#define REC_MAX     256                         /* a record's bytes at most (strings cut) */
+#define ARGS_MAX    24
+#define FMT_MAX     256                         /* a format's bytes at most, its 0 included */
+#define FMT_MAGIC   0x4d464c4eu                 /* "NLFM", the formats' blob */
 
 struct ring {
     uint32_t magic, boots;
     uint32_t wr, fl;                            /* bytes written / copied to the file, ever */
     uint32_t note;                              /* log_boot_note(): for the next boot */
+    uint32_t bound;                             /* where this boot's entries start */
+    uint32_t fmt_prev, fmt_cur;                 /* the formats' CRC before bound, from bound */
     char data[DATA_BYTES];
 };
 
@@ -33,15 +49,51 @@ static uint8_t cur[512];                        /* sector being filled */
 static uint8_t hdr[512];
 
 /* ---- ring ---- */
+static uint8_t rbyte(uint32_t pos)
+{
+    return (uint8_t)R->data[pos % DATA_BYTES];
+}
+
+static uint32_t rd32(uint32_t pos)
+{
+    return rbyte(pos) | (uint32_t)rbyte(pos + 1) << 8 | (uint32_t)rbyte(pos + 2) << 16 |
+           (uint32_t)rbyte(pos + 3) << 24;
+}
+
+/* bytes of the entry at pos (at most avail: a line cut by a reset ends there) */
+static uint32_t entry_len(uint32_t pos, uint32_t avail)
+{
+    uint32_t n = 0;
+    if (rbyte(pos) != REC) {
+        while (n < avail && rbyte(pos + n++) != '\n')
+            ;
+        return n;
+    }
+    if (avail < REC_HEAD)
+        return avail;
+    uint32_t desc = rd32(pos + 7);
+    n = REC_HEAD;
+    for (uint32_t i = 0; i < (desc & 31) && n < avail; i++) {
+        if (desc >> (5 + i) & 1) {
+            while (n < avail && rbyte(pos + n++))
+                ;
+        } else {
+            n += 4;
+        }
+    }
+    return n < avail ? n : avail;
+}
+
 static void ring_put(const char *s, uint32_t n)
 {
     volatile struct ring *r = R;
+    while (r->wr + n - r->fl > DATA_BYTES) {    /* the oldest entries dropped, whole */
+        uint32_t k = entry_len(r->fl, r->wr - r->fl);
+        logs.lost += k;
+        r->fl += k;
+    }
     while (n--)
         r->data[r->wr++ % DATA_BYTES] = *s++;
-    if (r->wr - r->fl > DATA_BYTES) {           /* oldest bytes overwritten */
-        logs.lost += r->wr - r->fl - DATA_BYTES;
-        r->fl = r->wr - DATA_BYTES;
-    }
 }
 
 static uint32_t log_pending(void)
@@ -69,7 +121,23 @@ static char *put_num(char *p, char *end, uint32_t v, int base, int neg, int widt
     return p;
 }
 
-static char *vformat(char *p, char *end, const char *f, va_list ap)
+/* the arguments: from a va_list, or from a token record's (strings as pointers) */
+struct fargs {
+    va_list *ap;
+    const uintptr_t *a;
+};
+
+static uint32_t arg_u(struct fargs *x)
+{
+    return x->ap ? va_arg(*x->ap, uint32_t) : (uint32_t)*x->a++;
+}
+
+static const char *arg_s(struct fargs *x)
+{
+    return x->ap ? va_arg(*x->ap, const char *) : (const char *)*x->a++;
+}
+
+static char *vformat(char *p, char *end, const char *f, struct fargs *x)
 {
     while (*f && p < end) {
         if (*f != '%') {
@@ -87,7 +155,7 @@ static char *vformat(char *p, char *end, const char *f, va_list ap)
             f++;
         switch (*f) {
         case 's': {
-            const char *s = va_arg(ap, const char *);
+            const char *s = arg_s(x);
             int n = 0;
             while (s && s[n])
                 n++;
@@ -98,19 +166,19 @@ static char *vformat(char *p, char *end, const char *f, va_list ap)
             break;
         }
         case 'c':
-            *p++ = (char)va_arg(ap, int);
+            *p++ = (char)arg_u(x);
             break;
         case 'd': {
-            int v = va_arg(ap, int);
+            int v = (int)arg_u(x);
             p = put_num(p, end, v < 0 ? -(uint32_t)v : (uint32_t)v, 10, v < 0, width, pad, 0);
             break;
         }
         case 'u':
-            p = put_num(p, end, va_arg(ap, uint32_t), 10, 0, width, pad, 0);
+            p = put_num(p, end, arg_u(x), 10, 0, width, pad, 0);
             break;
         case 'x':
         case 'X':
-            p = put_num(p, end, va_arg(ap, uint32_t), 16, 0, width, pad, *f == 'X');
+            p = put_num(p, end, arg_u(x), 16, 0, width, pad, *f == 'X');
             break;
         case '%':
             *p++ = '%';
@@ -129,7 +197,8 @@ static char *format(char *p, char *end, const char *f, ...)
 {
     va_list ap;
     va_start(ap, f);
-    p = vformat(p, end, f, ap);
+    struct fargs x = { &ap, 0 };
+    p = vformat(p, end, f, &x);
     va_end(ap);
     return p;
 }
@@ -138,27 +207,78 @@ char *log_format(char *p, char *end, const char *f, ...)
 {
     va_list ap;
     va_start(ap, f);
-    p = vformat(p, end, f, ap);
+    struct fargs x = { &ap, 0 };
+    p = vformat(p, end, f, &x);
     va_end(ap);
     return p;
 }
 
-/* One line: "[ssss.mmm] text\n" */
-void log_printf(const char *fmt, ...)
+/* One line of text: "[ssss.mmm] text\n" */
+static void text_line(const char *fmt, va_list *ap)
 {
     char b[256], *p = b, *end = b + sizeof b - 1;
     uint32_t ms = millis();
-    va_list ap;
+    struct fargs x = { ap, 0 };
 
     p = format(p, end, "[%4u.%03u] ", ms / 1000, ms % 1000);
-    va_start(ap, fmt);
-    p = vformat(p, end, fmt, ap);
-    va_end(ap);
+    p = vformat(p, end, fmt, &x);
     while (p > b && p[-1] == '\n')
         p--;
     *p++ = '\n';
     ring_put(b, (uint32_t)(p - b));
 }
+
+void log_text(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    text_line(fmt, &ap);
+    va_end(ap);
+}
+
+#ifndef log_printf
+void log_printf(const char *fmt, ...)           /* host builds */
+{
+    va_list ap;
+    va_start(ap, fmt);
+    text_line(fmt, &ap);
+    va_end(ap);
+}
+#else
+/* A token record (see the top): the format's offset, the arguments as the descriptor says */
+void log_tok(const char *fmt, uint32_t desc, ...)
+{
+    char b[REC_MAX];
+    uint32_t ms = millis(), tok = (uint32_t)(fmt - __start_logfmt), n = REC_HEAD;
+    va_list ap;
+
+    b[0] = REC;
+    for (int i = 0; i < 4; i++)
+        b[1 + i] = (char)(ms >> 8 * i);
+    b[5] = (char)tok;
+    b[6] = (char)(tok >> 8);
+    for (int i = 0; i < 4; i++)
+        b[7 + i] = (char)(desc >> 8 * i);
+    va_start(ap, desc);
+    for (uint32_t i = 0; i < (desc & 31); i++) {
+        /* a string's bytes: what leaves its 0 and 4 bytes to each argument after it (from
+         * n + 4 x the arguments left <= REC_MAX, true at the start: 11 + 4 x 24) */
+        int room = REC_MAX - (int)n - 4 * (int)((desc & 31) - i - 1) - 1;
+        if (desc >> (5 + i) & 1) {
+            const char *s = va_arg(ap, const char *);
+            for (int k = 0; s && s[k] && k < room; k++)
+                b[n++] = s[k];
+            b[n++] = 0;
+        } else {
+            uint32_t v = va_arg(ap, uint32_t);
+            for (int k = 0; k < 4; k++)
+                b[n++] = (char)(v >> 8 * k);
+        }
+    }
+    va_end(ap);
+    ring_put(b, n);
+}
+#endif
 
 void log_init(void)
 {
@@ -171,8 +291,142 @@ void log_init(void)
         r->note = 0;
     }
     logs.recovered = r->wr - r->fl;
+    r->fmt_prev = logs.recovered ? r->fmt_cur : 0;  /* the boot before's records: its formats */
+    r->bound = r->wr;
+    r->fmt_cur = 0;                             /* this boot's: known at log_attach() */
     logs.boots = ++r->boots;
     logs.attached = 0;
+}
+
+/* ---- the formats, in the image (FW1, else FW2): header +0x1e8 = {offset, length} of
+ * "NLFM", version 1, CRC, length, then the section "logfmt" ---- */
+#if !defined(log_printf)                        /* host builds without tokens: none */
+static uint32_t fmt_check(void)
+{
+    return 0;
+}
+
+static int fmt_read(uint32_t tok, char *out, uint32_t n)
+{
+    (void)tok, (void)out, (void)n;
+    return -1;
+}
+#elif defined(LOG_TOKENS_HOST)                  /* log_test: the section in memory */
+extern uint32_t log_host_fmt;                   /* the formats' CRC the test says */
+
+static uint32_t fmt_check(void)
+{
+    return log_host_fmt;
+}
+
+static int fmt_read(uint32_t tok, char *out, uint32_t n)
+{
+    const char *f = __start_logfmt + tok;
+    for (uint32_t i = 0; i < n; i++)
+        if (!(out[i] = f[i]))
+            return 0;
+    return -1;
+}
+#else
+static uint32_t fmt_lba, fmt_len, fmt_sec_lba[2], fmt_next;
+static uint8_t fmt_sec[2][512] __attribute__((aligned(4)));
+
+/* the CRC of the formats in the image now (0: none), the sector cache emptied */
+static uint32_t fmt_check(void)
+{
+    uint32_t *h = (uint32_t *)(void *)fmt_sec[0];
+    fmt_sec_lba[0] = fmt_sec_lba[1] = 0;
+    fmt_len = 0;
+    for (int k = 0; k < 2; k++) {
+        uint32_t img = EMMC_FW1 + (k ? emmc.r : 0);
+        if (!emmc.p || emmc_read(img, 1, h) || fmt_sec[0][0x1f8] != 'R' || fmt_sec[0][0x1ff] != 'W')
+            continue;
+        uint32_t off = h[0x1e8 / 4], len = h[0x1ec / 4];
+        if (!len || off % 512 || len < 16 || emmc_read(img + off / 512, 1, h) ||
+            h[0] != FMT_MAGIC || h[1] != 1 || h[3] > len - 16)
+            continue;
+        fmt_lba = img + off / 512;
+        fmt_len = h[3];
+        return h[2];
+    }
+    return 0;
+}
+
+/* the format at offset tok of the section, into out (n bytes with its 0): 0, or -1 */
+static int fmt_read(uint32_t tok, char *out, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++, tok++) {
+        if (tok >= fmt_len)
+            return -1;
+        uint32_t off = 16 + tok, lba = fmt_lba + off / 512, j = 0;
+        while (j < 2 && fmt_sec_lba[j] != lba)
+            j++;
+        if (j == 2) {
+            j = fmt_next++ & 1;
+            fmt_sec_lba[j] = 0;
+            if (emmc_read(lba, 1, fmt_sec[j]))
+                return -1;
+            fmt_sec_lba[j] = lba;
+        }
+        if (!(out[i] = (char)fmt_sec[j][off % 512]))
+            return 0;
+    }
+    return -1;
+}
+#endif
+
+/* The entry at pos (len bytes) as text into [p, end): a line as it is; a record made from its
+ * format when the image holds the formats it was written with, else raw */
+static char *entry_text(uint32_t pos, uint32_t len, char *p, char *end, uint32_t now_id)
+{
+    if (rbyte(pos) != REC) {
+        for (uint32_t i = 0; i < len && p < end; i++)
+            *p++ = (char)rbyte(pos + i);
+        return p;
+    }
+    static char strs[REC_MAX];                  /* the strings, one after another */
+    static char f[FMT_MAX];
+    uintptr_t a[ARGS_MAX] = { 0 };
+    uint32_t sn = 0;
+    uint32_t ms = 0, tok, desc, n = REC_HEAD;
+    char *line = p;
+    for (int i = 0; i < 4; i++)
+        ms |= (uint32_t)rbyte(pos + 1 + i) << 8 * i;
+    tok = rbyte(pos + 5) | (uint32_t)rbyte(pos + 6) << 8;
+    desc = rd32(pos + 7);
+    uint32_t na = desc & 31;
+    if (na > ARGS_MAX)
+        na = ARGS_MAX;
+    for (uint32_t i = 0; i < na; i++) {
+        if (desc >> (5 + i) & 1) {
+            a[i] = (uintptr_t)(strs + sn);
+            while (n < len && rbyte(pos + n)) {
+                if (sn < REC_MAX - 1)
+                    strs[sn++] = (char)rbyte(pos + n);
+                n++;
+            }
+            strs[sn < REC_MAX ? sn++ : REC_MAX - 1] = 0;
+            n++;
+        } else {
+            a[i] = rd32(pos + n);
+            n += 4;
+        }
+    }
+    uint32_t id = (int32_t)(pos - R->bound) < 0 ? R->fmt_prev : R->fmt_cur;
+    p = format(p, end, "[%4u.%03u] ", ms / 1000, ms % 1000);
+    if (id && id == now_id && !fmt_read(tok, f, sizeof f)) {
+        struct fargs x = { 0, a };
+        p = vformat(p, end, f, &x);
+        while (p > line && p[-1] == '\n')
+            p--;
+    } else {
+        p = format(p, end, "?log %04x", tok);   /* readlog.py --elf makes it text */
+        for (uint32_t i = 0; i < na; i++)
+            p = desc >> (5 + i) & 1 ? format(p, end, " \"%s\"", (const char *)a[i])
+                                    : format(p, end, " %x", (uint32_t)a[i]);
+    }
+    *p++ = '\n';                                /* (end leaves room for it) */
+    return p;
 }
 
 void log_boot_note(uint32_t v)
@@ -257,44 +511,66 @@ int log_attach(void)
                 cur[i] = ' ';
         }
     }
+    if (!R->fmt_cur)                            /* this boot's records: these formats */
+        R->fmt_cur = fmt_check();
     logs.error = 0;
     logs.attached = 1;
     last_flush = ticks();
     return 0;
 }
 
+static int write_cur(void)
+{
+    if (!emmc_write_log(file_first + logs.next, 1, cur))
+        return 0;
+    logs.attached = 0;
+    return logs.error = -6;
+}
+
+/* The ring's entries as text into the file, entry by entry */
 int log_flush(void)
 {
     volatile struct ring *r = R;
-    int wrote = 0;
+    static char line[256];                      /* a line at most, as log_text() */
+    int wrote = 0, dirty = 0;
 
     if (!logs.attached)
         return -1;
     last_flush = ticks();
+    if (r->fl == r->wr)
+        return 0;
+    uint32_t now_id = fmt_check();
     while (r->fl != r->wr) {
-        uint32_t take = 512 - fill, avail = r->wr - r->fl;
-        if (take > avail)
-            take = avail;
-        for (uint32_t i = 0; i < take; i++)
-            cur[fill + i] = (uint8_t)r->data[(r->fl + i) % DATA_BYTES];
-        if (emmc_write_log(file_first + logs.next, 1, cur)) {
-            for (uint32_t i = fill; i < 512; i++)
-                cur[i] = ' ';
-            logs.attached = 0;
-            return logs.error = -6;
-        }
-        wrote = 1;
-        r->fl += take;
-        fill += take;
-        if (fill == 512) {
-            fill = 0;
-            for (int i = 0; i < 512; i++)
-                cur[i] = ' ';
-            if (++logs.next >= logs.file_sectors) {
-                logs.next = 1;
-                logs.wraps++;
+        uint32_t len = entry_len(r->fl, r->wr - r->fl);
+        char *e = entry_text(r->fl, len, line, line + sizeof line - 1, now_id);
+        uint32_t n = (uint32_t)(e - line);
+        for (uint32_t i = 0; i < n;) {
+            uint32_t take = 512 - fill < n - i ? 512 - fill : n - i;
+            for (uint32_t k = 0; k < take; k++)
+                cur[fill + k] = (uint8_t)line[i + k];
+            fill += take;
+            i += take;
+            dirty = 1;
+            if (fill == 512) {
+                if (write_cur())
+                    return logs.error;
+                wrote = 1;
+                dirty = 0;
+                fill = 0;
+                for (int k = 0; k < 512; k++)
+                    cur[k] = ' ';
+                if (++logs.next >= logs.file_sectors) {
+                    logs.next = 1;
+                    logs.wraps++;
+                }
             }
         }
+        r->fl += len;
+    }
+    if (dirty) {
+        if (write_cur())
+            return logs.error;
+        wrote = 1;
     }
     if (wrote && write_header()) {
         logs.attached = 0;

@@ -2,6 +2,7 @@
 #include <string.h>
 #include "board.h"
 #include "regs.h"
+#include "lcd.h"
 
 static const uint32_t gpio_base[3] = { GPIO0_BASE, GPIO1_BASE, GPIO2_BASE };
 
@@ -169,6 +170,7 @@ void clock_low(int on)
 {
     if (on == clock_is_low || (on && cpu_hz <= 24000000))
         return;                                 /* already on the crystal (the fallback) */
+    lcd_sync();                                 /* the screen's DMA done (ETUDE §134) */
     __asm volatile ("cpsid i");
     if (on) {
         low_sel0 = REG(CRU_CLKSEL0) & 0xffff;

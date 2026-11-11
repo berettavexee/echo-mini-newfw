@@ -73,5 +73,13 @@ SECTIONS
     ASSERT(SIZEOF(.pmusram) <= 0xc000, "queue folders reach the log ring (0x0309c000)")
     ASSERT(_sidata + SIZEOF(.data) <= 0x03078000, "code reaches the directory listing (0x03078000)")
 
+    /* The log's formats (log.h, ETUDE §133): never loaded, at address 0 (a format's address is
+     * its offset, the token the ring keeps); tools/mkimg.py stores them in the image */
+    logfmt 0 (INFO) : {
+        __start_logfmt = .;
+        KEEP(*(logfmt))
+    }
+    ASSERT(SIZEOF(logfmt) < 0x10000, "log formats over 64 KiB (16-bit tokens)")
+
     /DISCARD/ : { *(.ARM.exidx*) *(.ARM.attributes) *(.comment) }
 }

@@ -16,12 +16,15 @@ fw_end; header +0x148 = {1, offset, length} (the stock image-pack slot). The fon
 (tools/mkfusion.py) follows it, 512-aligned; header +0x80 = {offset, length} (the stock 16 px
 font slot, count at +0x74 = 2 as in the stock header). The languages' catalogues
 (tools/mklang.py) follow it, 512-aligned; header +0x78 = {offset, length} (the stock 12 px font
-slot, empty otherwise; src/lang.c).
+slot, empty otherwise; src/lang.c). The log's formats (the ELF's section "logfmt", src/log.h)
+follow them, 512-aligned: "NLFM", version 1, CRC-32 of the formats, their length, then the
+formats; header +0x1e8 = {offset, length} (zero in the stock header).
 """
 import datetime
 import os
 import struct
 import sys
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rkcrc import rkcrc                                            # noqa: E402
@@ -88,7 +91,15 @@ def main():
     font_off = (pack_off + len(pack) + 511) & ~511
     lang = open(a[a.index("--lang") + 1], "rb").read() if "--lang" in a else b""
     lang_off = (font_off + len(font) + 511) & ~511
-    fw_end = (lang_off + len(lang) + 0x3fff) & ~0x3fff
+    logfmt = b""
+    if "logfmt" in secs:                        # the log's formats (src/log.h): not loaded
+        sh = secs["logfmt"]
+        fmts = e[sh[4]:sh[4] + sh[5]]
+        if max(len(f) for f in fmts.split(b"\0")) >= 256:
+            sys.exit("a log format of 256 bytes or more: log.c's FMT_MAX")
+        logfmt = struct.pack("<4I", 0x4d464c4e, 1, zlib.crc32(fmts) or 1, len(fmts)) + fmts
+    fmt_off = (lang_off + len(lang) + 511) & ~511
+    fw_end = (fmt_off + len(logfmt) + 0x3fff) & ~0x3fff
     size = (fw_end + 0x104000) & ~0xfffff
     bcd = lambda v: int(str(v), 16)
     hdr = bytearray(0x200)
@@ -104,6 +115,8 @@ def main():
     if font:                                    # our font blob, in the 16 px font slot
         struct.pack_into("<I2I2I", hdr, 0x74, 2, lang_off if lang else 0, len(lang), font_off,
                          len(font))
+    if logfmt:                                  # the log's formats
+        struct.pack_into("<2I", hdr, 0x1e8, fmt_off, len(logfmt))
     struct.pack_into("<I", hdr, 0x1f4, fw_end)
     hdr[0x1f8:0x200] = b"RKnanoFW"
 
@@ -113,11 +126,14 @@ def main():
     img[pack_off:pack_off + len(pack)] = pack
     img[font_off:font_off + len(font)] = font
     img[lang_off:lang_off + len(lang)] = lang
+    img[fmt_off:fmt_off + len(logfmt)] = logfmt
     img[fw_end:fw_end + 0x200] = hdr
     img += struct.pack("<I", rkcrc(bytes(img)))
     open(dst, "wb").write(img)
     print(f"  entry 0: code 0x{BASE:08x}+0x{len(code):x}, data 0x{d_vma:08x}+0x{d_size:x} "
           f"(load copy at 0x{d_lma:08x}), bss 0x{b_vma:08x}+0x{b_size:x}")
+    if logfmt:
+        print(f"  log formats: {len(logfmt) - 16} bytes at 0x{fmt_off:x}")
     print(f"wrote {dst}: {len(img)} bytes, fw_end 0x{fw_end:x}, date {date}, "
           f"CRC 0x{rkcrc(bytes(img[:-4])):08x}")
 

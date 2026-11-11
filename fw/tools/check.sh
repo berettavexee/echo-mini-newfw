@@ -5,7 +5,7 @@
 #   - the log formats match their arguments (log.h, LOG_FORMAT_CHECK);
 #   - the strings shown are marked for translation, po/newfw.pot is up to date (tools/mkpot.py),
 #     the translations keep the printf conversions and fit in a catalogue (tools/mklang.py);
-#   - the host tests of log.c, msc.c, remote.c, perf.c, library.c and font.c pass;
+#   - the host tests of log.c, msc.c, remote.c, perf.c, library.c, font.c and lcd.c pass;
 #   - ruff (or pyflakes) and codespell find nothing (when installed);
 #   - the functions of ours the linker drops (dead code) are listed, not refused.
 # --full also builds the test variants (ECHO_HWTEST, ECHO_HWSYN, ECHO_NO_HWFFT, ECHO_FFTCMP,
@@ -66,6 +66,19 @@ if python3 tools/mklang.py --check font/fusion-pixel-12px/fusion-pixel-12px-prop
 else bad "translations (po/*.po)"; fi
 
 say "host tests"
+# the log with token records (ETUDE §133): the same text as the plain log, but for the line that
+# differs on purpose (a raw record's token)
+if cc -O1 -Wall -Werror -Isrc -o $C/log_test_p tools/log_test.c > $C/log_tok.log 2>&1 &&
+    $C/log_test_p $C/log_p.txt >> $C/log_tok.log 2>&1 &&
+    cc -O1 -Wall -Werror -Isrc -DLOG_TOKENS -o $C/log_test_t tools/log_test.c >> $C/log_tok.log 2>&1 &&
+    $C/log_test_t $C/log_t.txt >> $C/log_tok.log 2>&1 &&
+    for v in p t; do python3 tools/readlog.py $C/log_$v.txt | sed -e 1d -e 's/?log [0-9a-f]*/?log T/' \
+        > $C/log_$v.out; done &&
+    cmp -s $C/log_p.out $C/log_t.out; then
+    printf 'ok    log_test with tokens\n'
+else
+    bad "log_test with tokens (see fw/$C/log_tok.log, log_p.out, log_t.out)"; tail -5 $C/log_tok.log
+fi
 for t in log msc remote perf; do
     if cc -O1 -Wall -Werror -Isrc -o $C/${t}_test tools/${t}_test.c > $C/${t}_test.log 2>&1 &&
         $C/${t}_test >> $C/${t}_test.log 2>&1; then
@@ -90,6 +103,14 @@ if cc -O1 -Wall -Werror -Isrc -I$C/prod -o $C/font_test tools/font_test.c > $C/f
     printf 'ok    font_test\n'
 else
     bad "font_test (see fw/$C/font_test.log)"; tail -5 $C/font_test.log
+fi
+
+# the glyph renderer (ETUDE §134): every glyph, sizes 1 and 2, cut, in strips, against 0.103's
+if cc -O2 -Wall -Werror -Isrc -I$C/prod -o $C/lcd_test tools/lcd_test.c > $C/lcd_test.log 2>&1 &&
+    $C/lcd_test $C/prod/font.bin >> $C/lcd_test.log 2>&1; then
+    printf 'ok    lcd_test\n'
+else
+    bad "lcd_test (see fw/$C/lcd_test.log)"; tail -5 $C/lcd_test.log
 fi
 
 if [ "$1" = "--full" ]; then

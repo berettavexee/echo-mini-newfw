@@ -13,6 +13,16 @@ extern int lcd_ready;
 
 void lcd_init(void);
 void lcd_perf_probe(void);       /* test build ECHO_LCDPERF: the screen's costs, logged */
+void lcd_calibrate(void);        /* test build ECHO_LCDCAL: the VOP mode for the DMA, picked */
+/* The output by DMA (ETUDE §134): the transfer in flight finished, the VOP back to the CPU; before
+ * anything else uses DMAC1 (a reset), the clocks or the panel */
+void lcd_sync(void);
+extern int lcd_dma_mode;         /* 0: the CPU writes each byte; 1-4: DMA, the VOP's mode */
+extern int lcd_lost;             /* the DMA failed: the screen to redraw in full (cleared there) */
+struct lcd_dma_stats {
+    uint32_t xfers, bytes, wait_us, wait_max, fails;
+};
+extern struct lcd_dma_stats lcd_dma;
 void lcd_fill(int x, int y, int w, int h, uint16_t color);
 int lcd_text(int x, int y, const char *s, uint16_t fg, uint16_t bg);
 /* UTF-8 */

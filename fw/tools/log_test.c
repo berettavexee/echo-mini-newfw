@@ -1,5 +1,9 @@
 /* Host-side test of src/log.c: ring, file attach, flush, wrap, re-attach after a reboot.
- *   cc -O1 -Wall -Isrc -o build/log_test tools/log_test.c && build/log_test */
+ *   cc -O1 -Wall -Isrc -o build/log_test tools/log_test.c && build/log_test OUT.txt
+ * With -DLOG_TOKENS (ETUDE §133) log_printf writes token records, made text at the flush from
+ * the section in memory: the file must come out the same as without (check.sh compares them);
+ * then records whose formats are gone come out raw. */
+#define _GNU_SOURCE                             /* memmem */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,9 +39,13 @@ int emmc_read(uint32_t s, uint32_t n, void *buf)
     return 0;
 }
 
+#ifdef LOG_TOKENS
+#define LOG_TOKENS_HOST
+uint32_t log_host_fmt = 0x1234;
+#endif
 #include "../src/log.c"
 
-int main(void)
+int main(int argc, char **argv)
 {
     int fail = 0;
     memset(file, ' ', sizeof file);
@@ -59,10 +67,35 @@ int main(void)
     log_printf("second boot");
     log_attach();
     log_flush();
-    FILE *f = fopen("build/log_test.txt", "wb");
+    static const char long_s[] = "0123456789012345678901234567890123456789012345678901234567"
+                                 "8901234567890123456789";
+    const char *nul = 0;
+    log_printf("strings '%s' %d '%s' '%5s' %c %08X", long_s, -5, nul, "ab", 'z', 0xbeefu);
+#ifdef LOG_TOKENS
+    log_flush();
+    log_printf("formats gone %u '%s'", 7u, "x");    /* written raw: the image changed */
+    log_host_fmt = 0x5678;
+    log_flush();
+    log_host_fmt = 0x1234;
+    log_printf("formats gone %u '%s'", 7u, "x");    /* the same line from a raw one */
+#else
+    log_text("?log 0000 7 \"x\"");                  /* what the raw line looks like */
+    log_printf("formats gone %u '%s'", 7u, "x");
+#endif
+    log_flush();
+    FILE *f = fopen(argc > 1 ? argv[1] : "build/log_test.txt", "wb");
     fwrite(file, 1, sizeof file, f);
     fclose(f);
     if (bad_writes) { printf("FAIL %u writes outside the file\n", bad_writes); fail++; }
+#ifdef LOG_TOKENS
+    static const char *want[] = {                   /* raw, then text again */
+        "?log ", " 7 \"x\"\n", "formats gone 7 'x'\n" };
+    for (int i = 0; i < 3; i++)
+        if (!memmem(file, sizeof file, want[i], strlen(want[i]))) {
+            printf("FAIL not in the file: %s\n", want[i]);
+            fail++;
+        }
+#endif
     printf("wraps %u next %u boots %u lost %u\n", logs.wraps, logs.next, logs.boots, logs.lost);
     return fail;
 }

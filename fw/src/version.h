@@ -13,12 +13,14 @@
 #define FW_VERSION "0.103lb"           /* test build: the library's index built at power-on */
 #elif defined(ECHO_LIBCREATE)
 #define FW_VERSION "0.103lc"           /* test build: the library's file created at power-on */
+#elif defined(ECHO_LCDCAL)
+#define FW_VERSION "0.103d4c"           /* test build: DMA variants logged, mode picked (ETUDE §135) */
 #elif defined(ECHO_LCDPERF)
 #define FW_VERSION "0.103lp"            /* test build: the screen's costs (ETUDE §132) */
 #elif defined(ECHO_HWTEST)
 #define FW_VERSION "0.103hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.103m2"
+#define FW_VERSION "0.103d4"
 #endif
 #define FW_DATE    "2026-11-11"
 

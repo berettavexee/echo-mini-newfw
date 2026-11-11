@@ -413,6 +413,12 @@ void ui_main(void)
             lcd_text_clip(8, 108, crash_text[1], LCD_W - 8, DIM, BG);
             lcd_text_clip(8, 134, T("details: NEWFWLOG.TXT"), LCD_W - 8, DIM, BG);
         }
+        if (lcd_lost) {                         /* the DMA failed (lcd.c): all drawn again */
+            lcd_lost = 0;
+            full = b_dirty = 1;
+            if (scr_n)
+                scr_stack[scr_n - 1]->shown();
+        }
         if (banner_ms && millis() - banner_ms > 3000) {
             banner_ms = 0;
             full = b_dirty = 1;

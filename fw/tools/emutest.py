@@ -28,7 +28,8 @@ EMU, MKDISK, READLOG, MKBAD = (os.path.join(TOOLS, n) for n in
                                ("emu_fw.py", "mkdisk.py", "readlog.py", "mkbadimg.py"))
 VOL_SECTOR = 0x81000
 GOLDBERG = os.path.join(TOOLS, "..", "..", "testdata", "goldberg", "variatio4-5s.flac")
-ALWAYS_FORBID = [r"EXCEPTION", r"!! WRITE OUTSIDE", r"(?i)hard ?fault"]
+ALWAYS_FORBID = [r"EXCEPTION", r"!! WRITE OUTSIDE", r"(?i)hard ?fault",
+                 r"\?log [0-9a-f]{4}"]          # a token record not made text (src/log.h)
 LOW_ORDER = r"!! HIFIACC order"                 # orders 1 and 2, wrong on the device (ETUDE §66,
                                                 # §116): never sent, but by the benches (hwtest)
 

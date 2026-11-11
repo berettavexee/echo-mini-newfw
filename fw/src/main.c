@@ -287,6 +287,10 @@ void sys_idle(void)
                    c == 1 ? "" : c ? " (not set)" : " (none)",
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) / 10 : 0,
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) % 10 : 0);
+        log_printf("lcd: DMA mode %d: %u transfers, %u KiB, waits %u ms (max %u us), %u failures",
+                   lcd_dma_mode, lcd_dma.xfers, lcd_dma.bytes >> 10, lcd_dma.wait_us / 1000,
+                   lcd_dma.wait_max, lcd_dma.fails);
+        lcd_dma.wait_max = 0;
     }
     sys_power_poll(now, 0);
 }
@@ -482,6 +486,9 @@ int main(void)
     storage_init();
     font_init();
     lang_init();                                /* (the language: with the settings, ui_main) */
+#ifdef ECHO_LCDCAL
+    lcd_calibrate();
+#endif
 #ifdef ECHO_LCDPERF
     lcd_perf_probe();
 #endif
