@@ -3,8 +3,9 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-10, version 0.103 (the music library: built on the player, its views, the
-play queue on the internal memory, the microSD card in the library).
+Last update: 2026-11-11, version 0.103q1 on the `rework` branch (the screen drawn by DMA, the
+font's tables and the log's formats out of the RAM, the first code overlay; not released yet).
+Latest release: 0.103 (the music library).
 
 ## Done, validated on the device
 
@@ -53,11 +54,16 @@ play queue on the internal memory, the microSD card in the library).
 | USB sound card: the Power key (screen off and on; held 2 s, the card left, then the power off) | 0.100 | §95 |
 | ALAC's adaptive predictor on HIFIACC (orders 3 to 30; checked against our decoder on the device): core B at 9.5 MHz on 16-bit ALAC instead of 35; the end of Imdct36 and SYNTH as pending IRQs | 0.101 | §113-§116 |
 | The clock shown or hidden (Settings, the line Clock) | 0.102 | §120 |
-| Pause when the headphones are unplugged (the last plug out; plugging back does not play; checked with a 3.5 mm plug) | 0.102 | §119 |
+| Pause when the headphones are unplugged (the last plug out; plugging back does not play; checked with the 3.5 mm and 4.4 mm plugs) | 0.102 | §119 |
+| A track saved paused at position 0 comes back paused, and a track resumed at power on opens the play screen (pull requests #9 and #1, CHEYAN) | 0.100, 0.101 | — |
+| The browser's selected row scrolls when its name is too long, a file or a folder (pull request #8, CHEYAN) | 0.100 | — |
 | Steady battery percent (the mean of a minute of readings; checked over a 14.6 h session to an empty battery) | 0.97, 0.102 | §82, §115 |
 | Music library: the index built on the player (18,003 tracks in 3 to 4 min, "no change" in 3 s), Library first at the top level (Artists, Albums, Years, Genres, All songs), the card's tracks with the card that was read, kept when it cannot be read at an update | 0.103 | §126-§127, §129 |
 | Play queue on the internal memory (NEWFWQ.DAT, 24,576 tracks): resumed at once, the queue mode (VOL+ and VOL-: PLAY next, MENU add), the Play queue screen; a card's tracks never read on another card | 0.103 | §128-§129 |
 | Interface languages (gettext PO files, catalogues in the image, the Language setting): English, French, Japanese and Simplified Chinese (partial) | 0.101 | §112 |
+| More room in core A's RAM: the font's tables read from the internal memory through a 2-way glyph cache, the log's formats kept in the image (lines made when written out) | 0.103m1-t1 | §131-§133 |
+| The screen drawn by DMA: text drawn into RAM strips (a line laid out once, only the glyphs' pixels written), sent to the panel by DMAC1 while the next strip is drawn, the CPU as a fallback; the play screen's full redraw from 13.4 to 8 ms of core A, its partial one from 3.9 to 2.7 ms | 0.103d4, 0.103g1 | §134-§136 |
+| Code overlays: the USB code (disk and sound card, 13.6 KiB) loaded from the internal memory into the directory listing's buffer for a USB session; code room from 29 to 42 KiB; the overlays' rules checked at each build (`tools/ovlcheck.py`) | 0.103o2 | §137 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
 
@@ -72,19 +78,21 @@ session on the normal image is done (0.99r37, 14.6 h to an empty battery: no wat
 the one fault record was the pause bug fixed in 0.101, §115). What is left of it is under "To
 do".
 
-## Waiting for a test on the device
+## Since 0.103, on `rework` (not released)
 
-- Pause when the headphones are unplugged, with a 4.4 mm plug (checked with 3.5 mm only, §119;
-  the emulator covers both and the two plugged together).
-
-- From pull requests #9 and #1 (CHEYAN): a track saved paused at position 0 now comes back
-  paused (it was lost; emulator: `emutest.py resume-paused-zero`), and a track resumed at
-  power on opens the play screen instead of the browser. On the device: "At power on: resume
-  paused", a track paused in its first two seconds, then the player switched off and on twice.
-
-- From pull request #8 (CHEYAN): the browser's selected row scrolls when its name is too long,
-  a file or a folder, with the play screen's timings. On the device: a long album folder and a
-  long file name, the scroll reset when the selection or the page changes.
+- 0.103m1-m2: the font's tables on the internal memory, a 2-way glyph cache, the screen's cost
+  measured (§131-§132).
+- 0.103t1: the log by tokens: its formats kept in the image, the ring holds the arguments
+  (§133).
+- 0.103d1-d4: the screen by DMA: strips in RAM, DMAC1 into the VOP's FIFO; the VOP set-up read
+  in RECHO's image (no VOP_START, source on AHB master 2, bursts of 16), odd widths, the FIFO's
+  drain (§134-§135).
+- 0.103g1: the glyphs: a line laid out once, only the set pixels written; text twice as fast
+  (§136).
+- 0.103o1-o2: the first code overlay (USB), its loader, its checks; 0.103o1's USB disk faulted
+  (its transfer buffer over the overlay), fixed in o2 (§137).
+- 0.103q1: quality pass: one lookup of the image's blobs, tag tables, dead code out, lines of
+  100 characters at most checked by `make check` (§138).
 
 ## Version history
 
@@ -179,10 +187,11 @@ One line per version; the measurements are in `ETUDE.md`.
     (EchoPod), cold code built for size (Podium);
   - the next track prepared in the input ring without restarting core B: left out (nothing
     audible to gain today) unless a need shows.
-- Screen writes by DMA: a band (for instance 320 x 16) drawn into a buffer, then sent to the
-  panel by the DMA, instead of the CPU writing each pixel: a scrolling line (the long title's
-  32-pixel marquee every 33 ms, since PR #2) and full redraws (11 to 14 ms today) would no
-  longer hold core A. After the rework (its one loop, step 2, makes room for banded drawing).
+- Memory (§131, §137): when a new feature needs room, the next overlays: the library's build
+  and the installer, then the settings screens; they need a region of their own in the code
+  window (it only pays from two overlays on). The English strings of the interface (about
+  8 KiB, their translations are already read from the image) could move to the internal memory
+  too. The browser's scroll is now bound by the bus to the panel (§136).
 
 - Fuzzing targets for FLAC (dr_flac), ALAC and Musepack (§64); more varied seeds for the FAT
   target (its coverage stops growing after 20 minutes).
@@ -241,8 +250,10 @@ One line per version; the measurements are in `ETUDE.md`.
   3. a finer panel model: drawing windows and sweeps followed, full redraws and flicker counted,
      the time of the first frame;
   4. a check that the ELF matches the image (wrong symbols otherwise);
-  5. a simulated USB host (enumeration, isochronous packets, feedback, the HID reports), to
-     test the sound card without the device (today `uac-power` only enters its screen);
+  5. a simulated USB host (enumeration, bulk and isochronous transfers, feedback, the HID
+     reports), to test the USB disk and the sound card without the device (today `uac-power`,
+     `uac-back` and `usb-disk` only enter and leave their screens: 0.103o1's USB disk fault,
+     §137, showed only on the device);
   6. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
 - Output and DAC settings (CS43131 registers, little code each):
   - headphone gain low / high (low suits sensitive in-ear monitors);
@@ -251,29 +262,8 @@ One line per version; the measurements are in `ETUDE.md`.
     linear phase, and no oversampling);
   - left/right balance (the stock firmware corrects each DAC, ETUDE §3.5).
 - Music features of the stock firmware:
-  - media library (planned, ETUDE §121): a Library entry beside the volumes (artists, albums,
-    genres, all songs), separate from the file browser, from an index of the tags in one
-    contiguous file on the internal memory (NEWFWLIB.DAT, created by the firmware: its first
-    file creation, FAT32 only), the card's tracks keyed by its serial; built in the storage
-    in a screen of its own. Steps: 1. genre, album artist,
-    year and disc in the tag readers (done, §122); 2. the index format (docs/LIBRARY.md), a PC
-    tool (`mklib.py`), the reader (`library.c`) and its host test (done, §123); then the file
-    creation (`fatwrite.c`, tested in the emulator with power cuts, §124); 3. the index built on
-    the device in a screen of its own with core B's memory, nothing playing (Settings, the line
-    Library; at once after a USB session that wrote; files unchanged not read again), compared
-    with mklib.py in the emulator up to 18,162 tracks; an update with the same files ends after
-    the count (a fingerprint, 3 s); on the device 18,003 tracks: 3 to 4 min built from the tags,
-    165 s after 5,733 files changed, an update keeping them all 23 s (the index before's tables
-    in RAM, reads and writes in runs; done, §126); 4. the views: Library first at the top level,
-    Artists, Albums, Years, Genres, All songs; the card's tracks hidden when another card or none
-    is in, a track on both memories shown once (the internal one's); PLAY on a track plays its
-    list, PLAY held on an album the album (done, §127); 5. the play queue kept in NEWFWQ.DAT
-    (resumed from it), PLAY held on every library line, the queue mode (VOL+ and VOL-: PLAY puts
-    next, MENU adds), the queue's screen (main menu), the card's tracks passed over when it is
-    out (done, §128; folders played with PLAY held could use the file too); 6. the card: a
-    track never read on another card (the queue keeps the card's serial; the index's tracks
-    kept only from the same card), the library's top says when the card in is not in it and
-    offers the update, a last line updates it (done, §129; one card at a time). Favourites would build on it;
+  - media library: done in 0.103 (§121-§129, the table above); left: the folders played with
+    PLAY held could keep their queue in NEWFWQ.DAT too; one card at a time;
   - favourites: add / remove a track, a list of them;
   - lyrics: synchronised `.lrc` files shown on the play screen;
   - folder jumping: at the end of a folder, go on with the next one;
