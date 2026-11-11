@@ -43,7 +43,7 @@ with gapless playback and ReplayGain.
 
 ## Getting started
 
-1. Download `NEWFW103.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
+1. Download `NEWFW104.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
 2. Follow [Installing](MANUAL.md#installing) in the manual.
 3. The [manual](MANUAL.md) shows the keys of each screen.
 

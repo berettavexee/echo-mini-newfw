@@ -3,9 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-11, version 0.103q1 on the `rework` branch (the screen drawn by DMA, the
-font's tables and the log's formats out of the RAM, the first code overlay; not released yet).
-Latest release: 0.103 (the music library).
+Last update: 2026-11-11, version 0.104 (the screen drawn by DMA, text twice as fast, the
+font's tables and the log's formats out of the RAM, the first code overlay).
 
 ## Done, validated on the device
 
@@ -61,9 +60,9 @@ Latest release: 0.103 (the music library).
 | Music library: the index built on the player (18,003 tracks in 3 to 4 min, "no change" in 3 s), Library first at the top level (Artists, Albums, Years, Genres, All songs), the card's tracks with the card that was read, kept when it cannot be read at an update | 0.103 | §126-§127, §129 |
 | Play queue on the internal memory (NEWFWQ.DAT, 24,576 tracks): resumed at once, the queue mode (VOL+ and VOL-: PLAY next, MENU add), the Play queue screen; a card's tracks never read on another card | 0.103 | §128-§129 |
 | Interface languages (gettext PO files, catalogues in the image, the Language setting): English, French, Japanese and Simplified Chinese (partial) | 0.101 | §112 |
-| More room in core A's RAM: the font's tables read from the internal memory through a 2-way glyph cache, the log's formats kept in the image (lines made when written out) | 0.103m1-t1 | §131-§133 |
-| The screen drawn by DMA: text drawn into RAM strips (a line laid out once, only the glyphs' pixels written), sent to the panel by DMAC1 while the next strip is drawn, the CPU as a fallback; the play screen's full redraw from 13.4 to 8 ms of core A, its partial one from 3.9 to 2.7 ms | 0.103d4, 0.103g1 | §134-§136 |
-| Code overlays: the USB code (disk and sound card, 13.6 KiB) loaded from the internal memory into the directory listing's buffer for a USB session; code room from 29 to 42 KiB; the overlays' rules checked at each build (`tools/ovlcheck.py`) | 0.103o2 | §137 |
+| More room in core A's RAM: the font's tables read from the internal memory through a 2-way glyph cache, the log's formats kept in the image (lines made when written out) | 0.104 | §131-§133 |
+| The screen drawn by DMA: text drawn into RAM strips (a line laid out once, only the glyphs' pixels written), sent to the panel by DMAC1 while the next strip is drawn, the CPU as a fallback; the play screen's full redraw from 13.4 to 8 ms of core A, its partial one from 3.9 to 2.7 ms | 0.104 | §134-§136 |
+| Code overlays: the USB code (disk and sound card, 13.6 KiB) loaded from the internal memory into the directory listing's buffer for a USB session; code room from 29 to 42 KiB; the overlays' rules checked at each build (`tools/ovlcheck.py`) | 0.104 | §137 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
 
@@ -77,22 +76,6 @@ core A causes no underrun in MP3, Vorbis or AAC; WAV 24/192 stands about 150 ms.
 session on the normal image is done (0.99r37, 14.6 h to an empty battery: no watchdog reset;
 the one fault record was the pause bug fixed in 0.101, §115). What is left of it is under "To
 do".
-
-## Since 0.103, on `rework` (not released)
-
-- 0.103m1-m2: the font's tables on the internal memory, a 2-way glyph cache, the screen's cost
-  measured (§131-§132).
-- 0.103t1: the log by tokens: its formats kept in the image, the ring holds the arguments
-  (§133).
-- 0.103d1-d4: the screen by DMA: strips in RAM, DMAC1 into the VOP's FIFO; the VOP set-up read
-  in RECHO's image (no VOP_START, source on AHB master 2, bursts of 16), odd widths, the FIFO's
-  drain (§134-§135).
-- 0.103g1: the glyphs: a line laid out once, only the set pixels written; text twice as fast
-  (§136).
-- 0.103o1-o2: the first code overlay (USB), its loader, its checks; 0.103o1's USB disk faulted
-  (its transfer buffer over the overlay), fixed in o2 (§137).
-- 0.103q1: quality pass: one lookup of the image's blobs, tag tables, dead code out, lines of
-  100 characters at most checked by `make check` (§138).
 
 ## Version history
 
@@ -172,6 +155,12 @@ One line per version; the measurements are in `ETUDE.md`.
   Years, Genres, All songs), the play queue kept in NEWFWQ.DAT (the queue mode, the Play queue
   screen, resumed at once), the microSD card (its serial in the queue and the index, the update
   offered for another card, an unreadable card's tracks kept); read errors logged once.
+- 0.104: room in core A's RAM (§131, §133): the font's tables on the internal memory behind a
+  2-way glyph cache, the log by tokens (its formats kept in the image); the screen by DMA
+  (§134-§135: strips in RAM sent by DMAC1 into the VOP's FIFO, the VOP set-up read in RECHO's
+  image, the CPU as a fallback); the glyphs laid out once, only their pixels written, text
+  twice as fast (§136); the first code overlay, the USB code over the directory listing, with
+  its checks at each build (§137); a quality pass (§138).
 
 ## To do
 
