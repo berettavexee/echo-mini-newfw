@@ -814,10 +814,8 @@ void lcd_calibrate(void)
                lcd_dma_mode);
     lcd_fill(0, 0, LCD_W, LCD_H, 0);
     struct key_ev e;                            /* the PLAY that confirmed: not for the UI */
-    while (key_held())
+    while (key_poll(&e) != EV_NONE || key_held())
         wdt_kick();
-    while (key_poll(&e) != EV_NONE)
-        ;
 }
 #endif
 

@@ -134,9 +134,10 @@ static void firmware_menu(void)
         sys_line(154, T("VOL+/VOL-: choose  PLAY: check  BACK"), DIM);
 
         int k;
-        while (!(k = key_edge())) {
+        while (!(k = key_edge())) {             /* the keys come by SysTick: a WFI between */
             wdt_kick();
             mq_tick();
+            cpu_wait();
         }
         mq.on = 0;
         if (k == KEY_BACK)
@@ -159,8 +160,10 @@ static void firmware_menu(void)
             sys_line(112, upd_title(r), WARN);
             sys_line(130, upd_hint(r), FG);
             sys_line(154, T("BACK: return"), DIM);
-            while (key_edge() != KEY_BACK)
+            while (key_edge() != KEY_BACK) {
                 wdt_kick();
+                cpu_wait();
+            }
             continue;
         }
         char date[12];
@@ -179,14 +182,18 @@ static void firmware_menu(void)
             sys_line(98, T("plug the USB cable"), FG);
             log_text("install: battery %u mV: refused", mv);
             sys_line(154, T("BACK: return"), DIM);
-            while (key_edge() != KEY_BACK)
+            while (key_edge() != KEY_BACK) {
                 wdt_kick();
+                cpu_wait();
+            }
             continue;
         }
         sys_line(80, T("do not power off during the install"), WARN);
         sys_line(154, T("PLAY: install   BACK: cancel"), DIM);
-        while ((k = key_edge()) != KEY_PLAY && k != KEY_BACK)
+        while ((k = key_edge()) != KEY_PLAY && k != KEY_BACK) {
             wdt_kick();
+            cpu_wait();
+        }
         if (k == KEY_BACK)
             continue;
         sys_line(154, "", DIM);
@@ -201,8 +208,10 @@ static void firmware_menu(void)
             sys_line(112, upd_title(r), WARN);
             sys_line(130, upd_hint(r), WARN);
             sys_line(154, T("BACK: return"), DIM);
-            while (key_edge() != KEY_BACK)
+            while (key_edge() != KEY_BACK) {
                 wdt_kick();
+                cpu_wait();
+            }
             continue;
         }
         sys_line(112, T("installed: restarting"), TITLE);

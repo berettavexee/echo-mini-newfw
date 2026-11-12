@@ -74,6 +74,12 @@ _INST = [(2000, "MENU", 1500)] + [(4000 + 300 * i, "VOL-") for i in range(7)] + 
 TESTS = {
     "boot": dict(files={"A.WAV": "wav"}, keys="", ms=7000,          # the log: every 5 s
                  expect=[r"=== boot", r"font: Fusion Pixel", r"ui: folder 0: \d+ entries"]),
+    # a short PLAY while the loop is held (a long operation): read by the SysTick interrupt
+    # (ETUDE §140), taken once the loop goes on; until 0.104 it was lost
+    "keys-stall": dict(files={"A.WAV": "wav"}, keys=keys((2100, "PLAY", 120)), ms=8000,
+                       emu_args=["--stall-at", "2000:500"],
+                       expect=[r"keys: play \(adc \d+, 1\d\d ms\)", r"player: .*A\.WAV",
+                               r"STALL of the loop: 500 ms"]),
     "play-wav": dict(files={"A.WAV": "wav"}, keys=keys((2000, "PLAY", 200)), ms=6500,
                      expect=[r"player: .*A\.WAV", r"player: format: 44100 Hz, 2 ch, 16 bits",
                              r"audio: running", r"player: finished"]),
@@ -269,6 +275,10 @@ SET_GROUPS = ("formats", "tags", "id3", "containers", "covers")
 for _g in SET_GROUPS:                           # the test set (mktestset.py), one folder a test
     TESTS[f"set-{_g}"] = dict(set=_g)
 SET_SECONDS = 3                                 # the files of a set made here (mktestset.py)
+# covers: its big Ogg files get 30 s (open_ms), so they last 40 s: shorter, the queue moved on
+# by itself during their header's read, and a PLAY held then, lost until 0.104 (ETUDE §140),
+# skipped the next file
+TESTS["set-covers"]["seconds"] = 40
 # the CI's share of the set: each format once (with Unicode tags in each container, Musepack's
 # APEv2 included), the high rates, and the cover skip past the 512 KiB window (M4A: a small one)
 

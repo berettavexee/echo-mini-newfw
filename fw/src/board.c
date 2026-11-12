@@ -3,6 +3,7 @@
 #include "board.h"
 #include "regs.h"
 #include "lcd.h"
+#include "keys.h"
 
 static const uint32_t gpio_base[3] = { GPIO0_BASE, GPIO1_BASE, GPIO2_BASE };
 
@@ -212,10 +213,14 @@ void clock_fast_ok(void)
 
 /* ---- time: SysTick at the core clock, 1 ms interrupt ---- */
 static volatile uint32_t ms_count;
+static void adc_tick(void);
+static volatile uint8_t adc_scan;               /* the ADC sampled by SysTick (adc_scan_start) */
 
 void SysTick_Handler(void)
 {
     ms_count++;
+    if (adc_scan && !(ms_count & 1))
+        adc_tick();
 }
 
 void timer_init(void)
@@ -306,19 +311,66 @@ uint32_t wdt_init(void)
 
 /* ---- ADC and keys ---- */
 /* Same sequence as the IDB loader: powering the converter up with a channel starts a
- * conversion. Wait for busy to rise, then to fall: at 200 MHz the first poll comes before
- * the conversion has started, and 0.6 read the previous channel's result (battery 4995 mV
- * from the idle key ladder at 1023). */
-unsigned adc_read(int ch)
+ * conversion. */
+static void adc_start(unsigned ch)
 {
     REG(SARADC_CTRL) &= ~0x10u;
-    REG(SARADC_CTRL) = (REG(SARADC_CTRL) & ~7u) | 0x10u | (unsigned)ch;
+    REG(SARADC_CTRL) = (REG(SARADC_CTRL) & ~7u) | 0x10u | ch;
+}
+
+/* Sampling in the SysTick interrupt, every 2 ms: the result of the conversion started at the
+ * tick before is read (about 20 us: long done), and the next one started, so the interrupt never
+ * waits for the converter. Channel 1 (the keys) to keys_sample(), channel 0 (the battery) one
+ * tick in 50 (every 100 ms), kept for battery_mv(). adc_read() from the loop holds the converter:
+ * the conversion it may have restarted is not taken for the interrupt's own. */
+static volatile uint8_t adc_hold, adc_isr_ch = 0xff, bat_ok;
+static volatile uint16_t bat_raw;
+
+static void adc_tick(void)
+{
+    static unsigned n;
+
+    if (adc_hold) {
+        adc_isr_ch = 0xff;
+        return;
+    }
+    if (adc_isr_ch != 0xff && !(REG(SARADC_STAS) & 1)) {
+        unsigned v = REG(SARADC_DATA) & 0x3ff;
+        if (adc_isr_ch == 1)
+            keys_sample(v, ticks());
+        else {
+            bat_raw = (uint16_t)v;
+            bat_ok = 1;
+        }
+    }
+    unsigned ch = ++n % 50 ? 1 : 0;
+    adc_start(ch);
+    adc_isr_ch = (uint8_t)ch;
+}
+
+void adc_scan_start(void)
+{
+    adc_scan = 1;
+}
+
+/* A conversion from the loop: wait for busy to rise, then to fall (at 200 MHz the first poll
+ * comes before the conversion has started, and 0.6 read the previous channel's result: battery
+ * 4995 mV from the idle key ladder at 1023) */
+unsigned adc_read(int ch)
+{
+    adc_hold = 1;
+    __asm volatile ("" ::: "memory");
+    adc_start((unsigned)ch);
     uint32_t t0 = ticks();
     while (!(REG(SARADC_STAS) & 1) && ticks() - t0 < 200)
         ;
     while ((REG(SARADC_STAS) & 1) && ticks() - t0 < 1000)
         ;
-    return REG(SARADC_DATA) & 0x3ff;
+    unsigned v = REG(SARADC_DATA) & 0x3ff;
+    adc_isr_ch = 0xff;
+    __asm volatile ("" ::: "memory");
+    adc_hold = 0;
+    return v;
 }
 
 /* Key ladder on channel 1, medians measured on the device: VOL- 1, VOL+ 126, Play 270,
@@ -359,10 +411,11 @@ int charging(void)
     return vbus() && !gpio_get(PIN_CHARGING);
 }
 
-/* Channel 0 through a 2:1 divider, 2.5 V reference */
+/* Channel 0 through a 2:1 divider, 2.5 V reference; once the interrupt samples it, its last
+ * reading (at most 100 ms old) */
 unsigned battery_mv(void)
 {
-    return adc_read(0) * 5000 / 1024;
+    return (adc_scan && bat_ok ? bat_raw : adc_read(0)) * 5000 / 1024;
 }
 
 /* Charge in %, from the voltage: the curve measured on the device during playback (ETUDE §65:

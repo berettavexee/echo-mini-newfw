@@ -50,6 +50,7 @@ void wdt_kick(void);
 uint32_t wdt_init(void);       /* armed: 2.7 s, its interrupt then a reset (0.99r34) */
 
 unsigned adc_read(int ch);
+void adc_scan_start(void);       /* channels 1 and 0 sampled by SysTick from now on */
 int key_ladder(unsigned v);
 int key_read(void);             /* current key of the ladder (Power excluded) */
 int power_key(void);

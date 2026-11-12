@@ -14,7 +14,12 @@ PIO model over a disk image; writes kept in memory, never written back, and chec
 the firmware area), time (ticks() replaced by a counter advancing 50 us per call; cpu_wait()
 goes on to the next 1 ms tick, as its WFI on the device, with core B run meanwhile).
 Shortcuts (most of the time went into Python callbacks, ETUDE §80): lcd_fill() drawn into the
-model at once (--no-fast-fill: through VOP_DATA), the SARADC busy bit read once per conversion.
+model at once (--no-fast-fill: through VOP_DATA), the SARADC busy bit read once per conversion
+(within 1 ms of its start).
+Core A's SysTick (ETUDE §140, firmwares from 0.104k1, which read the keys and the battery in it):
+its handler run at each ms of the simulated time, between two blocks, when not masked.
+--stall-at MS:DUR (not with --cycles): the loop held DUR ms at its first key_poll() from MS on,
+the SysTick and core B running meanwhile, as during a long operation.
 --ms stops at a simulated time (--steps stays a bound). EMU_COUNT=1 counts the MMIO accesses by
 address and lists the busiest at the end.
 --keys holds a key from a simulated time on (VOL-, VOL+, PLAY, MENU, BACK, NONE), --shots
@@ -53,7 +58,12 @@ from unicorn import (Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_BLO
                      UC_HOOK_MEM_UNMAPPED)
 from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
                                UC_ARM_REG_R12, UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR,
-                               UC_ARM_REG_XPSR, UC_ARM_REG_IPSR)
+                               UC_ARM_REG_XPSR, UC_ARM_REG_IPSR, UC_ARM_REG_PRIMASK,
+                               UC_ARM_REG_APSR)
+from unicorn import arm_const as _ac
+
+ST_REGS = [getattr(_ac, f"UC_ARM_REG_R{i}") for i in range(13)] + [UC_ARM_REG_SP, UC_ARM_REG_LR,
+                                                                     UC_ARM_REG_PC, UC_ARM_REG_XPSR]
 
 
 # --mmc-lat by default with --cycles: a 2 MiB install takes 1,541 ms, the device 1,387 to 1,578
@@ -481,11 +491,86 @@ def main():
             last = (last + n) % OUT_SIZE
         cap["start"] = last
 
+    # Core A's SysTick (ETUDE §140): the firmware's handler run at each millisecond of the
+    # simulated time, as an interrupt between two blocks: the run stopped (by the hooks of ticks()
+    # and cpu_wait, or between the slices of --cycles), the handler run alone up to a stop address
+    # (its return), the registers and flags put back. Not while the interrupts are masked
+    # (PRIMASK) or in a handler (IPSR); missed ticks are dropped, as the pending bit merges them.
+    # The clock does not move during the handler (its ticks() calls are free).
+    systick = {"in": False, "next": None, "due": False, "n": 0}
+    ST_STOP = CLOCK + 0x40                        # a "b ." in unused PMU-SRAM: the return
+    u.mem_write(ST_STOP, bytes.fromhex("fee7"))
+    st_vec = struct.unpack("<I", u.mem_read(vt + 4 * 15, 4))[0] & ~1 if "adc_scan_start" in sym \
+        else 0                                    # firmwares before 0.104k1: no SysTick work
+
+    def systick_ask(uc):
+        """A tick due: the run stopped for it (at the entry of ticks() or cpu_wait())"""
+        if not st_vec or systick["in"]:
+            return
+        now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
+        if systick["next"] is None:
+            systick["next"] = (now // 1000 + 1) * 1000
+        elif now >= systick["next"]:
+            systick["due"] = True
+            uc.emu_stop()
+
+    def systick_run(uc):
+        systick["due"] = False
+        now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
+        systick["next"] = (now // 1000 + 1) * 1000
+        if uc.reg_read(UC_ARM_REG_PRIMASK) & 1 or uc.reg_read(UC_ARM_REG_IPSR) & 0x1ff:
+            return
+        ctx = [uc.reg_read(r) for r in ST_REGS]
+        clock = uc.mem_read(CLOCK, 4)
+        uc.reg_write(UC_ARM_REG_SP, (ctx[13] - 0x20) & ~7)   # the frame the core would push
+        uc.reg_write(UC_ARM_REG_LR, ST_STOP | 1)
+        systick["in"] = True
+        try:
+            uc.emu_start(st_vec | 1, ST_STOP, count=200_000)
+        finally:
+            systick["in"] = False
+            uc.mem_write(CLOCK, bytes(clock))
+            for r, v in zip(ST_REGS[:16], ctx[:16]):
+                uc.reg_write(r, v)
+            uc.reg_write(UC_ARM_REG_APSR, ctx[16] & 0xf80f0000)
+        systick["n"] += 1
+
+    # --stall-at MS:DUR (not with --cycles): at its first key_poll() from MS on, the loop held
+    # DUR ms, as a long operation would hold it (a card mounted, a folder opened): the time goes
+    # on by ms, the SysTick handler runs, core B too; nothing else of core A
+    stall = [int(v) for v in opt("--stall-at", "0:0").split(":")]
+
+    def stall_hook(uc, addr, size, _):
+        if stall[1] and not systick["in"] and \
+                struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] >= stall[0] * 1000:
+            state["stall"] = stall[1]
+            stall[1] = 0
+            uc.emu_stop()
+    if stall[1] and "key_poll" in sym:
+        u.hook_add(UC_HOOK_BLOCK, stall_hook, begin=sym["key_poll"] & ~1,
+                   end=(sym["key_poll"] & ~1) + 1)
+
+    def stall_run(uc, ms):
+        at = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] // 1000
+        log.append(f"STALL of the loop: {ms} ms at {at} ms")
+        for _ in range(ms):
+            now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] + 1000
+            uc.mem_write(CLOCK, struct.pack("<I", now))
+            if sh.b and not sh.b.sleeping:
+                sh.b.step(int(1000 * b_ips(uc) / 1e6))
+            if sh.b:
+                sh.b.systick(now, b_hz(uc))
+            if st_vec:
+                systick_run(uc)
+
     def coreb_tick(uc, addr, size, _):
+        if systick["in"]:
+            return                                # the SysTick handler: its time does not count
         if stop_us and struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] >= stop_us:
             uc.emu_stop()                         # --ms, also in a busy wait (no cpu_wait)
         if cycles:
             return                                # --cycles: core B runs per slice
+        systick_ask(uc)
         if sh.b and not sh.b.sleeping:
             sh.b.step(5000)
         if sh.b:
@@ -523,6 +608,8 @@ def main():
     # cpu_wait (a return here, no SysTick): the time goes on to the next 1 ms tick, as the WFI
     # waits on the device, and core B runs for it (at its clock)
     def idle_tick(uc, addr, size, _):
+        if systick.pop("resumed", False):
+            return                                # resumed here after a SysTick: already moved
         now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
         nxt = (now // 1000 + 1) * 1000
         uc.mem_write(CLOCK, struct.pack("<I", nxt))
@@ -534,6 +621,8 @@ def main():
             sh.b.systick(nxt, b_hz(uc))
         if pcm_out and sh.b:
             capture()
+        if not cycles:
+            systick_ask(uc)
     if "cpu_wait" in sym:
         w = sym["cpu_wait"] & ~1
         u.hook_add(UC_HOOK_BLOCK, idle_tick, begin=w, end=w + 1)
@@ -668,7 +757,9 @@ def main():
             if 0x60020000 <= a < 0x60024000:
                 return sdc.read(a - 0x60020000) if sdc else regs.get(a, 0) & 0x7fffffff
             if a == 0x400d0004:                                  # SARADC STAS (see the write)
-                return state.pop("adc_busy", 0)
+                busy = state.pop("adc_busy", 0)
+                now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
+                return busy if now - state.get("adc_t", 0) < 1000 else 0
             if a == 0x4004001c:                                  # I2C0 IPD: all done, no NAK
                 return 0x3f
             if a == 0x40030020:                                  # I2S1 CLR: done
@@ -765,7 +856,9 @@ def main():
             elif a == 0x400d0008:
                 state["adc_ch"] = val & 7
                 if val & 0x10:                                   # a conversion starts: STAS
-                    state["adc_busy"] = 1                        # reads busy once, then done
+                    state["adc_busy"] = 1                        # reads busy once, then done,
+                    state["adc_t"] = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]                  # if read within 1 ms (the
+                                                                 # SysTick sampling: done)
             elif a == 0x60070028:
                 panel.command(val & 0xff)
             elif a == 0x6007002c:
@@ -888,7 +981,18 @@ def main():
     while True:
         try:
             if not cycles:
-                u.emu_start(cur, 0xffffffff, count=steps)
+                u.emu_start(cur | 1, 0xffffffff, count=steps)
+                stopped = (stop_us and struct.unpack("<I", u.mem_read(CLOCK, 4))[0] >= stop_us) \
+                    or mmc.cut_done
+                if state.get("stall") and not stopped:
+                    cur = u.reg_read(UC_ARM_REG_PC)
+                    stall_run(u, state.pop("stall"))
+                    continue
+                if systick["due"] and not stopped:
+                    cur = u.reg_read(UC_ARM_REG_PC)
+                    systick_run(u)
+                    systick["resumed"] = "cpu_wait" in sym and (cur & ~1) == sym["cpu_wait"] & ~1
+                    continue
             else:                                     # slices: the clock from the instructions
                 while done < steps:
                     u.emu_start(cur | 1, 0xffffffff, count=k)
@@ -910,6 +1014,9 @@ def main():
                             sh.b.t_back = 0
                     if sh.b:
                         sh.b.systick(int(now), b_hz(u))
+                    systick_ask(u)
+                    if systick["due"]:
+                        systick_run(u)
                     if regs.get(0x40120000, 0) & 1 and wdt_check(int(now), hz):
                         cur = u.reg_read(UC_ARM_REG_PC) | 1
                         continue

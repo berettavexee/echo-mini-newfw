@@ -3,8 +3,9 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-11, version 0.104 (the screen drawn by DMA, text twice as fast, the
-font's tables and the log's formats out of the RAM, the first code overlay).
+Last update: 2026-11-12, version 0.104k1 on the `rework` branch (the keys read in the SysTick
+interrupt). Latest release: 0.104 (the screen drawn by DMA, text twice as fast, the font's
+tables and the log's formats out of the RAM, the first code overlay).
 
 ## Done, validated on the device
 
@@ -63,6 +64,7 @@ font's tables and the log's formats out of the RAM, the first code overlay).
 | More room in core A's RAM: the font's tables read from the internal memory through a 2-way glyph cache, the log's formats kept in the image (lines made when written out) | 0.104 | §131-§133 |
 | The screen drawn by DMA: text drawn into RAM strips (a line laid out once, only the glyphs' pixels written), sent to the panel by DMAC1 while the next strip is drawn, the CPU as a fallback; the play screen's full redraw from 13.4 to 8 ms of core A, its partial one from 3.9 to 2.7 ms | 0.104 | §134-§136 |
 | Code overlays: the USB code (disk and sound card, 13.6 KiB) loaded from the internal memory into the directory listing's buffer for a USB session; code room from 29 to 42 KiB; the overlays' rules checked at each build (`tools/ovlcheck.py`) | 0.104 | §137 |
+| The keys read in the SysTick interrupt (the ladder sampled every 2 ms, the battery every 100 ms, the ADC never waited for): a press while the loop is held is taken after it instead of being lost; checked on the device (every key, chord, long presses, repeats) | 0.104k1 | §140 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
 
@@ -76,6 +78,12 @@ core A causes no underrun in MP3, Vorbis or AAC; WAV 24/192 stands about 150 ms.
 session on the normal image is done (0.99r37, 14.6 h to an empty battery: no watchdog reset;
 the one fault record was the pause bug fixed in 0.101, §115). What is left of it is under "To
 do".
+
+## Since 0.104, on `rework` (not released)
+
+- 0.104k1: the keys and the battery read in the SysTick interrupt, the changes of the keys
+  queued with their times; the installer's key waits by WFI; core A's SysTick in the emulator,
+  `--stall-at` and the test `keys-stall` (§140).
 
 ## Version history
 
@@ -165,11 +173,11 @@ One line per version; the measurements are in `ETUDE.md`.
 ## To do
 
 - Left from the rework (§97-§109):
-  - the keys read in the SysTick interrupt;
   - the screens that stop the music (USB, install, sound card, system) still in loops of their
     own;
-  - still blocking the loop: a folder opened by the browser, a card put in during playback
-    (mounted at its first use, up to 253 ms);
+  - still blocking the loop (keys pressed meanwhile are no longer lost since 0.104k1): a folder
+    opened by the browser, a card put in during playback (mounted at its first use, up to
+    253 ms);
   - at 176.4 and 192 kHz the clock rules swing between 50 and 80 MHz (10 changes a track, the
     ring kept over half); a DMA copy from SYSRAM would save about 5 MHz more there (§108);
   - ideas from the other projects (§98): still screens not redrawn and the loop in WFI

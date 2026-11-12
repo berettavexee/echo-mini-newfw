@@ -372,7 +372,8 @@ void sys_power_off(const char *why)
 }
 
 /* WFI only while the 1 ms SysTick interrupt runs, so that the wait is bounded. A function of
- * its own: the emulator (tools/emu_fw.py), which has no SysTick, replaces it by a return. */
+ * its own: the emulator (tools/emu_fw.py) replaces it by a return and moves its clock to the next
+ * ms (its SysTick runs there, ETUDE §140). */
 __attribute__((noinline)) void cpu_wait(void)
 {
     if (REG(SYST_CSR) & 2) {
@@ -471,6 +472,7 @@ int main(void)
     timer24_init();
     uint32_t wdt_was = wdt_init();
     log_init();
+    adc_scan_start();                           /* the keys and the battery read by SysTick */
     log_printf("=== boot %u: " FW_NAME " " FW_VERSION " (" FW_DATE "), tag %x, r0 %x r2 %x",
                logs.boots, boot_tag & 0xffff, boot_regs[0], boot_regs[2]);
     if (logs.recovered)
