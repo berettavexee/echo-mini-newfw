@@ -56,6 +56,23 @@ static void power_service(uint32_t key_ms)
         off_tried = 1;
         t_off = millis();
     }
+    /* Core A at 100 MHz while the music plays with the screen off (ETUDE §141, as RECHO): after
+     * 1 s of steady playback, nothing for the storage task, no walk, no USB cable; back to
+     * 200 MHz at once otherwise (the screen on goes back before its first frame, a track's tags
+     * read in q_open() too) */
+    static uint32_t slow_since;
+    int slow = q_playing && sys_screen_is_off() && !vbus() && !clock_is_low && player_settled() &&
+               !storage_busy() && !browser_walking();
+    if (!slow) {
+        slow_since = 0;
+        if (core_div != 2 && core_clock(2))
+            log_printf("clock: core A 200 MHz (%s)", !sys_screen_is_off() ? "screen on" :
+                       !q_playing ? "nothing playing" : vbus() ? "USB cable" :
+                       !player_settled() ? "a track opening" : "storage or walk");
+    } else if (!slow_since)
+        slow_since = millis() | 1;
+    else if (core_div == 2 && millis() - slow_since > 1000 && core_clock(4))
+        log_printf("clock: core A 100 MHz (screen off, playing)");
     if (quiet && !clock_is_low && cpu_hz > 24000000 && !vbus()) {     /* not in the fallback */
         log_printf("ui: clocks on the crystal (screen off, nothing playing)");
         log_flush();

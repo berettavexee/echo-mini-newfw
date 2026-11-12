@@ -80,6 +80,18 @@ TESTS = {
                        emu_args=["--stall-at", "2000:500"],
                        expect=[r"keys: play \(adc \d+, 1\d\d ms\)", r"player: .*A\.WAV",
                                r"STALL of the loop: 500 ms"]),
+    # core A at 100 MHz while the music plays with the screen off (ETUDE §141): Power turns the
+    # screen off, 1 s later 100 MHz; the next track's tags at 200 MHz, then 100 again; Power
+    # turns the screen on: 200 MHz before it. --cycles: the time from the instructions run, at
+    # the clock set (no underrun at 100 MHz)
+    "clock-a": dict(files={"A.WAV": "wav10", "B.WAV": "wav10"}, keys=keys((2000, "PLAY", 200)),
+                    ms=26000, emu_args=["--cycles", "--power", "1", "--gpio-at",
+                                        "1500:2:5:0,3500:2:5:1,3650:2:5:0,20000:2:5:1,20150:2:5:0"],
+                    expect=[r"screen off", r"clock: core A 100 MHz \(screen off, playing\)",
+                            r"clock: core A 200 MHz \(a track's tags\)",
+                            r"clock: core A 100 MHz \(screen off, playing\)",
+                            r"clock: core A 200 MHz \(screen on\)", r"screen on"],
+                    forbid=[r"WATCHDOG", r"underruns [1-9]"]),
     "play-wav": dict(files={"A.WAV": "wav"}, keys=keys((2000, "PLAY", 200)), ms=6500,
                      expect=[r"player: .*A\.WAV", r"player: format: 44100 Hz, 2 ch, 16 bits",
                              r"audio: running", r"player: finished"]),

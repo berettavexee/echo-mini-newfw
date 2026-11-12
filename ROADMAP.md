@@ -3,8 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-12, version 0.104k1 on the `rework` branch (the keys read in the SysTick
-interrupt). Latest release: 0.104 (the screen drawn by DMA, text twice as fast, the font's
+Last update: 2026-11-12, version 0.104a1 on the `rework` branch (the keys read in the SysTick
+interrupt, core A at 100 MHz with the screen off). Latest release: 0.104 (the screen drawn by DMA, text twice as fast, the font's
 tables and the log's formats out of the RAM, the first code overlay).
 
 ## Done, validated on the device
@@ -84,6 +84,10 @@ do".
 - 0.104k1: the keys and the battery read in the SysTick interrupt, the changes of the keys
   queued with their times; the installer's key waits by WFI; core A's SysTick in the emulator,
   `--stall-at` and the test `keys-stall` (§140).
+- 0.104a1: core A at 100 MHz while the music plays with the screen off (core A's divider only,
+  PCLK kept at 50 MHz, as RECHO does; 200 MHz for the screen, a track's tags, the storage task);
+  the emulator's CRU registers with their write mask, the test `clock-a` (§141). Checked on the
+  device; its gain on the battery life still to measure.
 
 ## Version history
 

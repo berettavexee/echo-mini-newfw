@@ -578,7 +578,7 @@ def main():
         if pcm_out and sh.b:
             capture()
     u.hook_add(UC_HOOK_BLOCK, coreb_tick, begin=t, end=t + 4)
-    panel, log, regs = Panel(), [], {}
+    panel, log, regs, regs_old = Panel(), [], {}, {}
 
     # --ring-trace FILE (with --cycles): every 5 ms of simulated time, the fill of core B's input
     # ring (ring bytes held: in_wr - rb_rd, version 3) and of the PCM ring (pcm_wr - pcm_rd),
@@ -806,6 +806,10 @@ def main():
         def wr(uc, off, size, val, _):
             a = base + off
             regs[a] = val
+            if a in (0x40180010, 0x40180014, 0x40180018):  # CRU MODE_CON, CLKSEL0/1: the upper
+                m = val >> 16                            # half says which bits are written (the
+                regs[a] = (regs_old.get(a, 0) & ~m | val & m) & 0xffff  # ACODEC's clock source
+                regs_old[a] = regs[a]                    # kept the core on the PLL, ETUDE §141)
             if a == 0x40120000 and regs.get(0x40120000 + 0x100, 0) & 1:
                 regs[a] = val | 1                                # once on, it stays on (device)
             if a == 0x40120000 and val & 1:

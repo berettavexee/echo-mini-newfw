@@ -274,7 +274,8 @@ void sys_idle(void)
     rtc_service();
     perf_idle_report();
     if (millis() - sys_t_bat > 60000) {
-        static uint32_t t_win, idle_win;
+        static uint32_t t_win, idle_win, slow_win;
+        uint32_t slow = core_slow_total();
         struct rtc_tm t;
         int c = rtc_get(&t);
         uint32_t now24 = timer24(), el = now24 - t_win, sl = a_idle - idle_win;
@@ -282,11 +283,14 @@ void sys_idle(void)
         idle_win = a_idle;
         sys_t_bat = millis();
         log_printf("battery %u mV, usb %d, charge pin %d, font reads %u, clock %02u:%02u:%02u%s, "
-                   "core A busy %u.%u %%", battery_mv(), vbus(), gpio_get(PIN_CHARGING),
+                   "core A busy %u.%u %% at %u MHz, %u s below 200 MHz (%u changes)",
+                   battery_mv(), vbus(), gpio_get(PIN_CHARGING),
                    font_misses(), c < 0 ? 0 : t.hour, c < 0 ? 0 : t.min, c < 0 ? 0 : t.sec,
                    c == 1 ? "" : c ? " (not set)" : " (none)",
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) / 10 : 0,
-                   el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) % 10 : 0);
+                   el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) % 10 : 0,
+                   cpu_hz / 1000000, (slow - slow_win) / 1000, core_switches);
+        slow_win = slow;
         log_printf("lcd: DMA mode %d: %u transfers, %u KiB, waits %u ms (max %u us), %u failures",
                    lcd_dma_mode, lcd_dma.xfers, lcd_dma.bytes >> 10, lcd_dma.wait_us / 1000,
                    lcd_dma.wait_max, lcd_dma.fails);
@@ -394,6 +398,8 @@ void sys_screen_set(int on)
         return;
     sys_screen_off = !on;
     if (on) {
+        if (core_clock(2))                      /* (power_service in ui.c, ETUDE §141) */
+            log_printf("clock: core A 200 MHz (screen on)");
         if (clock_is_low) {
             clock_low(0);                       /* the screen at full speed (ui.c power_service) */
             log_printf("screen: clocks back on the PLL, core %u Hz against the crystal "

@@ -167,6 +167,10 @@ int clock_init(void)
  * fallback, where they all work. Only from the PLL state. */
 int clock_is_low;
 static uint32_t low_sel0, low_sel1;
+uint32_t core_div = 2;                          /* core A = PLL / core_div (core_clock) */
+uint32_t core_slow_ms, core_switches;           /* time below 200 MHz, changes (the log) */
+static uint32_t core_slow_t0;
+static volatile uint32_t ms_count;
 
 void clock_low(int on)
 {
@@ -200,10 +204,59 @@ void clock_low(int on)
                 spin(2000);
             }
         cpu_hz = ((REG(CRU_MODE_CON) & 1) ? 400000000u : 24000000u) / ((low_sel0 & 7) + 1);
+        core_div = (low_sel0 & 7) + 1;          /* (core_clock(): kept as it was) */
     }
     clock_is_low = on;
     timer_init();                               /* SysTick: 1 ms at the new clock */
     __asm volatile ("cpsie i");
+}
+
+/* Core A's divider on the PLL, changed on the fly, PCLK kept at 50 MHz (core / 4 at 200 MHz,
+ * / 2 at 100, / 1 at 50), as RECHO 0.10.0 does (0x03051708, ETUDE §141): the I2C buses, the
+ * backlight's PWM and the watchdog run on PCLK and see nothing. Core B's divider (CLKSEL0 bits
+ * 14:12), the PLL, the eMMC and the SARADC (from the PLL, CLKSEL7), the microSD (crystal) and
+ * TIMER1 (24 MHz) do not change; the AHB follows core A. PCLK never above 50 MHz: slowing down,
+ * the core first; speeding up, PCLK first. SysTick set again for 1 ms; the time it had into its
+ * millisecond is given as a whole one (ms_count + 1), so ticks() never goes back. Only on the
+ * PLL (not with clock_low() on, nor in the 24 MHz fallback). */
+/* The time spent below 200 MHz so far (ms) */
+uint32_t core_slow_total(void)
+{
+    return core_slow_ms + (core_div != 2 && !clock_is_low ? ms_count - core_slow_t0 : 0);
+}
+
+int core_clock(uint32_t div)
+{
+    uint32_t shift = div == 2 ? 2 : div == 4 ? 1 : div == 8 ? 0 : 3;
+    if (shift > 2 || div == core_div || clock_is_low || cpu_hz <= 24000000u ||
+        !(REG(CRU_MODE_CON) & 1))
+        return 0;
+    lcd_sync();                                 /* the screen's DMA done (ETUDE §134) */
+    __asm volatile ("cpsid i");
+    uint32_t sel0 = 0x00070000u | (div - 1), sel1 = 0x03000000u | shift << 8;
+    if (div > core_div) {
+        REG(CRU_CLKSEL0) = sel0;
+        spin(2000);
+        REG(CRU_CLKSEL1) = sel1;
+    } else {
+        REG(CRU_CLKSEL1) = sel1;
+        spin(2000);
+        REG(CRU_CLKSEL0) = sel0;
+    }
+    spin(2000);
+    if (core_div == 2)
+        core_slow_t0 = ms_count;
+    else if (div == 2)
+        core_slow_ms += ms_count - core_slow_t0;
+    core_switches++;
+    core_div = div;
+    cpu_hz = 400000000u / div;
+    REG(SYST_CSR) = 0;
+    ms_count++;
+    REG(SCB_ICSR) = 1u << 25;                   /* PENDSTCLR: a tick met meanwhile is in it */
+    timer_init();
+    __asm volatile ("cpsie i");
+    return 1;
 }
 
 void clock_fast_ok(void)
@@ -212,7 +265,6 @@ void clock_fast_ok(void)
 }
 
 /* ---- time: SysTick at the core clock, 1 ms interrupt ---- */
-static volatile uint32_t ms_count;
 static void adc_tick(void);
 static volatile uint8_t adc_scan;               /* the ADC sampled by SysTick (adc_scan_start) */
 

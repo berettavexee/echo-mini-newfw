@@ -31,6 +31,9 @@ extern uint32_t cru_mode, cru_sel0, cru_sel1, mode_tries, pll_con1_after;
 int clock_init(void);           /* 1 = running at 200 MHz, 0 = stayed on the 24 MHz crystal */
 void clock_fast_ok(void);       /* clears the 200 MHz attempt marker */
 void clock_low(int on);         /* 1: 24 MHz crystal, PLL off; 0: back to the PLL */
+int core_clock(uint32_t div);    /* core A = PLL / div (2: 200 MHz, 4: 100), PCLK at 50 MHz */
+extern uint32_t core_div, core_switches;
+uint32_t core_slow_total(void); /* ms spent below 200 MHz (core_clock) */
 extern int clock_is_low;
 void timer_init(void);
 uint32_t ticks(void);           /* free-running microsecond counter */

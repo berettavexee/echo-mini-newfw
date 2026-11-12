@@ -233,6 +233,8 @@ static int q_open(int i, int chain)
     f.cluster = e->cluster;
     f.size = e->size;
     fat_open(&f);
+    if (core_clock(2))                          /* the tags at full speed (ETUDE §141) */
+        log_printf("clock: core A 200 MHz (a track's tags)");
     uint32_t t0 = ticks();
     const char *pp = perf_begin("tags");
     if (prep.state == PREP_RUNNING)
