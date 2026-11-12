@@ -285,6 +285,16 @@ One line per version; the measurements are in `ETUDE.md`.
 - To check on the device rather than add: the 4.4 mm balanced output (the plug is detected,
   nothing is specific to it; check by ear, and whether the stock firmware sets the DACs
   differently for it).
+- To test on the device: GPIO2_7, GPIO2_16 and GPIO2_17, the Bluetooth module's pins
+  (EchoPod `docs/hardware.md`, ReChord `bt_hw.h`): GPIO2_7 powers the module (high = on),
+  GPIO2_16/2_17 are UART1 TX/RX (group A). The stock firmware, RECHO 0.10.0 and EchoPod drive
+  all three low at boot; we leave them as inputs in their reset state. The datasheet gives
+  GPIO2_A7 an internal pull-down (the module stays off) but GPIO2_C0/C1 a pull-up (33-62 kΩ):
+  through an unpowered module's inputs that may draw up to about 0.1 mA per pin. A test image
+  that drives them low as the others do, then an endurance run against 0.104k1 (same
+  playlist); a gain of minutes at most is expected, not hours. RECHO sets no core voltage (no
+  register for it in the TRM, no PMIC on I2C, no GPIO switched at run time), so these pins are
+  the only boot difference found.
 
 ## Ideas, not decided
 

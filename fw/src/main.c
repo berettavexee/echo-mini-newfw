@@ -504,6 +504,12 @@ int main(void)
     log_printf("battery %u mV, usb %d, charge pin %d, jack 3.5 %d 4.4 %d, power key %d",
                battery_mv(), vbus(), gpio_get(PIN_CHARGING), gpio_get(PIN_JACK35),
                !gpio_get(PIN_JACK44), power_key());
+    /* The Bluetooth module's pins, left as they are (ROADMAP): GPIO2_7 its power (1 = on),
+     * GPIO2_16/2_17 UART1 TX/RX. Levels read, then direction, output data, iomux and pulls. */
+    log_printf("bt pins: power %d tx %d rx %d, gpio2 ddr %x dr %x, grf iomux2a %x 2c %x "
+               "pull2a %x 2c %x", gpio_get(2, 7), gpio_get(2, 16), gpio_get(2, 17),
+               REG(GPIO2_BASE + GPIO_DDR), REG(GPIO2_BASE + GPIO_DR), REG(GRF_BASE + 0x40),
+               REG(GRF_BASE + 0x48), REG(GRF_BASE + 0x50), REG(GRF_BASE + 0x58));
     log_flush();
     battery_check_boot();
     charge_screen(1);                           /* switched on by the USB cable: until PLAY held */

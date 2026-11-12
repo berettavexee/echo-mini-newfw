@@ -606,7 +606,9 @@ de donnée en `+0`, la direction en `+4`, et l'iomux dans le GRF. Broches repér
 | GPIO2_8 (0 = présente) | détection de prise : bit 1, la 4,4 mm | RECHO `0x03055ec0` |
 | GPIO2_3 | état du chargeur, lu quand VBUS est présent | RECHO `0x03069eb8`, fonction batterie |
 | GPIO0_11 (active basse, avec tirage) | probablement la détection de carte microSD | RECHO `0x03065890` |
-| GPIO2_4, 2_7, 2_16, 2_17, GPIO1_4 (sorties) | à identifier | RECHO |
+| GPIO2_7 (sortie, 1 = alimenté) | alimentation du module Bluetooth (modèle 8 Go) ; tirage interne vers le bas au reset | EchoPod `docs/hardware.md`, ReChord `bt_hw.h`, datasheet |
+| GPIO2_16, GPIO2_17 | UART1 TX et RX (groupe A, fonction 1) vers le module Bluetooth ; tirage interne vers le haut au reset ; mises à 0 au démarrage par l'origine, RECHO et EchoPod | idem |
+| GPIO2_4, GPIO1_4 (sorties) | GPIO2_4 : rétroéclairage ; GPIO1_4 : à identifier | RECHO |
 
 **Recoupement avec le firmware d'origine** :
 - GPIO2_6 est mis à 1 en `0x03053924` et `0x03061f86` (maintien de l'alimentation) ;
@@ -4758,3 +4760,18 @@ Jusqu'ici le cœur A restait à 200 MHz tant que la musique jouait, écran allum
 **À mesurer.** Le gain est inconnu : le cœur A dort en WFI 94 % du temps. Il faut une décharge comparée à celle de 0.104k1 (14,5 h, 9,4 h jusqu'à 3,6 V), avec un mélange de formats proche.
 
 **Sur l'appareil (0.104a1, `work/hwlog/2026-11-12_0.104a1/`, environ 5 min)** : 18 passages à 100 MHz, chacun 1 s après l'extinction de l'écran en lecture ; 200 MHz pour les tags de chaque morceau suivant, puis 100 MHz ; 200 MHz avant chaque rallumage, affichage normal. La réserve du DAC n'est jamais descendue sous 484 ms à 100 MHz ; les « underruns » du journal sont au début de morceaux, après des sauts manuels. Jusqu'à 32 s par minute sous 200 MHz avec des morceaux de test de 3 s. Les 10 échecs d'ouverture sont les fichiers refusés par conception (l'album en floor 0 de `test_floor0`, §62, et `ZZ_ZEROS.MPC`), à 200 MHz. Les touches rallument l'écran, donc le volume et les sauts se font toujours à 200 MHz. Reste une décharge complète pour mesurer le gain.
+
+## 142. L'écran de charge scintillait (0.104b1, 2026-11-12)
+Signalé par l'utilisateur pendant une recharge : le texte « Charging … % » scintillait, la jauge non. `draw_level()` (`charge.c`, deux fois par seconde) effaçait toute la bande du texte (`lcd_fill`) puis le réécrivait : depuis l'écran par DMA (§134), l'effacement et le texte partent en deux envois, et le trou entre les deux se voyait. Les autres écrans écrivent le texte dans des bandes déjà remplies du fond (§136), sans passer par le noir.
+
+Correction : le texte n'est redessiné que s'il change (pourcentage, en charge ou chargé), et sans effacement : le fond à gauche du texte centré, puis le texte, dont les bandes remplissent la ligne jusqu'au bord droit (comme `sys_line`). Les segments de la jauge ne sont redessinés que s'ils changent (le dernier, qui clignote une fois par seconde, comme prévu §48). Dans l'émulateur, 8 s d'écran de charge : 147 commandes à l'écran au lieu de 693 ; le texte reste en place d'une capture à l'autre.
+
+**Sur l'appareil (0.104b1)** : l'utilisateur confirme que le texte de l'écran de charge ne scintille plus.
+
+## 143. La tension chez RECHO, les broches du Bluetooth (2026-11-12)
+
+**Question de l'utilisateur** : RECHO tiendrait plusieurs heures de plus ; règle-t-il la tension du cœur ? Revérifié sur RECHO 0.10.0 (`HIFIEC90.IMG`, information seulement) : **non**. Le TRM n'a aucun registre de tension du cœur (le seul réglage de tension, `GRF_VREF_CON`, est la référence de 2,5 V de l'ADC, que RECHO allume au démarrage comme nous). Pas de PMIC : sur I2C0, les deux CS43131 seulement (§3.5) ; sur I2C1, l'horloge à `0xA2` seulement (adresse écrite en dur). Aucune sortie GPIO changée en cours de route hors rétroéclairage, maintien de l'alimentation, DAC et écran. RECHO écrit aussi `PMU_PWRDN_CON` bit 1 (coupure de PD_HIGH autorisée en veille profonde) et le PHY USB comme nous.
+
+**Seule différence au démarrage** (`0x030519fc`) : GPIO2_7, 2_16 et 2_17 mis à 0 en sortie. EchoPod (`docs/hardware.md`) et ReChord (`bt_hw.h`) les identifient : **module Bluetooth**, GPIO2_7 son alimentation (1 = allumé), GPIO2_16/2_17 l'UART1 TX/RX (groupe A). L'origine, RECHO et EchoPod les mettent à 0 au démarrage. Nous les laissons en entrée. Datasheet : GPIO2_A7 tirée vers le bas au reset (module éteint, sauf résistance externe), GPIO2_C0/C1 tirées vers le haut (33 à 62 kΩ), d'où peut-être un petit courant (≈ 0,1 mA par broche au plus, estimé) dans les entrées du module éteint : quelques minutes d'autonomie, pas des heures. L'écart avec RECHO s'explique plus probablement par les codecs (ni Opus ni Vorbis chez lui).
+
+**0.104g1** : au démarrage, une ligne de journal « bt pins: » lit le niveau des trois broches, la direction et la donnée de GPIO2, l'iomux et les tirages de GPIO2A/2C, sans rien changer. Si `power` lit 0, le module n'est pas alimenté. Le test de les mettre à 0 comme les autres est dans la ROADMAP.
