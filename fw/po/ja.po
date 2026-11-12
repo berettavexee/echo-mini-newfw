@@ -1,5 +1,5 @@
 # Japanese translation of the ECHO MINI new firmware.
-# From pull request #1 by iamcheyan; the entries flagged fuzzy are proposals still to review.
+# From pull request #1 by iamcheyan; all entries reviewed by iamcheyan, none is fuzzy.
 msgid ""
 msgstr ""
 "Project-Id-Version: echo-mini-newfw\n"
@@ -15,12 +15,10 @@ msgid "Internal"
 msgstr "内蔵ストレージ"
 
 #: src/browser.c
-#, fuzzy
 msgid "SD card (not responding)"
 msgstr "SDカード（応答なし）"
 
 #: src/browser.c
-#, fuzzy
 msgid "SD card (needs FAT32 or exFAT)"
 msgstr "SDカード（FAT32またはexFATが必要）"
 
@@ -33,7 +31,6 @@ msgid "no folder or playable file here"
 msgstr "フォルダーまたは再生可能なファイルがありません"
 
 #: src/browser.c
-#, fuzzy
 msgid "reading..."
 msgstr "読み込み中..."
 
@@ -72,7 +69,7 @@ msgstr "FW1を書き込み中 %u %%"
 
 #: src/install.c
 msgid "Install firmware (*.IMG, internal root)"
-msgstr "ファームウェアをインストール（*.IMG、内蔵ストレージのルート）"
+msgstr "ファームウェアをインストール（*.IMG、内蔵ルート）"
 
 #: src/install.c
 msgid "internal volume not available"
@@ -92,9 +89,9 @@ msgstr "BACK：戻る"
 
 #. TRANSLATORS: its date (2026-11-06), its size in MiB
 #: src/install.c
-#, c-format, fuzzy
+#, c-format
 msgid "valid image, %s, %u MiB"
-msgstr "有効なイメージ、%s、%u MiB"
+msgstr "有効なイメージ：%s、%u MiB"
 
 #: src/install.c
 msgid "writes FW2, then FW1"
@@ -105,9 +102,9 @@ msgid "too big for FW2: writes FW1 only"
 msgstr "FW2には大きすぎるためFW1のみ書き込み"
 
 #: src/install.c
-#, c-format, fuzzy
+#, c-format
 msgid "Battery too low (%u %%)"
-msgstr "電池残量不足（%u %%）"
+msgstr "バッテリー残量不足（%u %%）"
 
 #: src/install.c src/main.c src/uac.c src/ui.c src/usbmode.c
 msgid "plug the USB cable"
@@ -214,6 +211,10 @@ msgstr "時計が応答しません"
 msgid "clock set"
 msgstr "時刻を設定しました"
 
+#: src/ovl.c
+msgid "This part of the firmware is damaged: install it again"
+msgstr "ファームウェア破損：再インストールしてください"
+
 #: src/playback.c
 msgid "album"
 msgstr "アルバム"
@@ -231,132 +232,106 @@ msgid "auto"
 msgstr "自動"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: this variant of the format"
-msgstr "非対応：この形式のバリエーション"
+msgstr "非対応：この形式の別バージョン"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: more than 2 channels"
 msgstr "非対応：2チャンネルを超える音声"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: this bit depth"
 msgstr "非対応：このビット深度"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: floating-point samples"
 msgstr "非対応：浮動小数点サンプル"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: compressed WAV or AIFF"
 msgstr "非対応：圧縮WAV／AIFF"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: HE-AAC (AAC+)"
 msgstr "非対応：HE-AAC（AAC+）"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: this AAC profile"
 msgstr "非対応：このAACプロファイル"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: neither AAC nor ALAC"
 msgstr "非対応：AACでもALACでもありません"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: multichannel Opus"
 msgstr "非対応：マルチチャンネルOpus"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: too large for the memory"
-msgstr "非対応：メモリに対して大きすぎます"
+msgstr "非対応：メモリ容量を超えています"
 
 #: src/playback.c
-#, fuzzy
 msgid "Not supported: no sample rate"
 msgstr "非対応：サンプルレートがありません"
 
 #: src/playback.c
-#, fuzzy
 msgid "Check the file on a computer"
 msgstr "パソコンでファイルを確認してください"
 
 #: src/playback.c
-#, fuzzy
 msgid "Empty file (0 bytes)"
 msgstr "空のファイル（0バイト）"
 
 #: src/playback.c
-#, fuzzy
 msgid "Copy it again"
 msgstr "もう一度コピーしてください"
 
 #: src/playback.c
-#, fuzzy
 msgid "Damaged: no audio found"
 msgstr "破損：音声が見つかりません"
 
 #: src/playback.c
-#, fuzzy
 msgid "Damaged, or not what its name says"
-msgstr "破損、または拡張子と内容が不一致"
+msgstr "破損、または拡張子と内容が一致しません"
 
 #: src/playback.c
-#, fuzzy
 msgid "Damaged: decoding error"
 msgstr "破損：デコードエラー"
 
 #: src/playback.c
-#, fuzzy
 msgid "Convert it to stereo"
 msgstr "ステレオに変換してください"
 
 #: src/playback.c
-#, fuzzy
 msgid "Convert it to AAC-LC, MP3 or Opus"
 msgstr "AAC-LC、MP3、Opusに変換してください"
 
 #: src/playback.c
-#, fuzzy
 msgid "Convert it to FLAC, MP3, AAC-LC or Opus"
 msgstr "FLAC、MP3、AAC-LC、Opusに変換してください"
 
 #: src/playback.c
-#, fuzzy
 msgid "Read error"
-msgstr "読み込みエラー"
+msgstr "読み取りエラー"
 
 #: src/playback.c
-#, fuzzy
 msgid "Reinsert the card, or check the disk"
 msgstr "カードを挿し直すか、ディスクを確認してください"
 
 #: src/playback.c
-#, fuzzy
 msgid "Its codec is missing from the firmware"
-msgstr "このコーデックがファームウェアにありません"
+msgstr "このコーデックはファームウェアにありません"
 
 #: src/playback.c
-#, fuzzy
 msgid "Install the firmware again"
 msgstr "ファームウェアを再インストールしてください"
 
 #: src/playback.c
-#, fuzzy
 msgid "Internal error (core B)"
 msgstr "内部エラー（コアB）"
 
 #: src/playback.c
-#, fuzzy
 msgid "Please report it with NEWFWLOG.TXT"
 msgstr "NEWFWLOG.TXTを添えて報告してください"
 
@@ -377,17 +352,14 @@ msgid "shuffle"
 msgstr "シャッフル"
 
 #: src/playscreen.c
-#, fuzzy
 msgid "paused"
-msgstr "一時停止"
+msgstr "一時停止中"
 
 #: src/playscreen.c
-#, fuzzy
 msgid "stopped"
-msgstr "停止"
+msgstr "停止中"
 
 #: src/playscreen.c src/uac.c
-#, fuzzy
 msgid "playing"
 msgstr "再生中"
 
@@ -456,12 +428,10 @@ msgid "browser"
 msgstr "ブラウザー"
 
 #: src/settings.c
-#, fuzzy
 msgid "no clock"
 msgstr "時計なし"
 
 #: src/settings.c
-#, fuzzy
 msgid "not set"
 msgstr "未設定"
 
@@ -477,7 +447,7 @@ msgstr "%u 秒"
 
 #. TRANSLATORS: minutes
 #: src/settings.c
-#, c-format, fuzzy
+#, c-format
 msgid "%u min"
 msgstr "%u 分"
 
@@ -491,7 +461,7 @@ msgstr "タグ"
 
 #. TRANSLATORS: the minutes left before the sleep timer stops the music
 #: src/settings.c
-#, c-format, fuzzy
+#, c-format
 msgid "%u min left"
 msgstr "残り %u 分"
 
@@ -504,48 +474,40 @@ msgid "no"
 msgstr "いいえ"
 
 #: src/uac.c src/usbmode.c
-#, fuzzy
 msgid "waiting for the host"
 msgstr "ホスト待機中"
 
 #: src/uac.c
-#, fuzzy
 msgid "connected, no stream"
 msgstr "接続済み、ストリームなし"
 
 #: src/uac.c
-#, fuzzy
 msgid "stream open, no sound"
 msgstr "ストリーム開始、無音"
 
 #. TRANSLATORS: our attenuation (".5" or nothing after its whole dB), the computer's
 #: src/uac.c
-#, c-format, fuzzy
+#, c-format
 msgid "volume -%u%s dB, host -%u dB"
 msgstr "音量 -%u%s dB、ホスト -%u dB"
 
 #: src/uac.c
-#, fuzzy
 msgid "muted"
-msgstr "ミュート"
+msgstr "ミュート中"
 
 #: src/uac.c
-#, fuzzy
 msgid "MENU: remote on"
 msgstr "MENU：リモコン オン"
 
 #: src/uac.c
-#, fuzzy
 msgid "MENU: remote off"
 msgstr "MENU：リモコン オフ"
 
 #: src/uac.c
-#, fuzzy
 msgid "VOL+ / VOL-: volume, twice: track"
 msgstr "VOL+ / VOL-：音量、2回押し：曲送り"
 
 #: src/uac.c
-#, fuzzy
 msgid "PLAY: play/pause, BACK held: exit"
 msgstr "PLAY：再生/一時停止、BACK長押し：終了"
 
@@ -562,82 +524,66 @@ msgid "Cannot play"
 msgstr "再生できません"
 
 #: src/ui.c
-#, fuzzy
 msgid "Fault"
 msgstr "障害"
 
 #: src/ui.c
-#, fuzzy
 msgid "The last session ended on a fault"
 msgstr "前回のセッションは障害で終了しました"
 
 #: src/ui.c
-#, fuzzy
 msgid "details: NEWFWLOG.TXT"
 msgstr "詳細：NEWFWLOG.TXT"
 
 #: src/update.c
-#, fuzzy
 msgid "Cannot read the file"
 msgstr "ファイルを読み込めません"
 
 #: src/update.c
-#, fuzzy
 msgid "copy it to the player again"
 msgstr "プレーヤーにもう一度コピーしてください"
 
 #: src/update.c
-#, fuzzy
 msgid "Not a firmware image"
 msgstr "ファームウェアイメージではありません"
 
 #: src/update.c
-#, fuzzy
 msgid "use an ECHO MINI .IMG file"
 msgstr "ECHO MINIの.IMGファイルを使用してください"
 
 #: src/update.c
-#, fuzzy
 msgid "Incomplete file"
 msgstr "不完全なファイル"
 
 #: src/update.c
-#, fuzzy
 msgid "download or copy it again"
 msgstr "もう一度ダウンロードまたはコピーしてください"
 
 #: src/update.c
-#, fuzzy
 msgid "Image too large for this player"
 msgstr "このプレーヤーには大きすぎるイメージ"
 
 #: src/update.c
-#, fuzzy
 msgid "8 GB ECHO MINI images only"
 msgstr "8 GB版ECHO MINIのイメージのみ"
 
 #: src/update.c
-#, fuzzy
 msgid "Unknown image layout"
 msgstr "不明なイメージ構成"
 
 #: src/update.c
-#, fuzzy
 msgid "not an image for this player"
 msgstr "このプレーヤー用のイメージではありません"
 
 #: src/update.c
-#, fuzzy
 msgid "Damaged image"
 msgstr "破損したイメージ"
 
 #: src/update.c
-#, fuzzy
 msgid "download it again"
 msgstr "もう一度ダウンロードしてください"
 
 #: src/update.c
-#, fuzzy
 msgid "Flash write failed"
 msgstr "フラッシュ書き込みに失敗しました"
 
@@ -646,27 +592,22 @@ msgid "restart, then install again"
 msgstr "再起動してから再インストールしてください"
 
 #: src/update.c
-#, fuzzy
 msgid "Install failed"
 msgstr "インストールに失敗しました"
 
 #: src/update.c
-#, fuzzy
 msgid "restart, then try again"
 msgstr "再起動してからもう一度お試しください"
 
 #: src/usbmode.c
-#, fuzzy
 msgid "configured"
 msgstr "設定済み"
 
 #: src/usbmode.c
-#, fuzzy
 msgid "high speed"
 msgstr "ハイスピード"
 
 #: src/usbmode.c
-#, fuzzy
 msgid "full speed"
 msgstr "フルスピード"
 
@@ -679,12 +620,10 @@ msgid "USB disk (read only)"
 msgstr "USBディスク（読み取り専用）"
 
 #: src/usbmode.c
-#, fuzzy
 msgid "No FAT32 volume on the internal memory"
 msgstr "内蔵ストレージにFAT32ボリュームがありません"
 
 #: src/usbmode.c
-#, fuzzy
 msgid "nothing to share over USB"
 msgstr "USBで共有するものがありません"
 
@@ -697,200 +636,198 @@ msgid "eject on the computer before unplugging"
 msgstr "ケーブルを抜く前にPCで取り出してください"
 
 #: src/usbmode.c
-#, fuzzy
 msgid "Cannot share the internal memory"
 msgstr "内蔵ストレージを共有できません"
 
 #: src/usbmode.c
-#, fuzzy
 msgid "its volume overlaps the firmware area"
 msgstr "ボリュームがファームウェア領域と重なっています"
 
 #. TRANSLATORS: the time shown at the top of the play screen and the browser
 #: src/settings.c
 msgid "Clock"
-msgstr ""
+msgstr "時計"
 
 #. TRANSLATORS: the value of the line "Clock": the time shown or not
 #: src/settings.c
 msgid "shown"
-msgstr ""
+msgstr "表示"
 
 #. TRANSLATORS: the value of the line "Clock": the time shown or not
 #: src/settings.c
 msgid "hidden"
-msgstr ""
+msgstr "非表示"
 
 #: src/libui.c
 msgid "Updating the library"
-msgstr ""
+msgstr "ライブラリを更新中"
 
 #: src/libui.c
 msgid "BACK: stop (the library before is kept)"
-msgstr ""
+msgstr "BACK：中止（前のライブラリを保持）"
 
 #: src/libui.c
 msgid "Looking for the music"
-msgstr ""
+msgstr "音楽を検索中"
 
 #: src/libui.c
 msgid "Reading the tags"
-msgstr ""
+msgstr "タグを読み込み中"
 
 #: src/libui.c
 msgid "Sorting"
-msgstr ""
+msgstr "並べ替え中"
 
 #: src/libui.c
 msgid "Writing the library"
-msgstr ""
+msgstr "ライブラリを書き込み中"
 
 #: src/libui.c
 #, c-format
 msgid "%u files"
-msgstr ""
+msgstr "%u ファイル"
 
 #: src/libui.c
 #, c-format
 msgid "%u of %u"
-msgstr ""
+msgstr "%u / %u"
 
 #: src/libui.c
 #, c-format
 msgid "about %u min left"
-msgstr ""
+msgstr "残り約 %u 分"
 
 #: src/libui.c
 #, c-format
 msgid "about %u s left"
-msgstr ""
+msgstr "残り約 %u 秒"
 
 #: src/libui.c
 #, c-format
 msgid "Library updated: %u tracks"
-msgstr ""
+msgstr "ライブラリ更新完了：%u曲"
 
 #: src/libui.c
 msgid "Stopped: the library before is kept"
-msgstr ""
+msgstr "中止：前のライブラリを保持"
 
 #: src/libui.c
 msgid "No room for NEWFWLIB.DAT"
-msgstr ""
+msgstr "NEWFWLIB.DATの空きがありません"
 
 #: src/libui.c
 msgid "Too much music for the library"
-msgstr ""
+msgstr "ライブラリには曲が多すぎます"
 
 #: src/libui.c
 #, c-format
 msgid "The library could not be updated (%d)"
-msgstr ""
+msgstr "ライブラリを更新できません（%d）"
 
 #. TRANSLATORS: the music library (artists, albums...): its index, PLAY updates it
 #: src/settings.c
 msgid "Library (PLAY: update)"
-msgstr ""
+msgstr "ライブラリ（PLAY：更新）"
 
 #: src/settings.c
 #, c-format
 msgid "%u tracks"
-msgstr ""
+msgstr "%u 曲"
 
 #: src/browser.c
 msgid "Library"
-msgstr ""
+msgstr "ライブラリ"
 
 #: src/libbrowse.c
 msgid "Artists"
-msgstr ""
+msgstr "アーティスト"
 
 #: src/libbrowse.c
 msgid "Albums"
-msgstr ""
+msgstr "アルバム"
 
 #: src/libbrowse.c
 msgid "Years"
-msgstr ""
+msgstr "年"
 
 #: src/libbrowse.c
 msgid "Genres"
-msgstr ""
+msgstr "ジャンル"
 
 #: src/libbrowse.c
 msgid "All songs"
-msgstr ""
+msgstr "すべての曲"
 
 #: src/libbrowse.c
 msgid "nothing here"
-msgstr ""
+msgstr "ここには何もありません"
 
 #: src/libbrowse.c
 msgid "No library yet: Settings, Library, PLAY"
-msgstr ""
+msgstr "ライブラリ未作成：設定→ライブラリ→PLAY"
 
 #: src/libbrowse.c
 msgid "Unknown album"
-msgstr ""
+msgstr "不明なアルバム"
 
 #: src/libbrowse.c
 msgid "Unknown artist"
-msgstr ""
+msgstr "不明なアーティスト"
 
 #: src/libbrowse.c
 msgid "Unknown genre"
-msgstr ""
+msgstr "不明なジャンル"
 
 #: src/libbrowse.c
 msgid "Unknown year"
-msgstr ""
+msgstr "不明な年"
 
 #: src/browser.c
 msgid "Queue: PLAY next, MENU add"
-msgstr ""
+msgstr "キュー：PLAYで次に、MENUで追加"
 
 #: src/browser.c
 msgid "The queue is full"
-msgstr ""
+msgstr "キューがいっぱいです"
 
 #: src/browser.c
 msgid "No room for NEWFWQ.DAT"
-msgstr ""
+msgstr "NEWFWQ.DATの空きがありません"
 
 #: src/browser.c
 #, c-format
 msgid "Next: %d tracks"
-msgstr ""
+msgstr "次に再生：%d曲"
 
 #: src/browser.c
 #, c-format
 msgid "Added: %d tracks"
-msgstr ""
+msgstr "追加：%d曲"
 
 #: src/menu.c src/qscreen.c
 msgid "Play queue"
-msgstr ""
+msgstr "再生キュー"
 
 #: src/qscreen.c
 msgid "Empty the queue (the track playing kept)"
-msgstr ""
+msgstr "キューを空にする（再生中の曲は残す）"
 
 #: src/queue.c
 msgid "Queue"
-msgstr ""
+msgstr "キュー"
 
 #: src/qscreen.c
 msgid "Queue emptied"
-msgstr ""
+msgstr "キューを空にしました"
 
 #: src/libbrowse.c
 msgid "SD card not in the library: PLAY to update"
-msgstr ""
+msgstr "SDカード未登録：PLAYで更新"
 
 #: src/libbrowse.c
 msgid "Update the library"
-msgstr ""
+msgstr "ライブラリを更新"
 
 #: src/libbrowse.c
 msgid "SD card not readable (FAT32 or exFAT only)"
-msgstr ""
+msgstr "SDカードを読み込めません（FAT32/exFATのみ）"
