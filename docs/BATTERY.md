@@ -8,6 +8,14 @@ firmware logs the battery voltage once a minute, and powers off when the battery
 ![Battery voltage against time on battery, one line a version](battery/battery-life.svg)
 
 <!-- runs -->
+| Version | Date | Start | Hours on battery | Hours to 3.6 V | End | Played | Screen on | Cable |
+|---|---|---|---|---|---|---|---|---|
+| 0.72 | 2026-10-25 | 4.18 V | 8.2 | - | none (log ends) | 8.2 h: Opus 54 %, Vorbis 38 %, MP3 6 %, WAV 2 %, FLAC 0 % | 22 min | 0 min |
+| 0.80 | 2026-10-26 | 4.18 V | 15.6 | 10.0 | battery empty | 15.5 h: Vorbis 44 %, MP3 42 %, FLAC 13 %, MPC 1 % | 9 min | 11 min |
+| 0.87fx1 | 2026-10-28 | 4.18 V | 7.3 | - | none (log ends) | 7.7 h: Vorbis 45 %, FLAC 27 %, MP3 20 %, MPC 9 % | 17 min | 0 min |
+| 0.95 | 2026-10-29 | 4.18 V | 10.1 | 8.9 | no key for 10 min | 10.1 h: Vorbis 47 %, FLAC 28 %, MP3 16 %, MPC 9 % | 100 min | 0 min |
+| 0.99r37 | 2026-11-06 | 4.19 V | 14.6 | 9.3 | battery empty | 14.6 h: MP3 72 %, Opus 23 %, Vorbis 5 %, MPC 1 % | 5 min | 0 min |
+| 0.104k1 | 2026-11-12 | 4.19 V | 14.5 | 9.4 | battery empty | 14.5 h: MP3 54 %, Opus 23 %, Vorbis 23 % | 0 min | 0 min |
 <!-- /runs -->
 
 - **Hours on battery**: from the first battery line without the USB cable to the last one.
@@ -24,6 +32,19 @@ firmware logs the battery voltage once a minute, and powers off when the battery
 
 The runs are not controlled measurements: the music, the volume, the headphones and the age of
 the battery change from one run to the next. Read the table as a trend, not as a benchmark.
+
+## What the runs show
+
+- **0.99r37 and 0.104k1**, the two full runs with the screen off nearly all the time, last the
+  same: 14.6 h and 14.5 h, 9.3 h and 9.4 h to 3.6 V. Over the first 14 hours their curves stay
+  within 15 mV of each other (5 mV on average; 3.85 V after 4 h, 3.63 V after 8 h, 3.53 V after
+  12 h, 3.40 V after 14.2 h), then part by up to 34 mV in the last minutes, where the voltage
+  falls fast. Between them came the screen drawn by DMA, the code overlays and the keys read
+  in the SysTick interrupt (0.104k1): none of them shows in the battery life. 0.104k1 played
+  more Vorbis (23 % against 5 %, the heaviest format for core B), which does not show either.
+- **0.80** ran an hour longer (15.6 h), with 11 minutes on the cable that charged it meanwhile.
+- **0.95**, with 100 minutes of screen on, reached 3.6 V after 8.9 h instead of 9.3 to 10: the
+  backlight costs more than the decoding.
 
 ## Adding a run
 

@@ -215,8 +215,8 @@ def plot(d):
     doc = os.path.join(TOOLS, "..", "..", "docs", "BATTERY.md")
     if os.path.exists(doc):
         s = open(doc).read()
-        s = re.sub(r"(<!-- runs -->\n).*?(\n<!-- /runs -->)",
-                   lambda m: m.group(1) + table + m.group(2), s, flags=re.S)
+        s = re.sub(r"(<!-- runs -->\n)(?:.*?\n)?(<!-- /runs -->)",    # empty or not
+                   lambda m: m.group(1) + table + "\n" + m.group(2), s, flags=re.S)
         open(doc, "w").write(s)
     print(table)
 
