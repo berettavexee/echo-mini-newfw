@@ -44,6 +44,7 @@ def sessions(paths):
             if "=== boot" in ln:
                 m = re.search(r"newfw (\S+) ", ln)
                 ver, rtc, cur = (m.group(1) if m else None), None, None
+                screen_t = None                 # a screen left on by the last boot
                 continue
             m = re.search(r"rtc \(boot\): (\S+ \S+)", ln)
             if m:
@@ -73,7 +74,7 @@ def sessions(paths):
                 cur["fmt"][round(t)] = (codec, int(m.group(1)))
             if "screen on" in ln and t is not None:
                 screen_t = t
-            if "screen off" in ln and t is not None and screen_t is not None:
+            if "screen off" in ln and t is not None and screen_t is not None and t >= screen_t:
                 cur["screen"][round(screen_t)] = t - screen_t
                 screen_t = None
     return found

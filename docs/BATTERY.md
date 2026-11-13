@@ -15,6 +15,7 @@ firmware logs the battery voltage once a minute, and powers off when the battery
 | 0.87fx1 | 2026-10-28 | 4.18 V | 7.3 | - | none (log ends) | 7.7 h: Vorbis 45 %, FLAC 27 %, MP3 20 %, MPC 9 % | 17 min | 0 min |
 | 0.95 | 2026-10-29 | 4.18 V | 10.1 | 8.9 | no key for 10 min | 10.1 h: Vorbis 47 %, FLAC 28 %, MP3 16 %, MPC 9 % | 100 min | 0 min |
 | 0.99r37 | 2026-11-06 | 4.19 V | 14.6 | 9.3 | battery empty | 14.6 h: MP3 72 %, Opus 23 %, Vorbis 5 %, MPC 1 % | 5 min | 0 min |
+| 0.104b1 | 2026-11-12 | 4.17 V | 14.6 | 9.3 | battery empty | 14.5 h: MP3 63 %, Opus 31 %, Vorbis 4 %, MPC 2 %, AAC 0 % | 0 min | 0 min |
 | 0.104k1 | 2026-11-12 | 4.19 V | 14.5 | 9.4 | battery empty | 14.5 h: MP3 54 %, Opus 23 %, Vorbis 23 % | 0 min | 0 min |
 <!-- /runs -->
 
@@ -42,6 +43,13 @@ the battery change from one run to the next. Read the table as a trend, not as a
   falls fast. Between them came the screen drawn by DMA, the code overlays and the keys read
   in the SysTick interrupt (0.104k1): none of them shows in the battery life. 0.104k1 played
   more Vorbis (23 % against 5 %, the heaviest format for core B), which does not show either.
+- **0.104b1**, with core A at 100 MHz instead of 200 while the music plays with the screen off
+  (since 0.104a1; 99 % of the run, 371 switches, core A busy 10 % on average), lasts the same
+  as 0.104k1: 14.6 h, 9.3 h to 3.6 V. Its curve stays 5 to 15 mV under 0.104k1's, about the
+  15 mV it started lower (4.174 V against 4.189 V). Core A sleeps (WFI) 90 % of the time, and
+  the rest of the chip (PLL, buses, core B, DACs, memories) draws the same at either speed:
+  without a lower core voltage (the board's DC-DC is not driven by the firmware), the lower
+  clock saves too little to show.
 - **0.80** ran an hour longer (15.6 h), with 11 minutes on the cable that charged it meanwhile.
 - **0.95**, with 100 minutes of screen on, reached 3.6 V after 8.9 h instead of 9.3 to 10: the
   backlight costs more than the decoding.
