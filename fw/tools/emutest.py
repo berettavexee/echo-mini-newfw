@@ -120,6 +120,10 @@ TESTS = {
                                 (6000, "PLAY")),
                       expect=[r"ovl: USB from FW1 in \d+ us", r"uac: start", r"screen off",
                               r"uac: exit \(Power 2 s\)", r"power off \(Power 2 s\)"]),
+    # switched on by the cable (the charging screen, ETUDE §48): its text and gauge drawn again
+    # twice a second without a flicker (0.104b1, §142: the text was erased, then drawn)
+    "charge-screen": dict(files={"A.WAV": "wav"}, ms=8000, keys="", emu_args=["--vbus", "1"],
+                          expect=[r"-- panel: \d+ full redraws .*, 0 flickers .*, 0 on full clears"]),
     # the sound card left by BACK held: its overlay was over the directory listing (ETUDE §137),
     # read again for the browser
     "uac-back": dict(files={"A.WAV": "wav"}, ms=12000,
@@ -1190,6 +1194,10 @@ def main():
     if len(args) < 2:
         sys.exit(__doc__)
     img, elf = os.path.abspath(args[0]), os.path.abspath(args[1])
+    chk = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--check-elf"],
+                         capture_output=True, text=True)
+    if chk.returncode:                          # a stale ELF: every test would go astray
+        sys.exit(chk.stdout.strip() or chk.stderr.strip()[-300:])
     names = args[2:] or [n for n in TESTS if not TESTS[n].get("fault") and
                          not TESTS[n].get("hwtest") and not TESTS[n].get("libcreate")]
     failed = 0

@@ -247,20 +247,33 @@ One line per version; the measurements are in `ETUDE.md`.
   1. volumes generated on demand (a sparse disk whose files, valid FLAC frames, are made when
      read): libraries larger than the PC's RAM, cluster sizes (512 bytes), the files a Mac leaves
      (Spotlight, fseventsd, `._` files);
-  2. sector reads counted by phase (FAT or data), to catch regressions;
-  3. a finer panel model: drawing windows and sweeps followed, full redraws and flicker counted,
-     the time of the first frame;
-  4. a check that the ELF matches the image (wrong symbols otherwise);
+  2. ~~sector reads counted by phase~~: done (§144, "-- eMMC reads:" FAT, folders, files,
+     firmware, other); bounds per test still to set;
+  3. ~~a finer panel model~~: done (§144): full redraws, the first frame's time, flickers
+     counted (test `charge-screen`); left: the flickers of screen changes and of the list's mark
+     column (`browser.c` `draw_row`), to fix on a proposal;
+  4. ~~a check that the ELF matches the image~~: done (§144, `--check-elf`, once in emutest);
   5. a simulated USB host (enumeration, bulk and isochronous transfers, feedback, the HID
      reports), to test the USB disk and the sound card without the device (today `uac-power`,
      `uac-back` and `usb-disk` only enter and leave their screens: 0.103o1's USB disk fault,
      §137, showed only on the device);
   6. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
+  Also done (§144): `--foreign`, another firmware without an ELF (RECHO 0.10.1 runs: its
+  screens, keys and files, its core B not run), for comparisons.
 - Output and DAC settings (CS43131 registers, little code each):
   - headphone gain low / high (low suits sensitive in-ear monitors);
   - volume limiter (an adjustable ceiling);
   - digital filter of the DAC (the stock firmware offers fast or slow roll-off, minimum or
-    linear phase, and no oversampling);
+    linear phase, and no oversampling). `PCM_FILT_OPT` (`0x090000`): bit 7 slow/fast, bit 6
+    phase-compensated/low-latency, bit 5 NOS, with the datasheet's pop-free NOS sequence
+    (§5.9); we write `0x02` today (fast, low latency, high-pass on). Audio Science Review's
+    review of CS431xx devices ("On the distortion of Cirrus Logic CS431xx based devices",
+    2025) found a level-dependent distortion rise (the "Cirrus hump", up to about 0.06 %) on
+    several CS43131/CS43198 products, blamed on the chip's DRE; NOS mode is reported to avoid
+    it. Whether the ECHO MINI shows it is unknown (needs an audio analyser). The DRE itself is
+    not documented (`DRE_EN` is named only as a test condition in the datasheet), so it is not
+    touched. NOS costs treble (−3 dB near 0.44 Fs) and leaves the images above Fs/2 unfiltered:
+    a choice left to the listener, off by default;
   - left/right balance (the stock firmware corrects each DAC, ETUDE §3.5).
 - Music features of the stock firmware:
   - media library: done in 0.103 (§121-§129, the table above); left: the folders played with

@@ -1,5 +1,7 @@
 #!/bin/sh
-# build.sh ogg|vorbis|opus|vorbis-heap|mp3|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]
+# build.sh ogg|vorbis|opus|vorbis-heap|mp3|flac|alac|alac-ns|mpc|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]
+# flac, alac, mpc: codec_flac.c (dr_flac), mp4.c + codec_alac.c + alacdec.c, codec_mpc.c + libmpcdec;
+# the accelerators (ECHO_HIFIACC, ECHO_SYNTH) are off, ECHO_NO_HWALAC stubs the ALAC one.
 # Host builds of the core B Ogg code for fuzz_host.c (docs/FUZZING.md). ogg, vorbis and opus:
 # ASan + UBSan (signed shifts and Tremor's deliberate overflows left out), trace-pc coverage on
 # the code under test only. vorbis-heap: core B's own hifi/heap.c in place of libc malloc, no
@@ -44,11 +46,21 @@ aac|aacpkt)
         DEF="-DT_$(echo $T | tr a-z A-Z) -DECHO_NO_HWFFT -DOSCL_IMPORT_REF= -DOSCL_EXPORT_REF="; INC="-I$FW/src -I$PA"
         SRC="$FW/hifi/codec_aac.c $(ls $PA/*.cpp)"
         [ $T = aac ] && SRC="$FW/src/mp4.c $SRC";;
+flac)   REN="-Wno-error=incompatible-pointer-types"   # dr_flac: uint64_t * vs unsigned long long * on the PC
+        DEF="-DT_FLAC"; INC="-I$FW/hifi"; SRC="$FW/hifi/codec_flac.c";;
+alac|alac-ns)   DEF="-DT_ALAC -DECHO_NO_HWALAC"; INC="-I$FW/src"; SRC="$FW/src/mp4.c $FW/hifi/codec_alac.c $FW/hifi/alacdec.c";;
+mpc)    PC=${MPC_DIR:-$TP/libmpcdec}; REN="-fcommon"      # codec_mpc.c: see CMPC below
+        DEF="-DT_MPC -DMPC_FIXED_POINT"; INC="-I$PC/include -I$PC"
+        SRC="$FW/hifi/codec_mpc.c"
+        for f in huffman mpc_bits_reader mpc_decoder mpc_demux requant streaminfo synth_filter; do SRC="$SRC $PC/$f.c"; done;;
 mp3)    PM=$TP/pvmp3dec
         DEF=-DT_MP3; INC="-I$PM/include -I$PM/src"
         SRC="$FW/hifi/codec_mp3.c $(ls $PM/src/*.cpp)";;
-*) echo "usage: build.sh ogg|vorbis|opus|vorbis-heap|mp3|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]"; exit 1;;
+*) echo "usage: build.sh ogg|vorbis|opus|vorbis-heap|mp3|flac|alac|mpc|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]"; exit 1;;
 esac
+# alac-ns: alac without the shift-exponent check; alacdec.c shifts by 32 or more on odd streams
+# (as the Apple reference does, and as ARM defines it), which stops the run before the real bugs
+[ "$T" = alac-ns ] && SAN="$SAN -fno-sanitize=shift-exponent"
 OBJS=""
 # the PacketVideo decoders are C++ (no exceptions, no RTTI), as in the firmware Makefile, but
 # without PV_ARM_GCC_V5: their portable C fixed-point operations instead of the ARM ones
@@ -57,6 +69,10 @@ CXXF="${OPT:--O1} -g -w -funsigned-char -fno-exceptions -fno-rtti -Wno-narrowing
 # a table on their last pass, a value never used (docs/FUZZING.md, "Limits")
 NOASAN="trans4m_freq_2_time_fxp.cpp"
 SAN_NA=$(echo "$SAN" | sed 's/address,//')
+# codec_mpc.c defines the C library functions libmpcdec needs (malloc over core B's heap, a stub
+# pow and sprintf...); on the PC they would replace libc's and recurse. Renamed there, libmpcdec
+# then calls libc's: ASan sees its blocks.
+CMPC="-Dmalloc=mpc_malloc -Dcalloc=mpc_calloc -Dfree=mpc_free -Dsprintf=mpc_sprintf"
 for s in $SRC; do
   case " $NOASAN " in *" $(basename $s) "*) S=$SAN_NA;; *) S=$SAN;; esac
   case $s in
@@ -65,7 +81,8 @@ for s in $SRC; do
          # valid files (ms_synt.cpp); not a memory error, so not checked here
          g++ $CXXF $S -fno-sanitize=shift $COV $DEF $INC -c $s -o $o;;
   *)     o=$OUT/$(basename $(dirname $s))_$(basename $s .c).o
-         gcc $CF $S $COV $DEF $INC $REN -c $s -o $o;;
+         X=""; [ "$T:$(basename $s)" = mpc:codec_mpc.c ] && X=$CMPC
+         gcc $CF $S $COV $DEF $INC $REN $X -c $s -o $o;;
   esac
   OBJS="$OBJS $o"
 done
