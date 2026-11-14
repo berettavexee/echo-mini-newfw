@@ -14,7 +14,8 @@ with gapless playback and ReplayGain.
   any sample rate from 8 to 192 kHz, played as it is.
 - **Gapless playback** and **ReplayGain** (album, track or auto, with a preamp).
 - **Folder browser** with long names, on the internal memory and the microSD card (FAT32 or
-  exFAT). Play a whole folder tree, in order or shuffled.
+  exFAT). Play a whole folder tree, in order or shuffled. Long lists scroll faster when a
+  volume key is held, then letter by letter.
 - **Music library** by its tags: artists, albums, years, genres, all songs; built on the player
   (about 3 minutes for 18,000 tracks, then seconds when nothing changed), the internal memory
   and the microSD card together.
@@ -46,7 +47,7 @@ with gapless playback and ReplayGain.
 
 ## Getting started
 
-1. Download `NEWFW105.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
+1. Download `NEWFW106.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
 2. Follow [Installing](MANUAL.md#installing) in the manual.
 3. The [manual](MANUAL.md) shows the keys of each screen.
 
@@ -78,7 +79,7 @@ Vorbis, AAC, Musepack and (0.101) ALAC decoders run on the chip's accelerators (
 | ALAC (M4A) | 16 bits, 44.1 kHz, stereo | 9-10 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
 | ALAC (M4A) | 24 bits, 96 kHz, stereo | 27 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
 | Musepack | SV7 and SV8, ~180 kb/s, 44.1 kHz | 10-11 MHz (50 MHz) | libmpcdec, synthesis on SYNTH (0.93) |
-| WavPack | 16 bits, 44.1 kHz: fast, normal, high, very high | 27, 33, 45, 58 MHz (50-80 MHz) | libwavpack 5.9.0, decorrelation in Thumb-2 assembly (0.105wv3) |
+| WavPack | 16 bits, 44.1 kHz: fast, normal, high, very high | 27, 33, 45, 58 MHz (50-80 MHz) | libwavpack 5.9.0, decorrelation in Thumb-2 assembly (0.106) |
 | WavPack | 24 bits, 96 kHz: high, very high | 111, 141 MHz (200 MHz) | the same |
 | WavPack | 24 bits, 192 kHz: fast, normal (high and very high: refused, too heavy) | 145, 174 MHz (200 MHz) | the same |
 

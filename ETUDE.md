@@ -4956,3 +4956,7 @@ Demande : le format restant le plus rapide à ajouter ; proposition écrite (Wav
 
 **Pistes pour aller plus loin**, non faites : le décodage entropique (un sixième du temps) en assembleur ; une horloge du cœur B au-delà de 200 MHz (le firmware d'origine va vers 300-350 MHz), une étude à part.
 
+## 158. Version 0.106 (2026-11-15)
+
+Publiée à la demande de l'utilisateur, les notes de version montrées avant la publication. Le code de l'image de test 0.105wv5 (WavPack, le défilement accéléré, BACK en pause, les icônes System et Play queue), après les essais sur l'appareil de 0.105i1 à i3 et wv1 à wv5 (« tout fonctionne ») ; seuls le numéro de version et la date changent. Contenu : §154 à §157.
+
