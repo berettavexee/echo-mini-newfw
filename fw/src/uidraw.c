@@ -233,6 +233,46 @@ void list_move(int *sel, int *top, int n, int rows, int d)
         *top = *sel - rows + 1;
 }
 
+/* A list's key (VOL+/VOL-, ev its EV_*), §155: a press moves one row and wraps around; held in
+ * a list of more than two pages, one row each repeat (90 ms), then a page from 1.5 s (8 a
+ * second), then from 3 s a letter (3 a second: letter(sel, d) gives the row, -1: the list is not
+ * sorted by a name, pages then), and no wrap (from the last row to the first only by a press).
+ * Returns LS_* : what it did. */
+int list_step(int *sel, int *top, int n, int rows, int d, int ev, int (*letter)(int from, int d))
+{
+    static uint32_t t_last;
+    if (ev != EV_REPEAT || n <= 2 * rows) {
+        list_move(sel, top, n, rows, d);
+        return LS_ROW;
+    }
+    uint32_t now = millis(), held = key_held_us() / 1000;
+    int to = -1, how = LS_ROW;
+    if (held >= 3000 && letter) {
+        if (now - t_last < 330)
+            return LS_NONE;
+        to = letter(*sel, d);
+        how = LS_LETTER;
+    }
+    if (to < 0 && held >= 1500) {
+        if (now - t_last < 120)
+            return LS_NONE;
+        to = *sel + d * rows;
+        how = LS_PAGE;
+    } else if (to < 0)
+        to = *sel + d;
+    t_last = now;
+    if (to < 0)
+        to = 0;
+    if (to >= n)
+        to = n - 1;
+    if (to == *sel)
+        return how == LS_LETTER ? LS_LETTER : LS_NONE;
+    list_move(sel, top, n, rows, to - *sel);
+    if (how == LS_LETTER)                       /* the initial's rows below it */
+        *top = to < n - rows ? to : n - rows;
+    return how;
+}
+
 /* The column of a list's mark (22 pixels): the note of the track playing, or blank; each pixel
  * once (a fill of the column, then the note, flickered: ETUDE §144) */
 void list_mark(int y, int on, uint16_t bg)

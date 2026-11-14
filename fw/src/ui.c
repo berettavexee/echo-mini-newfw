@@ -416,7 +416,9 @@ void ui_main(void)
             lcd_text(8, 100, T("plug the USB cable"), DIM, BG);
         }
         if (fail_due) {                         /* nothing could be played: why, 3 s, then the */
-            fail_due = 0;                       /* browser */
+            int fd = fail_due;                  /* browser */
+            fail_due = 0;
+            log_printf("ui: cannot play: %s%s", fail_name, fd == 2 ? " (passed over)" : "");
             banner_ms = millis() ? millis() : 1;
             sys_screen_set(1);
             t_key = ticks();
@@ -427,7 +429,8 @@ void ui_main(void)
             lcd_text_clip(8, 62, fail_name, LCD_W - 8, FG, BG);
             lcd_text_clip(8, 92, tr(what), LCD_W - 8, FG, BG);
             lcd_text_clip(8, 118, tr(hint), LCD_W - 8, DIM, BG);
-            scr = SCR_BROWSER;
+            if (fd == 1)                        /* 2: a track passed over, the next plays */
+                scr = SCR_BROWSER;
         }
         if (crash_due) {                        /* the last session ended on a fault (0.99r32): */
             crash_due = 0;                      /* once, 3 s */
@@ -554,6 +557,8 @@ void ui_main(void)
             drawn_gen = heard_gen;
             full = b_dirty = 1;
         }
+        if (scr == SCR_BROWSER && !scr_n && browser_letter_done())
+            full = 1;                           /* the big letter off at once (§155) */
         /* Drawing: at most one frame every 33 ms (30/s, key repeat included), the periodic
          * refresh 4/s (play screen) or 2/s, nothing while the screen is off */
         if (scr_n && !sys_screen_is_off() && !banner_ms) {

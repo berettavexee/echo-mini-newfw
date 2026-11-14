@@ -311,7 +311,7 @@ static uint32_t name_id(const char *s)
 /* ---- the scan ---- */
 /* the tags read, per codec, and the slowest files (where a build's time goes: the log) */
 struct fs { uint32_t files, sectors, ms; };
-static struct fst { struct fs by[10]; struct { uint32_t ms, sectors; char name[48]; } slow[3]; }
+static struct fst { struct fs by[11]; struct { uint32_t ms, sectors; char name[48]; } slow[3]; }
     *const fst = (struct fst *)(HR + 0x5f000);
 static void tags_wait(void)                     /* before each read of tags_read() */
 {
@@ -410,7 +410,7 @@ static void fields(const struct fat_dirent *e, uint32_t codec, uint32_t *track, 
     uint32_t t0 = ticks(), s0 = sd_io.sectors + emmc_io.sectors;
     tags_read(&f, codec, tgp);
     uint32_t ms = (ticks() - t0) / 1000, secs = sd_io.sectors + emmc_io.sectors - s0;
-    struct fs *c = &fst->by[codec < 10 ? codec : 0];
+    struct fs *c = &fst->by[codec < 11 ? codec : 0];
     c->files++;
     c->sectors += secs;
     c->ms += ms;
@@ -1294,9 +1294,9 @@ int lib_build(const struct lb_hooks *h, struct lb_result *res)
                "sectors, %u ms", sd_io.cmds - io_sd0.cmds, sd_io.sectors - io_sd0.sectors,
                (sd_io.us - io_sd0.us) / 1000, emmc_io.cmds - io_mmc0.cmds,
                emmc_io.sectors - io_mmc0.sectors, (emmc_io.us - io_mmc0.us) / 1000);
-    static const char *const cn[10] = { "?", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF",
-                                        "M4A", "ALAC", "MPC" };
-    for (int k = 0; k < 10; k++)
+    static const char *const cn[11] = { "?", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF",
+                                        "M4A", "ALAC", "MPC", "WavPack" };
+    for (int k = 0; k < 11; k++)
         if (fst->by[k].files)
             log_printf("library: tags of %u %s files: %u sectors, %u ms (%u KiB, %u ms a file)",
                        fst->by[k].files, cn[k], fst->by[k].sectors, fst->by[k].ms,

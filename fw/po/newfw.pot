@@ -533,6 +533,15 @@ msgid "Not supported: no sample rate"
 msgstr ""
 
 #: src/playback.c
+msgid "Not supported: DSD audio"
+msgstr ""
+
+#. TRANSLATORS: a WavPack file whose mode and rate need more than the decoding core has
+#: src/playback.c
+msgid "Not supported: too heavy to decode in real time"
+msgstr ""
+
+#: src/playback.c
 msgid "Check the file on a computer"
 msgstr ""
 
@@ -558,6 +567,11 @@ msgstr ""
 
 #: src/playback.c
 msgid "Convert it to stereo"
+msgstr ""
+
+#. TRANSLATORS: a WavPack file too heavy to play (wavpack's options)
+#: src/playback.c
+msgid "Encode it again with wavpack -f, or as FLAC"
 msgstr ""
 
 #: src/playback.c

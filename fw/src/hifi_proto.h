@@ -52,7 +52,8 @@ enum hp_err {
  * (REFUSE, rt.h) or by core A's MP4 reader; HP_WHY_NONE: the error alone says it */
 enum hp_why {
     HP_WHY_NONE, HP_WHY_CHANNELS, HP_WHY_BITS, HP_WHY_FLOAT, HP_WHY_COMPRESSED, HP_WHY_HEAAC,
-    HP_WHY_AAC_TYPE, HP_WHY_MP4_CODEC, HP_WHY_OPUS_MAPPING, HP_WHY_MEMORY, HP_WHY_RATE,
+    HP_WHY_AAC_TYPE, HP_WHY_MP4_CODEC, HP_WHY_OPUS_MAPPING, HP_WHY_MEMORY, HP_WHY_RATE, HP_WHY_DSD,
+    HP_WHY_HEAVY,
 };
 
 struct hp_ctl {
@@ -264,7 +265,7 @@ enum { BP_SYS_RD = 1, BP_SYS_WR, BP_DRAM_RD, BP_PMU_RD, BP_PMU_WR, BP_SAR, BP_SY
  * it, which reads both containers (hifi/codec_pcm.c). HP_CODEC_AAC and HP_CODEC_ALAC: in MP4, fed
  * by core A as a packet stream (below); the browser gives AAC to every M4A, the container says. */
 enum hp_codec { HP_CODEC_WAV = 1, HP_CODEC_FLAC, HP_CODEC_MP3, HP_CODEC_VORBIS, HP_CODEC_OPUS,
-                HP_CODEC_AIFF, HP_CODEC_AAC, HP_CODEC_ALAC, HP_CODEC_MPC };
+                HP_CODEC_AIFF, HP_CODEC_AAC, HP_CODEC_ALAC, HP_CODEC_MPC, HP_CODEC_WAVPACK };
 
 /* Packet stream (MP4 audio, ETUDE §55): core A reads the container and its tables and writes
  * into the input ring this header, the decoder configuration (AAC: the AudioSpecificConfig),

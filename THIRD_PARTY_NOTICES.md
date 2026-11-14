@@ -9,6 +9,7 @@ named below; they apply to the image as well as to the sources.
 | libopus 1.5.2 (decoder) | Opus | Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon (2001-2023) | BSD-3-Clause | `third_party/opus/COPYING` |
 | Tremor (lowmem branch, patched) | Ogg Vorbis | Xiph.org Foundation (2002) | BSD-3-Clause | `third_party/tremor-lowmem/COPYING` |
 | libmpcdec | Musepack | The Musepack Development Team (2005) | BSD-3-Clause | `third_party/libmpcdec/COPYING` |
+| libwavpack 5.9.0 (decoder), and its ARM assembly ported to Thumb-2 in `fw/hifi/wvasm/` | WavPack | David Bryant (1998-2025) | BSD-3-Clause | `third_party/wavpack/COPYING` |
 | pvmp3dec (AOSP), and its ARM assembly ported to Thumb-2 in `fw/hifi/mp3asm/` | MP3 | PacketVideo (1998-2009), The Android Open Source Project (2005-2008) | Apache-2.0 | `third_party/pvmp3dec/NOTICE` |
 | pvaacdec (AOSP) | AAC | PacketVideo, The Android Open Source Project (2005-2008) | Apache-2.0 | `third_party/pvaacdec/NOTICE` |
 | Apple ALAC decoder, and `fw/hifi/alacdec.c` and `alacdec.h` derived from it | ALAC | Apple Inc. (2011) | Apache-2.0 | `third_party/alac/LICENSE` |
@@ -17,6 +18,7 @@ named below; they apply to the image as well as to the sources.
 
 The files derived from Apache-2.0 code (`fw/hifi/mp3asm/*.S`, `fw/hifi/alacdec.c`,
 `fw/hifi/alacdec.h`) stay under Apache-2.0 and say so in their header, with what was changed for
-this firmware.
+this firmware. `fw/hifi/wvasm/unpack_thumb2.S`, derived from libwavpack's `unpack_armv7.S`, stays
+under its BSD-3-Clause licence, likewise.
 
 Everything else in this repository is under the MIT License (`LICENSE`).

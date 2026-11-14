@@ -1,0 +1,17 @@
+libwavpack, the WavPack library, from the release 5.9.0 (https://github.com/dbry/WavPack/releases/
+tag/5.9.0, wavpack-5.9.0.tar.xz, SHA-256
+b5291bc4e6d69ebbd3da3800c5bf4a70f19bb92679b23e09b3b612c1e648d1ff): the decoder's files of src/
+(open_utils, unpack, unpack_utils, unpack_floats, unpack_seek, read_words, common_utils,
+decorr_utils, entropy_utils, wavpack_local.h, wavpack_version.h) and include/wavpack.h only.
+BSD 3-clause licence (see COPYING). Built for core B with NO_TAGS (core A reads the APEv2 tag
+itself), without ENABLE_DSD, ENABLE_LEGACY (files before 4.0) or ENABLE_THREADS, and with
+OPT_ASM_ARM: its src/unpack_armv7.S, ported to Thumb-2 (core B is a Cortex-M3), is
+fw/hifi/wvasm/unpack_thumb2.S. The few C library functions it uses (strcpy, strncmp, labs,
+newlib's character table) and malloc (core B's heap, fw/hifi/heap.c, a failure stopping core B)
+are provided by fw/hifi/codec_wavpack.c. ETUDE §156-§157. Two changes, marked "ECHO MINI", under
+-DECHO_MINI:
+- wavpack_local.h: apply_weight() always takes the 64-bit product (one SMULL on the Cortex-M3),
+  one of the variants the file gives as producing identical results;
+- unpack_seek.c: a seek skips to its sample in pieces of 1024 samples, through a buffer of 8 KiB:
+  the original allocates one buffer for the whole skip (up to 1 MiB), which core B's heap does
+  not hold (a failed allocation, not checked, then wrote through 0 into the code).

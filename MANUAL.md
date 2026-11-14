@@ -1,6 +1,6 @@
 # User manual
 
-This manual is for the ECHO MINI new firmware, version 0.105. It describes what the player shows
+This manual is for the ECHO MINI new firmware, version 0.106. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
 The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing a few
@@ -41,7 +41,9 @@ Each key knows three gestures:
 
 - a **press**: a short press, counted when the key is released;
 - a **long press**: PLAY, BACK and MENU held for 0.6 s;
-- a **held** VOL+ or VOL-: repeats from 0.45 s, about ten steps a second.
+- a **held** VOL+ or VOL-: repeats from 0.45 s, about ten steps a second. In a list of more
+  than two screens, the steps grow: a screen at a time after 1.5 s, then after 3 s a letter at
+  a time (see the folder browser).
 
 **VOL+ and VOL- together**, the "chord", opens the seek mode on the play screen. Press and hold
 **VOL+ first, then press VOL-** while still holding VOL+, and release both. The other order does
@@ -100,7 +102,7 @@ From top to bottom:
 |---|---|
 | **PLAY** | pause / play |
 | **PLAY held** | next track. On the last track (play mode "in order"), it stops; PLAY then plays that last track again from its start |
-| **BACK** | back to the start of the track; within its first 3 s, the track before (in shuffle: the one heard before). So a double press of BACK goes to the track before |
+| **BACK** | back to the start of the track; within its first 3 s, the track before (in shuffle: the one heard before). So a double press of BACK goes to the track before. In a pause, the track stays paused at its start (the track before: its length shows once it plays) |
 | **BACK held** | next play mode: in order → repeat all → repeat one → shuffle → in order. Shuffle plays every track of the queue once, in a random order, then another order |
 | **VOL+** / **VOL-** | volume up / down, 1 dB a step (held: repeats) |
 | **VOL+ held, then VOL-** | seek mode (below) |
@@ -173,6 +175,16 @@ plays, the browser shows its progress bar at the bottom.
 | **BACK** | up one folder; at the top level, the main menu |
 | **MENU** | to the play screen |
 | **MENU held** | main menu |
+
+**A long list**: VOL+ or VOL- held moves one row at a time, then a screen at a time after
+1.5 s, then after 3 s from one initial to the next (VOL+: back to the start of the initial,
+then the one before), shown as a big letter in the middle of the screen. On release the list
+shows again, the first row of that letter at the top. A list held to its end stops on its
+last row (from the last row to the first only by a press). The letters follow each list's
+order: in the library an artist's "The" is skipped ("The Beatles" under B), an accented letter
+counts as its base letter (É under E), and the Albums list, in its artists' order, goes by the
+artist's initial; digits and signs come first, as "#". The tracks of an album, the years and
+the play queue go a screen at a time.
 
 PLAY held takes the whole tree, up to 4,000 folders with tracks and 8 levels of folders (a
 folder of more than about 550 tracks is cut). After a power off, the player resumes a track
@@ -401,12 +413,14 @@ the next one.
 | AAC | `.m4a`, `.m4b`, `.mp4` | AAC-LC, mono or stereo; iTunes tags and ReplayGain; gapless |
 | ALAC | `.m4a`, `.m4b`, `.mp4` | Apple Lossless, 16, 20 or 24 bits, mono or stereo; iTunes tags and ReplayGain |
 | Musepack | `.mpc`, `.mp+`, `.mpp` | SV7 and SV8; APEv2 tags and ReplayGain; gapless |
+| WavPack | `.wv` | lossless and hybrid (the `.wv` alone: its lossy part), every mode (fast to very high, `-x`), 8 to 32 bits and floating point, mono or stereo; APEv2 tags (else ID3v1) and ReplayGain; gapless. Not played: DSD in WavPack, more than 2 channels, and the files too heavy for the decoding core (24 bits at 176.4 or 192 kHz in high or very high mode): **Cannot play**, "too heavy to decode in real time", then the next track |
 
 Sample rates from 8 to 192 kHz: 8, 11.025, 12, 16, 22.05, 24, 32, 44.1, 48, 64, 88.2, 96, 128,
 176.4 and 192 kHz, played as they are; any other rate is upsampled on the HiFi core. Tracks play gapless: the next track is queued behind the
 end of the current one.
 
-Not supported yet: HE-AAC, AAC in `.aac` files; floating-point WAV and AIFF. Files of 4 GiB or more are not
+Not supported yet: HE-AAC, AAC in `.aac` files; floating-point WAV and AIFF; WavPack's
+correction files (`.wvc`) and DSD. Files of 4 GiB or more are not
 listed.
 
 Storage:
@@ -415,8 +429,8 @@ Storage:
 
 ## Installing
 
-1. Copy the image (`NEWFW105.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
-   instance `NEWFW105.IMG`) to the
+1. Copy the image (`NEWFW106.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
+   instance `NEWFW106.IMG`) to the
    root of the internal memory. Use the stock firmware's USB disk, or USB, "Disk, read/write"
    with this firmware.
 2. Main menu → System → **Install a firmware (.IMG)**:

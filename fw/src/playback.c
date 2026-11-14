@@ -118,6 +118,9 @@ static const char *const why_text[] = {
     [HP_WHY_OPUS_MAPPING] = N_("Not supported: multichannel Opus"),
     [HP_WHY_MEMORY] = N_("Not supported: too large for the memory"),
     [HP_WHY_RATE] = N_("Not supported: no sample rate"),
+    [HP_WHY_DSD] = N_("Not supported: DSD audio"),
+    /* TRANSLATORS: a WavPack file whose mode and rate need more than the decoding core has */
+    [HP_WHY_HEAVY] = N_("Not supported: too heavy to decode in real time"),
 };
 
 /* what and hint marked with N_(): tr() to show them (the log keeps the English) */
@@ -141,6 +144,8 @@ void fail_text(int code, uint32_t why, const char **what, const char **hint)
     case PLAYER_EUNSUPPORTED:
         *what = why_text[why < sizeof why_text / sizeof *why_text ? why : HP_WHY_NONE];
         *hint = why == HP_WHY_CHANNELS ? N_("Convert it to stereo") :
+                /* TRANSLATORS: a WavPack file too heavy to play (wavpack's options) */
+                why == HP_WHY_HEAVY ? N_("Encode it again with wavpack -f, or as FLAC") :
                 why == HP_WHY_HEAAC || why == HP_WHY_AAC_TYPE ?
                     N_("Convert it to AAC-LC, MP3 or Opus") :
                 N_("Convert it to FLAC, MP3, AAC-LC or Opus");
@@ -313,6 +318,17 @@ void play_stop(int how)
 
 /* Plays track i of the queue; one that does not open is passed over in the direction step (+1, or
  * -1 for BACK: a failing track before does not send it forward again) */
+/* A track too heavy for core B (§157) passed over, the next one playing: the "Cannot play"
+ * banner, the screen kept (fail_due 2) */
+static void heavy_notice(int i, int r)
+{
+    uint32_t w = player.why;
+    player.why = HP_WHY_HEAVY;
+    play_failed(q_name(i), r);
+    player.why = w;
+    fail_due = 2;
+}
+
 void play_step(int i, int step)
 {
     int keep = q_playing && audio.on;
@@ -326,9 +342,11 @@ void play_step(int i, int step)
         q_playing = 0;
         return;
     }
-    int r, r0 = 0, absent = 0;
+    int r, r0 = 0, absent = 0, heavy = -1, heavy_r = 0;
     uint32_t why0 = 0;
     while ((r = q_open(q_dec, keep)) < 0) {
+        if (r == PLAYER_EUNSUPPORTED && player.why == HP_WHY_HEAVY && heavy < 0)
+            heavy = q_dec, heavy_r = r;         /* too heavy (§157): said, then passed over */
         if (r == Q_EABSENT && ++absent <= q_n) {        /* a card not in: not a failure */
             q_dec += step;
             if (q_dec >= 0 && q_dec < q_n)
@@ -355,11 +373,54 @@ void play_step(int i, int step)
     q_cur = q_dec;                              /* chosen: shown at once, even while the DACs */
     tg = tg_next;                               /* change rate (published after it) */
     rg_apply();
+    if (heavy >= 0)
+        heavy_notice(heavy, heavy_r);
 }
 
 void play_index(int i)
 {
     play_step(i, 1);
+}
+
+/* BACK in a pause (ETUDE §154): track i at its start, parked, still paused (PLAY plays it from
+ * there); core B asleep as after a long pause. Another track: its tags read for the screen, its
+ * length not known until it plays (0: no bar). */
+void play_park_start(int i)
+{
+    uint32_t len = i == q_cur ? len_ms() : 0;
+    if (q_playing)
+        play_stop(STOP_NOW);                    /* from a pause: the DACs stay muted */
+    hifi_sleep();
+    if (i != q_cur) {
+        const struct entry *e = q_ent(i);
+        if (prep.state == PREP_RUNNING)
+            storage_drain();                    /* tags.c is not reentrant */
+        prep.state = PREP_NONE;
+        tg = (struct tags){ .rg_gain = { RG_NONE, RG_NONE } };
+        tg_key.ok = 0;
+        if (e && e->size && !(e->flags & F_OTHER) &&
+            (!(e->flags & F_SD) || (sd_present() && !sd_open()))) {
+            struct fat_file f;
+            copy_name(f.name, q_name(i), sizeof f.name);
+            f.vol = e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT;
+            f.contig = (e->flags & F_CONTIG) != 0;
+            f.cluster = e->cluster;
+            f.size = e->size;
+            fat_open(&f);
+            tags_read(&f, e->flags & F_CODEC, &tg_next);
+            tg = tg_next;                       /* kept for PLAY (q_open: the same file) */
+            tg_key.cluster = f.cluster;
+            tg_key.size = f.size;
+            tg_key.vol = f.vol;
+            tg_key.ok = 1;
+        }
+    }
+    q_cur = q_dec = i;
+    parked = 1;
+    parked_ms = 0;
+    parked_len = len;
+    log_printf("ui: back to the start of %d/%d, paused", i + 1, q_n);
+    resume_save_later();
 }
 
 /* Core B stopped on a fault, or stuck, in the middle of a track (rework step 7, 0.99r33): the
@@ -419,12 +480,18 @@ void ui_background(void)
     if (r == 1 || player.time_ms > 10000)
         q_errors = 0;                           /* it played: only failures in a row stop */
     int first = q_dec, err = r < 0 ? r : 0;     /* the first that failed, why */
-    int absent = 0;
+    int absent = 0, heavy = r == PLAYER_EUNSUPPORTED && player.why == HP_WHY_HEAVY ? q_dec : -1;
+    int heavy_r = r;
     for (int n = q_next_index(q_dec, 0); n >= 0; n = q_next_index(n, 0)) {
         q_dec = n;
         int o = q_open(q_dec, 2);
-        if (o == 0)
-            return;                             /* the next one, gapless when it can */
+        if (o == 0) {                           /* the next one, gapless when it can; a track */
+            if (heavy >= 0)                     /* too heavy before it: said (§157) */
+                heavy_notice(heavy, heavy_r);
+            return;
+        }
+        if (o == PLAYER_EUNSUPPORTED && heavy < 0 && player.why == HP_WHY_HEAVY)
+            heavy = q_dec, heavy_r = o;
         if (o == Q_EABSENT) {                   /* on a card that is not in: passed over */
             if (++absent <= q_n)
                 continue;

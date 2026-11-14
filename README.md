@@ -3,18 +3,19 @@
 [![check](https://github.com/berettavexee/echo-mini-newfw/actions/workflows/check.yml/badge.svg)](https://github.com/berettavexee/echo-mini-newfw/actions/workflows/check.yml)
 
 **An alternative firmware for the SNOWSKY ECHO MINI music player**, written from scratch.
-It plays more formats than the stock firmware — Opus, Ogg Vorbis, Musepack, ALAC and more —
+It plays more formats than the stock firmware — Opus, Ogg Vorbis, Musepack, WavPack, ALAC and more —
 with gapless playback and ReplayGain.
 
 ![The play screen](docs/manual/play-screen.png)
 
 ## What it does
 
-- **Formats**: WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A), Musepack;
+- **Formats**: WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, AAC and ALAC (M4A), Musepack, WavPack;
   any sample rate from 8 to 192 kHz, played as it is.
 - **Gapless playback** and **ReplayGain** (album, track or auto, with a preamp).
 - **Folder browser** with long names, on the internal memory and the microSD card (FAT32 or
-  exFAT). Play a whole folder tree, in order or shuffled.
+  exFAT). Play a whole folder tree, in order or shuffled. Long lists scroll faster when a
+  volume key is held, then letter by letter.
 - **Music library** by its tags: artists, albums, years, genres, all songs; built on the player
   (about 3 minutes for 18,000 tracks, then seconds when nothing changed), the internal memory
   and the microSD card together.
@@ -46,7 +47,7 @@ with gapless playback and ReplayGain.
 
 ## Getting started
 
-1. Download `NEWFW105.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
+1. Download `NEWFW106.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
 2. Follow [Installing](MANUAL.md#installing) in the manual.
 3. The [manual](MANUAL.md) shows the keys of each screen.
 
@@ -78,6 +79,9 @@ Vorbis, AAC, Musepack and (0.101) ALAC decoders run on the chip's accelerators (
 | ALAC (M4A) | 16 bits, 44.1 kHz, stereo | 9-10 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
 | ALAC (M4A) | 24 bits, 96 kHz, stereo | 27 MHz (50 MHz) | ours, derived from Apple's; its predictor on HIFIACC (0.101) |
 | Musepack | SV7 and SV8, ~180 kb/s, 44.1 kHz | 10-11 MHz (50 MHz) | libmpcdec, synthesis on SYNTH (0.93) |
+| WavPack | 16 bits, 44.1 kHz: fast, normal, high, very high | 27, 33, 45, 58 MHz (50-80 MHz) | libwavpack 5.9.0, decorrelation in Thumb-2 assembly (0.106) |
+| WavPack | 24 bits, 96 kHz: high, very high | 111, 141 MHz (200 MHz) | the same |
+| WavPack | 24 bits, 192 kHz: fast, normal (high and very high: refused, too heavy) | 145, 174 MHz (200 MHz) | the same |
 
 The load rises for a moment at the start of a track and after a seek (the top step until the
 DAC ring is full). Details and the test conditions: `ETUDE.md` (§52 to §61, accelerators §66 to §77). Sample rates from 8 to

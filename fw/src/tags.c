@@ -880,4 +880,9 @@ void tags_read(const struct fat_file *f, uint32_t codec, struct tags *t)
         mp4(t);
     else if (codec == HP_CODEC_MPC)
         apev2(t);
+    else if (codec == HP_CODEC_WAVPACK) {       /* APEv2, else ID3v1 (both at the end) */
+        apev2(t);
+        if (!t->title[0] && !t->artist[0])
+            id3v1(t);
+    }
 }

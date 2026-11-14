@@ -31,6 +31,7 @@ static const char *codec_name(uint32_t c)
 {
     static const char *const n[] = {           /* names: the same in every language */
         "", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF", "AAC", "ALAC", "MPC",
+        "WV",
     };
     return c < sizeof n / sizeof *n ? n[c] : "";
 }
@@ -236,7 +237,8 @@ void draw_playing(int full)
 }
 
 /* A key on the play screen: VOL+/VOL- volume, PLAY pause / play, PLAY held next track (stop past
- * the last), BACK start of the track or the one before, BACK held the play mode. Returns UI_*. */
+ * the last), BACK start of the track or the one before (paused: it stays so), BACK held the
+ * play mode. Returns UI_*. */
 int play_key(const struct key_ev *e)
 {
     int k = e->key, ev = e->type;
@@ -266,7 +268,10 @@ int play_key(const struct key_ev *e)
     } else if (k == KEY_BACK && ev == EV_PRESS) {
         if (q_n) {
             int prev = q_prev_index(q_cur);     /* shuffle: the one played before */
-            if (player_heard.time_ms > 3000 || prev < 0)
+            int start = now_ms() > 3000 || prev < 0;
+            if ((q_playing && audio_paused) || parked)
+                play_park_start(start ? q_cur : prev);  /* paused: it stays so (§154) */
+            else if (start)
                 play_index(q_cur);              /* back to the start of the track */
             else
                 play_step(prev, -1);

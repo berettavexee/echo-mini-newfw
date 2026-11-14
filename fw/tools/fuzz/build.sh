@@ -1,6 +1,7 @@
 #!/bin/sh
-# build.sh ogg|vorbis|opus|vorbis-heap|mp3|flac|alac|alac-ns|mpc|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]
-# flac, alac, mpc: codec_flac.c (dr_flac), mp4.c + codec_alac.c + alacdec.c, codec_mpc.c + libmpcdec;
+# build.sh ogg|vorbis|opus|vorbis-heap|mp3|flac|alac|alac-ns|mpc|wv|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]
+# flac, alac, mpc, wv: codec_flac.c (dr_flac), mp4.c + codec_alac.c + alacdec.c, codec_mpc.c +
+# libmpcdec, codec_wavpack.c + libwavpack (its malloc: libc's, for ASan);
 # the accelerators (ECHO_HIFIACC, ECHO_SYNTH) are off, ECHO_NO_HWALAC stubs the ALAC one.
 # Host builds of the core B Ogg code for fuzz_host.c (docs/FUZZING.md). ogg, vorbis and opus:
 # ASan + UBSan (signed shifts and Tremor's deliberate overflows left out), trace-pc coverage on
@@ -53,10 +54,14 @@ mpc)    PC=${MPC_DIR:-$TP/libmpcdec}; REN="-fcommon"      # codec_mpc.c: see CMP
         DEF="-DT_MPC -DMPC_FIXED_POINT"; INC="-I$PC/include -I$PC"
         SRC="$FW/hifi/codec_mpc.c"
         for f in huffman mpc_bits_reader mpc_decoder mpc_demux requant streaminfo synth_filter; do SRC="$SRC $PC/$f.c"; done;;
+wv)     PW=$TP/wavpack
+        DEF="-DT_WV -DNO_TAGS -DECHO_MINI"; INC="-I$PW/include -I$PW/src"
+        SRC="$FW/hifi/codec_wavpack.c"
+        for f in open_utils unpack unpack_utils unpack_floats unpack_seek read_words common_utils decorr_utils entropy_utils; do SRC="$SRC $PW/src/$f.c"; done;;
 mp3)    PM=$TP/pvmp3dec
         DEF=-DT_MP3; INC="-I$PM/include -I$PM/src"
         SRC="$FW/hifi/codec_mp3.c $(ls $PM/src/*.cpp)";;
-*) echo "usage: build.sh ogg|vorbis|opus|vorbis-heap|mp3|flac|alac|mpc|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]"; exit 1;;
+*) echo "usage: build.sh ogg|vorbis|opus|vorbis-heap|mp3|flac|alac|mpc|wv|mp4|aac|aacpkt|tags|fat [TREMOR_DIR]"; exit 1;;
 esac
 # alac-ns: alac without the shift-exponent check; alacdec.c shifts by 32 or more on odd streams
 # (as the Apple reference does, and as ARM defines it), which stops the run before the real bugs
@@ -73,6 +78,9 @@ SAN_NA=$(echo "$SAN" | sed 's/address,//')
 # pow and sprintf...); on the PC they would replace libc's and recurse. Renamed there, libmpcdec
 # then calls libc's: ASan sees its blocks.
 CMPC="-Dmalloc=mpc_malloc -Dcalloc=mpc_calloc -Dfree=mpc_free -Dsprintf=mpc_sprintf"
+# codec_wavpack.c likewise defines strcpy, strncmp, labs, newlib's _ctype_ and malloc (over
+# heap.c's heap_malloc..., here libc's)
+CWV="-Dstrcpy=wv_strcpy -Dstrncmp=wv_strncmp -Dlabs=wv_labs -D_ctype_=wv_ctype_ -Dmalloc=wv_malloc -Dcalloc=wv_calloc -Drealloc=wv_realloc -Dfree=wv_free"
 for s in $SRC; do
   case " $NOASAN " in *" $(basename $s) "*) S=$SAN_NA;; *) S=$SAN;; esac
   case $s in
@@ -82,6 +90,7 @@ for s in $SRC; do
          g++ $CXXF $S -fno-sanitize=shift $COV $DEF $INC -c $s -o $o;;
   *)     o=$OUT/$(basename $(dirname $s))_$(basename $s .c).o
          X=""; [ "$T:$(basename $s)" = mpc:codec_mpc.c ] && X=$CMPC
+         [ "$T:$(basename $s)" = wv:codec_wavpack.c ] && X=$CWV
          gcc $CF $S $COV $DEF $INC $REN $X -c $s -o $o;;
   esac
   OBJS="$OBJS $o"

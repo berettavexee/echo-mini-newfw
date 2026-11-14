@@ -12,6 +12,8 @@ void ui_power_off(void);        /* before switching off: the resume state */
  * (top) follows it; past a screen, a scroll bar at the right edge of the rows (only then: the
  * rows' text stops at list_text_end) */
 void list_move(int *sel, int *top, int n, int rows, int d);
+enum { LS_NONE, LS_ROW, LS_PAGE, LS_LETTER };
+int list_step(int *sel, int *top, int n, int rows, int d, int ev, int (*letter)(int from, int d));
 int list_text_end(int n, int rows);
 void list_scrollbar(int y, int rows, int top, int n);
 void list_mark(int y, int on, uint16_t bg);     /* the note of the track playing, or blank */

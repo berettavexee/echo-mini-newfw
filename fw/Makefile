@@ -190,9 +190,45 @@ $(BUILD)/hifi_mpc.elf: $(MPC_OBJS) $(HDEPS)
 	  $(MPC_OBJS) $(HLDFLAGS) -Wl,-Map=$(BUILD)/hifi_mpc.map -o $@
 	$(CROSS)size $@
 
-$(BUILD)/codecs.bin: $(BUILD)/hifi_pcm.elf $(BUILD)/hifi_flac.elf $(BUILD)/hifi_mp3.elf $(BUILD)/hifi_vorbis.elf $(BUILD)/hifi_opus.elf $(BUILD)/hifi_aac.elf $(BUILD)/hifi_alac.elf $(BUILD)/hifi_mpc.elf tools/mkpack.py
+# WavPack: libwavpack 5.9.0 (third_party/wavpack, BSD, two changes marked ECHO MINI), its
+# decoder only: no DSD,
+# no legacy files, no tags (core A reads them), no threads; malloc from hifi/heap.c (a block's
+# buffer, freed at the next block; ETUDE §156)
+WV_DIR ?= ../third_party/wavpack
+WV_SRCS := open_utils unpack unpack_utils unpack_floats unpack_seek read_words common_utils \
+           decorr_utils entropy_utils
+WV_OBJS := $(patsubst %,$(BUILD)/wv/%.o,$(WV_SRCS)) $(BUILD)/wv/unpack_thumb2.o
+# -DOPT_ASM_ARM: libwavpack's decorrelation passes in assembly, its ARM file ported to Thumb-2
+# (hifi/wvasm/unpack_thumb2.S, ETUDE §157)
+WV_HEAP ?= 143360
+WV_DEFS = -DNO_TAGS -DHEAP_SIZE=$(WV_HEAP)
+WV_FLAGS = -mcpu=cortex-m3 -mthumb -O2 -g -ffreestanding -nostdlib -ffunction-sections \
+           -fdata-sections -w -DNO_TAGS -DECHO_MINI -DOPT_ASM_ARM -I$(WV_DIR)/include -I$(WV_DIR)/src
+
+$(BUILD)/wv/unpack_thumb2.o: hifi/wvasm/unpack_thumb2.S
+	@mkdir -p $(dir $@)
+	$(CC) -mcpu=cortex-m3 -mthumb -c $< -o $@
+
+$(BUILD)/wv/%.o: $(WV_DIR)/src/%.c $(BUILD)/flags
+	@mkdir -p $(dir $@)
+	$(CC) $(WV_FLAGS) -c $< -o $@
+
+# heap.c's functions renamed (heap_malloc...): codec_wavpack.c's malloc stops core B on a failed
+# allocation (libwavpack does not check them all: a write through 0 lands in the code, §156)
+$(BUILD)/wv/heap.o: hifi/heap.c $(HDEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(HCFLAGS) -DHEAP_SIZE=$(WV_HEAP) -Dmalloc=heap_malloc -Dcalloc=heap_calloc \
+	  -Drealloc=heap_realloc -Dfree=heap_free -c $< -o $@
+
+$(BUILD)/hifi_wv.elf: $(WV_OBJS) $(BUILD)/wv/heap.o $(HDEPS)
+	$(CC) $(HCFLAGS) $(WV_DEFS) -I$(WV_DIR)/include -I$(WV_DIR)/src hifi/rt.c $(BUILD)/wv/heap.o \
+	  hifi/codec_wavpack.c $(WV_OBJS) $(HLDFLAGS) -Wl,-Map=$(BUILD)/hifi_wv.map -o $@
+	$(CROSS)size $@
+
+$(BUILD)/codecs.bin: $(BUILD)/hifi_pcm.elf $(BUILD)/hifi_flac.elf $(BUILD)/hifi_mp3.elf $(BUILD)/hifi_vorbis.elf $(BUILD)/hifi_opus.elf $(BUILD)/hifi_aac.elf $(BUILD)/hifi_alac.elf $(BUILD)/hifi_mpc.elf $(BUILD)/hifi_wv.elf tools/mkpack.py
 	python3 tools/mkpack.py $@ 1:$(BUILD)/hifi_pcm.elf 2:$(BUILD)/hifi_flac.elf 3:$(BUILD)/hifi_mp3.elf \
-	  4:$(BUILD)/hifi_vorbis.elf 5:$(BUILD)/hifi_opus.elf 7:$(BUILD)/hifi_aac.elf 8:$(BUILD)/hifi_alac.elf 9:$(BUILD)/hifi_mpc.elf
+	  4:$(BUILD)/hifi_vorbis.elf 5:$(BUILD)/hifi_opus.elf 7:$(BUILD)/hifi_aac.elf 8:$(BUILD)/hifi_alac.elf 9:$(BUILD)/hifi_mpc.elf \
+	  10:$(BUILD)/hifi_wv.elf
 
 # The languages' catalogues (ETUDE §112): po/*.po
 $(BUILD)/lang.bin: tools/mklang.py po/newfw.pot $(wildcard po/*.po) $(FONT_BDF)

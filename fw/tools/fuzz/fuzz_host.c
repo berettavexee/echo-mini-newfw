@@ -10,7 +10,7 @@
  * Replay options: FUZZ_V=1 prints the format and frames decoded, FUZZ_PCM=file writes the output
  * words (whole file, no time limit), FUZZ_NOFORK=1 runs in this process (for gdb).
  * Target chosen at build time (build.sh): -DT_OGG (pg_packet only), -DT_VORBIS, -DT_OPUS,
- * -DT_MP3, -DT_FLAC, -DT_MPC, -DT_AACPKT (codec_aac.c on a packet stream), and the core A readers: -DT_MP4
+ * -DT_MP3, -DT_FLAC, -DT_MPC, -DT_WV, -DT_AACPKT (codec_aac.c on a packet stream), and the core A readers: -DT_MP4
  * (src/mp4.c), -DT_AAC and -DT_ALAC (mp4.c, then codec_aac.c or codec_alac.c on the stream it makes), -DT_TAGS (src/tags.c
  * for every format); -DREAL_HEAP keeps core B's hifi/heap.c for Vorbis (no ASan).
  * FUZZ_STREAM=file (T_MP4, T_AAC replay) writes the packet stream mp4.c makes: seeds for
@@ -80,6 +80,15 @@ void rt_wait(void)
 uint32_t rt_heap_peak;
 void *rt_alloc(uint32_t n) { return malloc(n ? n : 1); }
 void rt_heap_reset(void) { }
+
+#if defined(T_WV)
+uint32_t heap_peak;                     /* hifi/heap.c: libc's malloc instead (ASan) */
+void heap_reset(void) { }
+void *heap_malloc(size_t n) { return malloc(n); }
+void *heap_calloc(size_t a, size_t b) { return calloc(a, b); }
+void *heap_realloc(void *p, size_t n) { return realloc(p, n); }
+void heap_free(void *p) { free(p); }
+#endif
 
 #if defined(T_VORBIS) && !defined(REAL_HEAP)
 /* hifi/heap.c is replaced by libc malloc (bounds seen by ASan); the codebook cache never hits */
@@ -422,7 +431,7 @@ static uint32_t pos(uint32_t n)
 {
     if (!n)
         return 0;
-#if defined(T_TAGS) || defined(T_MPC)
+#if defined(T_TAGS) || defined(T_MPC) || defined(T_WV)
     if (!rnd(8))
         return n - 1 - rnd(n < 512 ? n : 512);
 #endif

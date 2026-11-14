@@ -271,6 +271,20 @@ msgid "Not supported: no sample rate"
 msgstr "Non pris en charge : sans fréquence d'échantillonnage"
 
 #: src/playback.c
+msgid "Not supported: DSD audio"
+msgstr "Non pris en charge : audio DSD"
+
+#. TRANSLATORS: a WavPack file whose mode and rate need more than the decoding core has
+#: src/playback.c
+msgid "Not supported: too heavy to decode in real time"
+msgstr "Non pris en charge : trop lourd à décoder en temps réel"
+
+#. TRANSLATORS: a WavPack file too heavy to play (wavpack's options)
+#: src/playback.c
+msgid "Encode it again with wavpack -f, or as FLAC"
+msgstr "Réencodez-le avec wavpack -f, ou en FLAC"
+
+#: src/playback.c
 msgid "Check the file on a computer"
 msgstr "Vérifiez le fichier sur un ordinateur"
 

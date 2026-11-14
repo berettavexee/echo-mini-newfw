@@ -21,7 +21,7 @@ HALF = 4 << 20                                  # each half of the file
 VOL_SECTOR = 0x81000                            # the internal volume in the emulator's disks
 CODECS = {"wav": 1, "flac": 2, "fla": 2, "mp3": 3, "ogg": 4, "oga": 4, "opus": 5, "opu": 5,
           "aiff": 6, "aif": 6, "aifc": 6, "m4a": 7, "m4b": 7, "mp4": 7, "mpc": 9, "mp+": 9,
-          "mpp": 9}                             # browser.c's codec_of (m4a: AAC; ALAC is 8)
+          "mpp": 9, "wv": 10}                   # browser.c's codec_of (m4a: AAC; ALAC is 8)
 LIMITS = dict(title=96, artist=128, album=128, albumartist=96, genre=48, file=128)  # with the 0
 
 # ---- the sort key (the same in fw/src/library.c) ----
@@ -415,7 +415,7 @@ def file_fields(name, data):
         return dict(title=first(t, "\xa9nam"), artist=first(t, "\xa9ART"),
                     album=first(t, "\xa9alb"), albumartist=first(t, "aART"), genre=g,
                     year=first(t, "\xa9day"), track=trk, disc=disc)
-    if ext in ("mpc", "mp+", "mpp"):
+    if ext in ("mpc", "mp+", "mpp", "wv"):     # APEv2 (WavPack: its ID3v1, not read here)
         return dict(title=first(t, "Title"), artist=first(t, "Artist"), album=first(t, "Album"),
                     albumartist=first(t, "Album Artist"), genre=genre_name(first(t, "Genre")),
                     year=first(t, "Year"), track=first(t, "Track"), disc=first(t, "Disc"))

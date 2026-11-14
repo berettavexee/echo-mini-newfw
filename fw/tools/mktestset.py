@@ -17,6 +17,8 @@ Groups (one folder each in OUTDIR):
                noise of 1 MB, 8 MB and 17 MB (past the 16 MiB tags.c reads at most; Ogg: 64 MiB), each
                put before the text tags, in FLAC (not 17 MB: a FLAC block holds less than
                16 MiB), MP3, Ogg Vorbis, Opus, M4A and Musepack (APEv2 "Cover Art (Front)")
+  wavpack/     WavPack's modes (fast to very high, -x6, hybrid), 8 to 32 bits, mono, floats, 44.1
+               to 192 kHz, for the decoder of core B (wavpack 5 on the PATH: skipped without)
   alacorder/   ALAC with the prediction order forced (FFmpeg's encoder: 1 to 30), 16 and 24 bits,
                stereo and mono, for the bench of HIFIACC's ALAC filter (ETUDE §113; not in the
                default groups)
@@ -87,6 +89,11 @@ def pcm(src, dst, rate, bits, seconds):
         str(rate), *(["dither", "-s"] if bits == 16 else []))
 
 
+
+def missing_enc(kind):
+    """Musepack and WavPack: their encoders may be missing (their files then skipped)"""
+    return (kind == "mpc" and not have("mpcenc")) or (kind == "wavpack" and not have("wavpack"))
+
 def encode(kind, src, dst, rate, bits, seconds, tmp):
     w = os.path.join(tmp, f"in_{rate}_{bits}.wav")
     if not os.path.exists(w):
@@ -108,6 +115,8 @@ def encode(kind, src, dst, rate, bits, seconds, tmp):
               ["-c:a", "alac", "-sample_fmt", "s16p" if bits == 16 else "s32p"]), dst)
     elif kind == "mpc":
         run("mpcenc", "--silent", "--overwrite", w, dst)
+    elif kind == "wavpack":
+        run("wavpack", "-q", "-y", "-hh", w, "-o", dst)
     else:
         raise ValueError(kind)
 
@@ -350,15 +359,34 @@ def aiff_tag(path, t, id3=False):
 
 # ---- the set ----
 EXT = dict(wav="wav", aiff="aiff", flac="flac", mp3="mp3", vorbis="ogg", opus="opus",
-           aac="m4a", alac="m4a", mpc="mpc")
+           aac="m4a", alac="m4a", mpc="mpc", wavpack="wv")
 FORMATS = [("wav", 44100, 16), ("wav", 96000, 24), ("wav", 192000, 24), ("aiff", 44100, 16),
            ("aiff", 96000, 24), ("flac", 44100, 16), ("flac", 48000, 24), ("flac", 88200, 24),
            ("flac", 96000, 24), ("flac", 176400, 24), ("flac", 192000, 24), ("mp3", 44100, 16),
            ("mp3", 48000, 16), ("vorbis", 44100, 16), ("vorbis", 96000, 16), ("opus", 48000, 16),
-           ("aac", 44100, 16), ("alac", 44100, 16), ("alac", 96000, 24), ("mpc", 44100, 16)]
+           ("aac", 44100, 16), ("alac", 44100, 16), ("alac", 96000, 24), ("mpc", 44100, 16),
+           ("wavpack", 44100, 16), ("wavpack", 96000, 24)]
 TAGGED = [("flac", 96000, 24), ("mp3", 44100, 16), ("vorbis", 44100, 16), ("opus", 48000, 16),
-          ("aac", 44100, 16), ("wav", 44100, 16), ("aiff", 44100, 16), ("mpc", 44100, 16)]
+          ("aac", 44100, 16), ("wav", 44100, 16), ("aiff", 44100, 16), ("mpc", 44100, 16),
+          ("wavpack", 44100, 16)]
 COVERED = [k for k in TAGGED if k[0] not in ("wav", "aiff")]   # the formats with cover art
+# WavPack's modes (ETUDE §156): name, rate, bits, channels, sox's sample encoding, wavpack's
+# options; -b: hybrid (lossy, no correction file); -x6: the slowest encoding, decoded as -hh
+WVMODES = [("fast", 44100, 16, 2, "signed-integer", ["-f"]),
+           ("normal", 44100, 16, 2, "signed-integer", []),
+           ("high", 44100, 16, 2, "signed-integer", ["-h"]),
+           ("vhigh", 44100, 16, 2, "signed-integer", ["-hh"]),
+           ("vhigh-x6", 44100, 16, 2, "signed-integer", ["-hh", "-x6"]),
+           ("hybrid", 44100, 16, 2, "signed-integer", ["-b320"]),
+           ("hybrid-24", 96000, 24, 2, "signed-integer", ["-b1000", "-h"]),
+           ("mono", 44100, 16, 1, "signed-integer", ["-h"]),
+           ("8bit", 44100, 8, 2, "unsigned-integer", []),
+           ("24-96", 96000, 24, 2, "signed-integer", ["-h"]),
+           ("24-96-vhigh", 96000, 24, 2, "signed-integer", ["-hh"]),
+           ("24-192-high", 192000, 24, 2, "signed-integer", ["-h"]),
+           ("24-192", 192000, 24, 2, "signed-integer", ["-hh"]),
+           ("32bit", 48000, 32, 2, "signed-integer", ["-h"]),
+           ("float", 48000, 32, 2, "floating-point", ["-h"])]
 ALACORDER = [(16, 44100, 2, o) for o in (1, 2, 3, 4, 8, 16, 30)] + \
     [(24, 96000, 2, 8), (24, 96000, 2, 30), (16, 44100, 1, 4)]   # bits, rate, channels, order
 
@@ -409,8 +437,8 @@ def tag(kind, path, t, pic=None, **kw):
         wav_tag(path, t, **kw)
     elif kind == "aiff":
         aiff_tag(path, t, **kw)
-    elif kind == "mpc":
-        mpc_tag(path, t, pic)
+    elif kind in ("mpc", "wavpack"):
+        mpc_tag(path, t, pic)                   # an APEv2 tag at the end, both
 
 
 def noise_png(side, seed):
@@ -471,8 +499,8 @@ def main():
 
         if "formats" in groups:
             for kind, rate, bits in FORMATS:
-                if kind == "mpc" and not have("mpcenc"):
-                    print("mktestset: no mpcenc, Musepack skipped")
+                if missing_enc(kind):
+                    print(f"mktestset: no encoder, {kind} skipped")
                     continue
                 add("formats", f"{kind}-{bits}-{rate}.{EXT[kind]}", kind, rate, bits,
                     carried(kind, ASCII))
@@ -492,9 +520,25 @@ def main():
                 man.append(dict(file=f"alacorder/{name}", codec="alac", rate=rate, bits=bits,
                                 channels=ch, tags={}, rg={}, expect="empty",
                                 size=os.path.getsize(path)))
+        if "wavpack" in groups and missing_enc("wavpack"):
+            print("mktestset: no wavpack, its group skipped")
+        elif "wavpack" in groups:
+            d = os.path.join(a.out, "wavpack")
+            os.makedirs(d, exist_ok=True)
+            for name, rate, bits, ch, enc, opts in WVMODES:
+                w = os.path.join(tmp, f"wv_{name}.wav")
+                run("sox", "-R", a.src, "-e", enc, "-b", str(bits), "-c", str(ch), w, "trim",
+                    "0", str(a.seconds), "rate", "-v", str(rate),
+                    *(["dither", "-s"] if bits <= 16 else []))
+                path = os.path.join(d, f"wv-{name}.wv")
+                run("wavpack", "-q", "-y", *opts, w, "-o", path)
+                man.append(dict(file=f"wavpack/wv-{name}.wv", codec="wavpack", rate=rate,
+                                bits=bits, channels=ch, tags={}, rg={}, expect="empty",
+                                size=os.path.getsize(path), **({"note": "float"} if enc ==
+                                                               "floating-point" else {})))
         if "tags" in groups:
             for kind, rate, bits in TAGGED:
-                if kind == "mpc" and not have("mpcenc"):
+                if missing_enc(kind):
                     continue
                 for name, t in TAGSETS.items():
                     t = carried(kind, LATIN1 if kind == "aiff" and name == "unicode" else t)
@@ -567,7 +611,7 @@ def main():
                 for kind, rate, bits in COVERED:
                     if kind == "flac" and len(pic[0]) >= 1 << 24:
                         continue                # a FLAC block holds less than 16 MiB
-                    if kind == "mpc" and not have("mpcenc"):
+                    if missing_enc(kind):
                         continue
                     ogg = kind in ("vorbis", "opus")
                     add("covers", f"{kind}-cover{cname}.{EXT[kind]}", kind, rate, bits, ASCII,

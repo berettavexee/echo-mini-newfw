@@ -3,8 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-14, version 0.105 (a new interface: one header, the files' top level with
-the volumes' free space, a grouped main menu, an Information page, no flicker).
+Last update: 2026-11-15, version 0.106 (WavPack; long lists scrolled faster, by initials; BACK
+in a pause keeps the pause).
 
 ## Done, validated on the device
 
@@ -67,6 +67,8 @@ the volumes' free space, a grouped main menu, an Information page, no flicker).
 | One header on every screen (title, n/N, clock, play state and mode icons, volume, battery as an icon, a percent or the music left), a folder ends with ">", the play screen with the track's number and the time left, every screen drawn without flicker (checked by the emulator's panel model) | 0.105 | §144, §147-§148, §150 |
 | The files' top level: Library, Internal memory, SD card with icons, the library's tracks and each volume's free space (counted at the library's update, kept across power-offs), the card greyed without one; BACK there opens the main menu | 0.105 | §149, §152 |
 | The main menu grouped with icons, USB inactive without the cable, System (Information, system screen, installer, loader mode) | 0.105 | §151-§152 |
+| WavPack (`.wv`): lossless and hybrid, every mode, 8 to 32 bits and floats, mono or stereo, APEv2 tags; libwavpack 5.9.0 with its decorrelation in Thumb-2 assembly; exact to the bit against FFmpeg; a file too heavy for core B (24/192 in high or very high) refused with its reason | 0.106 | §156-§157 |
+| Long lists scrolled faster: VOL held moves a row, then a screen after 1.5 s, then an initial after 3 s (a big letter shown, the library's sort followed, no wrap while held); BACK in a pause keeps the pause (the start of the track, or the track before) | 0.106 | §154-§155 |
 | Damaged Musepack and ALAC files cannot crash the decoders (found by fuzzing FLAC, ALAC and Musepack) | 0.105 | §146 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
@@ -173,6 +175,9 @@ One line per version; the measurements are in `ETUDE.md`.
   core A at 100 MHz with the screen off, no gain on the battery (§141); the fuzzing fixes in
   libmpcdec and the ALAC decoder (§146); the emulator's tools: the ELF check, the panel's
   flicker count, the disk reads by phase, foreign firmwares (§144).
+- 0.106: WavPack (§156-§157): libwavpack 5.9.0's decoder on core B, its ARM assembly ported
+  to Thumb-2, files too heavy for core B refused with their reason; the fast scroll of long
+  lists by initials and BACK in a pause (§154-§155); the System and Play queue icons aligned.
 
 ## To do
 
@@ -317,8 +322,7 @@ One line per version; the measurements are in `ETUDE.md`.
 - Further formats, a distant prospect, only if libraries call for them:
   - DSD (DSF, DFF): native DSD through the I2S and the CS43131, or conversion to PCM;
   - APE (Monkey's Audio, SDK now BSD): the higher compression levels may be too heavy for
-    core B;
-  - WavPack (BSD reference decoder).
+    core B (WavPack, lighter, already needs 145 to 175 MHz at 24/192).
   WMA, TTA and MP2 are not considered (rare, or no permissive decoder).
 - Tracker modules (Amiga and PC), a distant prospect:
   - MOD, then S3M, with a small permissive player (micromod, BSD); IT (libxmp-lite, MIT) only
