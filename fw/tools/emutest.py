@@ -258,6 +258,36 @@ TESTS = {
                                 r"keys: vol\+ held",
                                 r"ui: letter \d+ -> \d+ of 312"],
                         check=lambda w: fast_scroll_check(w)),
+    # WavPack (ETUDE §156): the seek mode (VOL+ then VOL-), the target 20 s on, PLAY: the
+    # track opened again there (libwavpack's search, from its blocks' headers); then 10 s back
+    # (0.105wv1 broke its code on a seek: the skip to the sample in one buffer of up to 1 MiB);
+    # then a power cycle: resumed 2 s before where it was
+    "wv-seek": dict(files={"A.WV": "wv30"}, ms=19000,
+                    keys=keys((2000, "PLAY")) + ",5000:VOL+,5300:VOL-,5600:NONE," +
+                    keys((6200, "VOL+"), (6700, "VOL+"), (7300, "PLAY")) +
+                    ",10000:VOL+,10300:VOL-,10600:NONE," + keys((11200, "VOL-"), (11800, "PLAY")),
+                    expect=[r"ui: queue 1/1: A\.WV \(0\)", r"ui: seek \d+ -> 2\d{4} ms of 30000",
+                            r"player: format: 44100 Hz, 2 ch, 16 bits",
+                            r"ui: seek 2\d{4} -> 1\d{4} ms of 30000", r"player: start at 1\d{4} ms",
+                            r"player: format: 44100 Hz, 2 ch, 16 bits",
+                            r"ui: resume: .*at 1\d{4} ms, playing 1", r"player: start at 1\d{4} ms"],
+                    reboot=dict(ms=9000)),
+    # a WavPack too heavy for core B (ETUDE §157): 24/192 in -hh, about 300 MHz: refused with
+    # its reason on the "Cannot play" banner, and the next track of the queue plays
+    "wv-heavy": dict(files={"A.WV": "wvheavy", "B.WV": "wv10"}, ms=9000,
+                     keys=keys((2000, "PLAY")),
+                     expect=[r"player: WavPack: 16 decorrelation terms, about \d{3} MHz of core B: "
+                             r"refused", r"ui: queue 2/2: B\.WV \(0\)",
+                             r"error: A\.WV: Not supported: too heavy to decode in real time",
+                             r"ui: cannot play: A\.WV \(passed over\)"]),
+    # the same reached by the queue moving on by itself (its open is asynchronous: the refusal
+    # comes after; 0.105wv4 passed it over without the banner)
+    "wv-heavy-chain": dict(files={"1.WV": "wv3", "2.WV": "wvheavy", "3.WV": "wv3"}, ms=12000,
+                           keys=keys((2000, "PLAY")),
+                           expect=[r"ui: queue 1/3: 1\.WV \(0\)",
+                                   r"WavPack: 16 decorrelation terms, about \d{3} MHz of core B: refused",
+                                   r"ui: queue 3/3: 3\.WV \(0\)",
+                                   r"ui: cannot play: 2\.WV \(passed over\)"]),
     # both headphone outputs in, PLAY: the 3.5 mm out (the 4.4 mm still in: no pause), then the
     # 4.4 mm out: a pause (ETUDE §119); in again: no play until PLAY; PLAY, PLAY (paused by
     # hand), out again: nothing more
@@ -447,6 +477,11 @@ TESTS["alac-exact"] = dict(set="alacorder", seconds=2, exact=True, pick=[
     "alacorder/alac-16-44100-stereo-o2.m4a"],
     check=lambda text: [] if re.search(r"alacacc: \S+: [1-9]\d* predictions on HIFIACC", text)
     else ["no prediction on HIFIACC"])
+# WavPack (ETUDE §156): every mode of the set's wavpack group, each bit-exact against FFmpeg's
+# own decoder in what the DAC played (needs wavpack on the PATH for the set); not 24/192 in
+# -h and -hh: too heavy for core B, refused (§157, test wv-heavy)
+TESTS["wv-exact"] = dict(set="wavpack", seconds=2, exact=True,
+                         skip=["wavpack/wv-24-192.wv", "wavpack/wv-24-192-high.wv"])
 TESTS["hwt-alac"] = dict(set="alacorder", seconds=1, hwtest=True, check=check_hwa)
 TESTS["hwt-imdct"] = dict(set="formats", pick=["formats/mp3-16-44100.mp3"], hwtest=True,
                           check=check_hwi)
@@ -456,7 +491,8 @@ TESTS["set-ci"] = dict(set="tags,formats,covers", pick=[
     "tags/mp3-unicode.mp3", "tags/vorbis-unicode.ogg", "tags/opus-unicode.opus",
     "tags/aac-unicode.m4a", "formats/alac-24-96000.m4a", "formats/flac-24-192000.flac",
     "covers/flac-cover1m.flac", "covers/mp3-cover1m.mp3", "covers/opus-cover1m.opus",
-    "covers/aac-coverjpg600.m4a", "tags/mpc-unicode.mpc", "covers/mpc-cover1m.mpc"])
+    "covers/aac-coverjpg600.m4a", "tags/mpc-unicode.mpc", "covers/mpc-cover1m.mpc",
+    "tags/wavpack-unicode.wv", "formats/wavpack-24-96000.wv"])
 FIELD_MAX = dict(title=96, artist=128, album=128)    # struct tags (tags.h), with the 0
 MORE_MAX = dict(albumartist=96, genre=48)           # its library fields (§122)
 
@@ -494,7 +530,7 @@ def run_set(group, t, img, elf, tmp):
     man = [m for m in json.load(open(os.path.join(src, "manifest.json")))
            if m["file"] in t["pick"]] if "pick" in t else \
         [m for m in json.load(open(os.path.join(src, "manifest.json")))
-         if m["file"].startswith(group + "/")]
+         if m["file"].startswith(group + "/") and m["file"] not in t.get("skip", ())]
     lost = sorted(set(t.get("pick", [])) - {m["file"] for m in man})
     if lost:
         return [f"not in the set: {', '.join(lost)}"], ""
@@ -572,7 +608,7 @@ def run_set(group, t, img, elf, tmp):
         if not mf:
             fails.append(what + "no format line")
         elif int(mf.group(1)) != m["rate"] or int(mf.group(2)) != m["channels"] or (
-                m["codec"] in ("wav", "aiff", "flac", "alac") and int(mf.group(3)) != m["bits"]):
+                m["codec"] in ("wav", "aiff", "flac", "alac", "wavpack") and int(mf.group(3)) != m["bits"]):
             fails.append(what + f"format {mf.group(0)}, expected {m['rate']} Hz, "
                          f"{m['channels']} ch, {m['bits']} bits")
     for n, m in names.items():
@@ -596,12 +632,15 @@ def check_exact(man, src, dac):
     heard = open(dac, "rb").read() if os.path.exists(dac) else b""
     fails = []
     for m in man:
-        ref = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i",
-                              os.path.join(src, m["file"]), "-ac", "2", "-f",
-                              "s16le" if m["bits"] == 16 else "s32le", "-"],
+        w = 2 if m["bits"] <= 16 else 4         # mono: each sample twice (FFmpeg's -ac 2
+        ref = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i",   # lowers it 3 dB)
+                              os.path.join(src, m["file"]), "-f",
+                              "s16le" if m["bits"] <= 16 else "s32le", "-"],
                              capture_output=True, check=True).stdout
+        if m.get("channels") == 1:
+            ref = b"".join(ref[i:i + w] * 2 for i in range(0, len(ref), w))
         if not ref or heard.find(ref) < 0:
-            fb = 4 if m["bits"] == 16 else 8    # where its start is, and how far it agrees
+            fb = 4 if m["bits"] <= 16 else 8    # where its start is, and how far it agrees
             at = heard.find(ref[fb * 2048:fb * 2048 + 1024]) - fb * 2048
             same = 0
             if at >= 0:
@@ -672,6 +711,17 @@ def run(name, t, img, elf, tmp):
         if src.startswith("wav"):               # "wav", or "wav10": its length in seconds
             src = os.path.join(tmp, dst.replace("/", "_"))
             wav(src, int(src_len) if (src_len := t["files"][dst][3:]) else 3)
+        elif src.startswith("wvheavy"):         # a WavPack 24-bit 192 kHz -hh of 3 s: refused
+            w = os.path.join(tmp, dst.replace("/", "_") + ".wav")
+            wav(w, 3)
+            subprocess.run(["sox", w, "-b", "24", w + ".192.wav", "rate", "192000"], check=True)
+            src = os.path.join(tmp, dst.replace("/", "_"))
+            subprocess.run(["wavpack", "-q", "-y", "-hh", w + ".192.wav", "-o", src], check=True)
+        elif src.startswith("wv"):              # "wv30": a WavPack (-hh) of 30 s (wavpack)
+            w = os.path.join(tmp, dst.replace("/", "_") + ".wav")
+            wav(w, int(src[2:]) if src[2:] else 3)
+            src = os.path.join(tmp, dst.replace("/", "_"))
+            subprocess.run(["wavpack", "-q", "-y", "-hh", w, "-o", src], check=True)
         elif src == "empty":                    # a name only (a long folder's rows)
             src = os.path.join(tmp, dst.replace("/", "_"))
             open(src, "wb").close()
@@ -946,15 +996,22 @@ def lib_compare(dump, disk, card, tmp, tag):
     return [] if r.returncode == 0 else [f"{tag}: " + ln for ln in r.stdout.splitlines()[-4:]]
 
 
+def lib_count(src):
+    """The tracks of lib_disks(): the set's files, and the 12 copied to the card (89 before
+    WavPack's files joined the set; Musepack's and WavPack's only with their encoders)"""
+    return len(json.load(open(os.path.join(src, "manifest.json")))) + 12
+
+
 def lib_build_test(variant):
     def go(img, elf, tmp):
         IMG_FOR_DISK[0] = img
         disk, card, src = lib_disks(tmp)
+        n = lib_count(src)
         dump = os.path.join(tmp, "after.img")
         whole = lib_boot(img, elf, disk, card, dump)
         text = read_log(dump)
-        fails = [] if re.search(r"library: 89 tracks \(89 read, 0 from the index before\)",
-                                text) else ["first build: not 89 tracks read"]
+        fails = [] if re.search(rf"library: {n} tracks \({n} read, 0 from the index before\)",
+                                text) else [f"first build: not {n} tracks read"]
         fails += lib_compare(dump, disk, card, tmp, "first")
         if variant == "update":                 # one file deleted, one added, one changed
             shutil.move(dump, disk)
@@ -965,15 +1022,15 @@ def lib_build_test(variant):
             whole += lib_boot(img, elf, disk, card, dump)
             text = read_log(dump)
             if not re.search(r"building into half B \(the index before reused\)", text) or \
-                    not re.search(r"library: 89 tracks \(2 read, 87 from the index before\)",
-                                  text):
-                fails.append("update: not 2 read and 87 reused into half B")
+                    not re.search(rf"library: {n} tracks \(2 read, {n - 2} from the index "
+                                  r"before\)", text):
+                fails.append(f"update: not 2 read and {n - 2} reused into half B")
             fails += lib_compare(dump, disk, card, tmp, "update")
         if variant == "nochange":               # the same files: the update stops after the count
             shutil.move(dump, disk)
             whole += lib_boot(img, elf, disk, card, dump)
             text = read_log(dump)
-            if not re.search(r"library: no change \(89 tracks, the same fingerprint\)", text):
+            if not re.search(rf"library: no change \({n} tracks, the same fingerprint\)", text):
                 fails.append("no change: not seen")
             fails += lib_compare(dump, disk, card, tmp, "no change")
         if variant.startswith("cut"):           # a cut during a second build: the first kept
@@ -1002,12 +1059,13 @@ def lib_settings(img, elf, tmp):
     """Settings, the line Library (the 14th), PLAY: the update screen; the index compared with
     mklib.py's answers (the production image: the path the user takes)"""
     IMG_FOR_DISK[0] = img
-    disk, card, _ = lib_disks(tmp)
+    disk, card, src = lib_disks(tmp)
+    n = lib_count(src)
     dump = os.path.join(tmp, "after.img")
     whole = lib_boot(img, elf, disk, card, dump, ["--keys", LIB_KEYS])
     text = read_log(dump)
-    fails = [] if re.search(r"library: 89 tracks \(89 read, 0 from the index before\)", text) \
-        else ["not 89 tracks read"]
+    fails = [] if re.search(rf"library: {n} tracks \({n} read, 0 from the index before\)",
+                            text) else [f"not {n} tracks read"]
     # the free space counted after the update (§149): the internal volume's as mtools sees it
     m = re.search(r"space: internal (\d+) MiB free", text)
     free = re.search(r"([\d ]+) bytes free", mtools(dump, "mdir", "::").stdout)

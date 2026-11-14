@@ -416,7 +416,9 @@ void ui_main(void)
             lcd_text(8, 100, T("plug the USB cable"), DIM, BG);
         }
         if (fail_due) {                         /* nothing could be played: why, 3 s, then the */
-            fail_due = 0;                       /* browser */
+            int fd = fail_due;                  /* browser */
+            fail_due = 0;
+            log_printf("ui: cannot play: %s%s", fail_name, fd == 2 ? " (passed over)" : "");
             banner_ms = millis() ? millis() : 1;
             sys_screen_set(1);
             t_key = ticks();
@@ -427,7 +429,8 @@ void ui_main(void)
             lcd_text_clip(8, 62, fail_name, LCD_W - 8, FG, BG);
             lcd_text_clip(8, 92, tr(what), LCD_W - 8, FG, BG);
             lcd_text_clip(8, 118, tr(hint), LCD_W - 8, DIM, BG);
-            scr = SCR_BROWSER;
+            if (fd == 1)                        /* 2: a track passed over, the next plays */
+                scr = SCR_BROWSER;
         }
         if (crash_due) {                        /* the last session ended on a fault (0.99r32): */
             crash_due = 0;                      /* once, 3 s */

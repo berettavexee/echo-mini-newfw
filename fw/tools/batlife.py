@@ -22,7 +22,7 @@ EMPTY_MV = 3300                                  # the firmware's power off (bat
 BAT = re.compile(r"\[\s*([\d.]+)\] battery (\d+) mV, usb (\d).*clock (\d+):(\d+):(\d+)")
 TIME = re.compile(r"^\[\s*([\d.]+)\] ")
 CODECS = {1: "WAV", 2: "FLAC", 3: "MP3", 4: "Vorbis", 5: "Opus", 6: "AIFF", 7: "AAC", 8: "ALAC",
-          9: "MPC"}                             # enum hp_codec (hifi_proto.h)
+          9: "MPC", 10: "WavPack"}              # enum hp_codec (hifi_proto.h)
 
 
 def log_lines(path):

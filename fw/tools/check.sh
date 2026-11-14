@@ -138,7 +138,7 @@ fi
 
 if [ "$1" = "--full" ]; then
     say "fuzzing harnesses"
-    for t in ogg vorbis vorbis-heap opus mp3 mp4 aac aacpkt tags fat; do
+    for t in ogg vorbis vorbis-heap opus mp3 mp4 aac aacpkt tags fat wv; do
         if sh tools/fuzz/build.sh $t > $C/fuzz-$t.log 2>&1; then printf 'ok    fuzz %s\n' $t
         else bad "fuzz $t (see fw/$C/fuzz-$t.log)"; tail -5 $C/fuzz-$t.log; fi
     done

@@ -809,6 +809,9 @@ static int open_step(void)
         log_printf("player: open failed: state %u error %u why %u, fault pc %x lr %x cfsr %x, "
                    "in %u/%u", c->state, c->error, c->why, c->fault_pc, c->fault_lr,
                    c->fault_cfsr, c->in_rd, feed_pos);
+        if (c->codec == HP_CODEC_WAVPACK && c->why == HP_WHY_HEAVY)
+            log_printf("player: WavPack: %u decorrelation terms, about %u MHz of core B: refused",
+                       c->error_info >> 16, c->error_info & 0xffff);
         int r = c->state == HP_ERROR ? b_error(c) : HIFI_ETIMEOUT;
         hifi_stop();
         audio_detach();
@@ -833,6 +836,9 @@ static int open_finish(void)
                "input%s", player.rate, player.channels, player.bps, c->frame_bytes,
                player.length_ms, c->in_rd, c->codec == HP_CODEC_VORBIS && (c->error_info >> 31) ?
                ", codebooks from the cache" : "");
+    if (c->codec == HP_CODEC_WAVPACK)           /* (§157: the estimate of its load) */
+        log_printf("player: WavPack: %u decorrelation terms, about %u MHz of core B",
+                   c->error_info >> 16, c->error_info & 0xffff);
     /* core B decodes into its output ring while the DACs are set up */
     command(HP_CMD_PLAY);
     ps.fb = c->frame_bytes;
@@ -1027,7 +1033,7 @@ static void perf_report(const char *name)
                                                   player.length_ms) : 0;
     const struct perf_gap *a = &perf_play, *l = &perf_loop;
     static const char *const cn[] = { "?", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF", "AAC",
-                                      "ALAC", "MPC" };
+                                      "ALAC", "MPC", "WavPack" };
     const char *codec = player.codec < sizeof cn / sizeof *cn ? cn[player.codec] : "?";
     if (!ps.full) {
         log_printf("perf: %s [%s %u/%u]: gap max %u ms (%s %u ms), loop gap max %u ms (%s %u "

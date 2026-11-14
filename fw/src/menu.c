@@ -299,17 +299,18 @@ static int info_draw(void)
         *p = 0;
         /* TRANSLATORS: Information's lines */
         info_row(0, T("Version"), b);
-        info_line(1, "WAV AIFF FLAC ALAC MP3 AAC Opus Vorbis MPC");  /* (names) */
+        info_line(1, "WAV AIFF FLAC ALAC WavPack");     /* (names) the lossless formats, */
+        info_line(2, "MP3 AAC Opus Vorbis MPC");        /* then the lossy ones */
         volume_text(b, FAT_VOL_INT);
-        info_row(2, T("Internal memory"), b);
+        info_row(3, T("Internal memory"), b);
         volume_text(b, FAT_VOL_SD);
-        info_row(3, T("SD card"), b);
+        info_row(4, T("SD card"), b);
         int t = lib_status();
         p = t < 0 ? log_format(b, b + 47, "%s", T("not built")) :
             log_format(b, b + 47, T("%u tracks"), (uint32_t)t);
         *p = 0;
-        info_row(4, T("Library"), b);
-        lcd_fill(0, ROW_Y0 + 16 * 7, LCD_W, LCD_H - ROW_Y0 - 16 * 7, BG);
+        info_row(5, T("Library"), b);
+        lcd_fill(0, ROW_Y0 + 16 * 8, LCD_W, LCD_H - ROW_Y0 - 16 * 8, BG);
     } else
         head_status(0);
     if (i_dirty || pct != i_pct) {
@@ -317,14 +318,14 @@ static int info_draw(void)
         p = log_format(b, b + 47, EN("%u.%02u V, %u %%"), mv / 1000, mv % 1000 / 10,
                        (uint32_t)(pct & 0xff));
         *p = 0;
-        info_row(5, T("Battery"), b);
+        info_row(6, T("Battery"), b);
         if (vbus())
             p = log_format(b, b + 47, "%s", charging() ? T("charging") : T("charged"));
         else
             p = bat_time_text(b, b + 47, pct & 0xff);
         *p = 0;
         /* TRANSLATORS: the music left on the battery (Information) */
-        info_row(6, T("Time left"), b);
+        info_row(7, T("Time left"), b);
         i_pct = pct;
     }
     i_dirty = 0;

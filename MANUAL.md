@@ -413,12 +413,14 @@ the next one.
 | AAC | `.m4a`, `.m4b`, `.mp4` | AAC-LC, mono or stereo; iTunes tags and ReplayGain; gapless |
 | ALAC | `.m4a`, `.m4b`, `.mp4` | Apple Lossless, 16, 20 or 24 bits, mono or stereo; iTunes tags and ReplayGain |
 | Musepack | `.mpc`, `.mp+`, `.mpp` | SV7 and SV8; APEv2 tags and ReplayGain; gapless |
+| WavPack | `.wv` | lossless and hybrid (the `.wv` alone: its lossy part), every mode (fast to very high, `-x`), 8 to 32 bits and floating point, mono or stereo; APEv2 tags (else ID3v1) and ReplayGain; gapless. Not played: DSD in WavPack, more than 2 channels, and the files too heavy for the decoding core (24 bits at 176.4 or 192 kHz in high or very high mode): **Cannot play**, "too heavy to decode in real time", then the next track |
 
 Sample rates from 8 to 192 kHz: 8, 11.025, 12, 16, 22.05, 24, 32, 44.1, 48, 64, 88.2, 96, 128,
 176.4 and 192 kHz, played as they are; any other rate is upsampled on the HiFi core. Tracks play gapless: the next track is queued behind the
 end of the current one.
 
-Not supported yet: HE-AAC, AAC in `.aac` files; floating-point WAV and AIFF. Files of 4 GiB or more are not
+Not supported yet: HE-AAC, AAC in `.aac` files; floating-point WAV and AIFF; WavPack's
+correction files (`.wvc`) and DSD. Files of 4 GiB or more are not
 listed.
 
 Storage:

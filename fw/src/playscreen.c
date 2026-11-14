@@ -31,6 +31,7 @@ static const char *codec_name(uint32_t c)
 {
     static const char *const n[] = {           /* names: the same in every language */
         "", "WAV", "FLAC", "MP3", "Vorbis", "Opus", "AIFF", "AAC", "ALAC", "MPC",
+        "WV",
     };
     return c < sizeof n / sizeof *n ? n[c] : "";
 }

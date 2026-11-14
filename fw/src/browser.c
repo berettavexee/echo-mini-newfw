@@ -54,7 +54,7 @@ uint32_t file_codec(const char *name)
         { "opus", HP_CODEC_OPUS }, { "opu", HP_CODEC_OPUS }, { "aiff", HP_CODEC_AIFF },
         { "aif", HP_CODEC_AIFF }, { "aifc", HP_CODEC_AIFF }, { "m4a", HP_CODEC_AAC },
         { "m4b", HP_CODEC_AAC }, { "mp4", HP_CODEC_AAC }, { "mpc", HP_CODEC_MPC },
-        { "mp+", HP_CODEC_MPC }, { "mpp", HP_CODEC_MPC },
+        { "mp+", HP_CODEC_MPC }, { "mpp", HP_CODEC_MPC }, { "wv", HP_CODEC_WAVPACK },
     };
     const char *dot = 0;
     for (const char *p = name; *p; p++)

@@ -21,6 +21,14 @@ sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath
 import emu_host                                                   # noqa: E402
 
 STOP = 0x0001FFF0
+# EMU_BPROF=FILE: core B's PC at the end of each of its steps while it runs (a profile by
+# sampling), written as "address count" lines at exit, most first; arm-none-eabi-addr2line -f
+# -e build/hifi_<codec>.elf names them (ETUDE §156)
+PROF = {} if os.environ.get("EMU_BPROF") else None
+if PROF is not None:
+    import atexit
+    atexit.register(lambda: open(os.environ["EMU_BPROF"], "w").write(
+        "".join(f"{a:#x} {n}\n" for a, n in sorted(PROF.items(), key=lambda x: -x[1]))))
 CLOCK = 0x0309f000                      # emu_fw.py's clock: microseconds, in core A's SRAM
 
 
@@ -230,4 +238,6 @@ class CoreB(emu_host.Hifi):
             print(f"core B: {ex} at pc {self.u.reg_read(UC_ARM_REG_PC):#x} " +
                   " ".join(f"{k} {v:#x}" for k, v in rr.items()))
             raise
+        if PROF is not None and not self.sleeping:                # EMU_BPROF: where it ran out
+            PROF[self.pc & ~1] = PROF.get(self.pc & ~1, 0) + 1
         self.msgs.clear()

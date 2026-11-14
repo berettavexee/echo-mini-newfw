@@ -20,7 +20,7 @@
 #elif defined(ECHO_HWTEST)
 #define FW_VERSION "0.104hwt"           /* test build: accelerators against the software */
 #else
-#define FW_VERSION "0.105i3"
+#define FW_VERSION "0.105wv5"
 #endif
 #define FW_DATE    "2026-11-14"
 

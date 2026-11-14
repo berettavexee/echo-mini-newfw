@@ -30,6 +30,7 @@ The firmware's own code, unchanged, built for the PC:
 | `flac` | `fw/hifi/codec_flac.c` + dr_flac, accelerator off | a FLAC file |
 | `alac` | `mp4.c`, then `fw/hifi/codec_alac.c` + `alacdec.c` on the packet stream it makes, accelerator stubbed (`ECHO_NO_HWALAC`) | an M4A file with ALAC |
 | `mpc` | `fw/hifi/codec_mpc.c` + libmpcdec (fixed point), SYNTH off | a Musepack file, SV7 or SV8 |
+| `wv` | `fw/hifi/codec_wavpack.c` + libwavpack 5.9.0 (decoder only), libc's malloc for ASan | a WavPack file |
 | `mp4` | `fw/src/mp4.c` (core A): the MP4 container, then the whole packet stream, then a seek | an M4A file |
 | `aac` | `mp4.c`, then `fw/hifi/codec_aac.c` + pvaacdec (AOSP) on the packet stream it makes | an M4A file |
 | `aacpkt` | `codec_aac.c` + pvaacdec alone | a packet stream (`hifi_proto.h`), configuration included |
@@ -105,7 +106,10 @@ For the three new targets, `mkseeds.sh` encodes FLAC (16 and 32 bits, mono and s
 compression levels) and ALAC in M4A. ffmpeg cannot encode Musepack: the `mpc` seeds are copied
 from `work/testsets/mpc_test` (or a folder given as third argument), the originals untouched. SV7
 files are cut to 40,000 bytes; an SV8 file is kept whole, because `mpc_demux_init` reads its end
-(the seek table), and the fuzzer's input limit is 4 MiB for it. `mkseeds.sh` encodes a few seconds of tone and noise at several rates, channel counts and
+(the seek table), and the fuzzer's input limit is 4 MiB for it. WavPack (`wv`, 0.105wv1):
+FFmpeg's encoder at several levels, depths (8 to 32 bits, floats) and channel counts, and with the
+reference `wavpack` on the PATH its modes (fast to very high, `-x6`, hybrid, floats); cut to
+100,000 bytes (the first blocks), the 32-bit ones to 300,000 (a block is larger). `mkseeds.sh` encodes a few seconds of tone and noise at several rates, channel counts and
 qualities: Vorbis, Opus, MP3 (MPEG-1, 2 and 2.5, CBR and VBR, with and without the Xing frame,
 ID3v2 and ID3v1 tags) and M4A (8 to 96 kHz, the `moov` box at the start or at the end). Given a
 music folder, it also takes a few files of each format from it. These are remuxed without

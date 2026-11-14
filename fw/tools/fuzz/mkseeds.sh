@@ -9,11 +9,12 @@
 # audio, so that each run stays short); M4A seeds are kept whole (their moov box may be at the
 # end). FLAC and ALAC (in M4A, OUTDIR/alac) are encoded by ffmpeg likewise. ffmpeg cannot encode
 # Musepack: MPC_DIR (default work/testsets/mpc_test, if present) gives SV7 and SV8 files, copied
-# (never changed) and into OUTDIR/mpc (SV7 cut to 40,000 bytes, SV8 whole).
+# (never changed) and into OUTDIR/mpc (SV7 cut to 40,000 bytes, SV8 whole). WavPack: OUTDIR/wv
+# (FFmpeg's encoder, and the reference wavpack when on the PATH), whole.
 set -e
 O=$1; M=$2; MP=${3:-$(dirname "$0")/../../../work/testsets/mpc_test}
 [ -n "$O" ] || { echo "usage: mkseeds.sh OUTDIR [MUSIC_DIR]"; exit 1; }
-mkdir -p "$O/vorbis" "$O/opus" "$O/mp3" "$O/m4a" "$O/flac" "$O/alac" "$O/mpc"
+mkdir -p "$O/vorbis" "$O/opus" "$O/mp3" "$O/m4a" "$O/flac" "$O/alac" "$O/mpc" "$O/wv"
 ff() { ffmpeg -loglevel error -y "$@"; }
 i=0
 for spec in "44100 2 5" "44100 1 0" "48000 2 8" "22050 2 2" "8000 1 -1" "96000 2 4"; do
@@ -58,6 +59,23 @@ for spec in "44100 2 s16p +faststart" "44100 1 s16p -" "48000 2 s32p +faststart"
   mf=""; [ "$4" != "-" ] && mf="-movflags $4"
   ff $(src $1 330 3) -ac $2 -c:a alac -sample_fmt $3 $mf -metadata title="Seed $i" "$O/alac/syn$i.m4a"
 done
+# WavPack (OUTDIR/wv): FFmpeg's encoder at several levels, depths and channel counts, and when
+# the reference wavpack is on the PATH its modes (fast to very high, hybrid, floats)
+i=0
+for spec in "44100 2 s16p 0" "44100 1 s16p 3" "48000 2 s32p 8" "96000 2 s32p 1" "8000 1 u8p 2" \
+            "22050 2 fltp 4"; do
+  set -- $spec; i=$((i + 1))
+  ff $(src $1 440 3) -ac $2 -c:a wavpack -sample_fmt $3 -compression_level $4 "$O/wv/syn$i.wv"
+done
+if command -v wavpack >/dev/null; then
+  ff $(src 44100 440 3) -ac 2 -c:a pcm_s16le "$O/wv/in.wav"
+  ff $(src 48000 440 3) -ac 2 -c:a pcm_f32le "$O/wv/inf.wav"
+  for m in "f -f" "n -q" "h -h" "hh -hh" "x -hhx6" "b -b256" "bh -b400hh"; do
+    set -- $m; wavpack -q -y $2 "$O/wv/in.wav" -o "$O/wv/ref-$1.wv"
+  done
+  wavpack -q -y -h "$O/wv/inf.wav" -o "$O/wv/ref-float.wv"
+  rm "$O/wv/in.wav" "$O/wv/inf.wav"
+fi
 i=0
 for f in "$MP"/*.[mM][pP][cC]; do
   [ -f "$f" ] || continue
@@ -92,4 +110,4 @@ fi
 for f in "$O"/vorbis/* "$O"/opus/* "$O"/mp3/* "$O"/flac/*; do
   head -c 40000 "$f" > "$f.t" && mv "$f.t" "$f"
 done
-ls -l "$O/vorbis" "$O/opus" "$O/mp3" "$O/m4a" "$O/flac" "$O/alac" "$O/mpc"
+ls -l "$O/vorbis" "$O/opus" "$O/mp3" "$O/m4a" "$O/flac" "$O/alac" "$O/mpc" "$O/wv"
