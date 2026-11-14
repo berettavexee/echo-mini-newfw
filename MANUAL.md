@@ -1,6 +1,6 @@
 # User manual
 
-This manual is for the ECHO MINI new firmware, version 0.104. It describes what the player shows
+This manual is for the ECHO MINI new firmware, version 0.105. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
 The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing a few
@@ -415,8 +415,8 @@ Storage:
 
 ## Installing
 
-1. Copy the image (`NEWFW104.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
-   instance `NEWFW104.IMG`) to the
+1. Copy the image (`NEWFW105.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
+   instance `NEWFW105.IMG`) to the
    root of the internal memory. Use the stock firmware's USB disk, or USB, "Disk, read/write"
    with this firmware.
 2. Main menu → System → **Install a firmware (.IMG)**:

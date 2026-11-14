@@ -4900,3 +4900,7 @@ Essai de 0.104m1 sur l'appareil : tout fonctionne. Demande : BACK au niveau du h
 
 Icônes dessinées par l'utilisateur (Pixilart, calque visible lu tel quel) : Settings, une clé plate (10 × 10) ; USB, une prise (12 × 7). 42 tests sur 42.
 
+## 153. Version 0.105 (2026-11-14)
+
+Publiée à la demande de l'utilisateur, notes de version validées par lui. Le code de l'image de test 0.104m2 (le menu regroupé, BACK à la racine, les icônes de l'utilisateur), après les essais sur l'appareil de 0.104u1, v1, w1, w2 et m1 (« tout fonctionne ») ; seul le numéro de version change. Contenu : §140 à §152.
+

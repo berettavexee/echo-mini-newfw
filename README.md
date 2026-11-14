@@ -20,6 +20,9 @@ with gapless playback and ReplayGain.
   and the microSD card together.
 - **Play queue** kept on the internal memory: play next, add to the end, a screen to see it;
   resumed after a power off.
+- **Interface**: one header on every screen (clock, what plays, play mode, volume, battery as an
+  icon, a percent or the music left), a grouped main menu with icons, an Information page,
+  screens drawn without flicker.
 - **Settings**: brightness, screen timeout, sleep timer, power off when idle, start-up behaviour.
 - **Languages**: English, French, Japanese, Simplified Chinese (partial); translations are gettext
   PO files, see [docs/TRANSLATING.md](docs/TRANSLATING.md).
@@ -37,13 +40,13 @@ with gapless playback and ReplayGain.
 - This is **unofficial**: install at your own risk. Keep a stock image on the player and
   learn the recovery mode first (see the manual).
 - It is made and tested for the **8 GB model** only (the 512 MB model is not supported).
-- The interface is plain. The project began as a test bench for codecs, gapless playback and
+- The interface is simple. The project began as a test bench for codecs, gapless playback and
   ReplayGain, which could not be added by patching the stock firmware. For a more polished
   custom firmware, look at [RECHO](https://recho.atzkey.workers.dev/).
 
 ## Getting started
 
-1. Download `NEWFW104.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
+1. Download `NEWFW105.IMG` from the [latest release](https://github.com/berettavexee/echo-mini-newfw/releases/latest).
 2. Follow [Installing](MANUAL.md#installing) in the manual.
 3. The [manual](MANUAL.md) shows the keys of each screen.
 

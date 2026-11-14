@@ -3,9 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-12, version 0.104a1 on the `rework` branch (the keys read in the SysTick
-interrupt, core A at 100 MHz with the screen off). Latest release: 0.104 (the screen drawn by DMA, text twice as fast, the font's
-tables and the log's formats out of the RAM, the first code overlay).
+Last update: 2026-11-14, version 0.105 (a new interface: one header, the files' top level with
+the volumes' free space, a grouped main menu, an Information page, no flicker).
 
 ## Done, validated on the device
 
@@ -64,7 +63,11 @@ tables and the log's formats out of the RAM, the first code overlay).
 | More room in core A's RAM: the font's tables read from the internal memory through a 2-way glyph cache, the log's formats kept in the image (lines made when written out) | 0.104 | §131-§133 |
 | The screen drawn by DMA: text drawn into RAM strips (a line laid out once, only the glyphs' pixels written), sent to the panel by DMAC1 while the next strip is drawn, the CPU as a fallback; the play screen's full redraw from 13.4 to 8 ms of core A, its partial one from 3.9 to 2.7 ms | 0.104 | §134-§136 |
 | Code overlays: the USB code (disk and sound card, 13.6 KiB) loaded from the internal memory into the directory listing's buffer for a USB session; code room from 29 to 42 KiB; the overlays' rules checked at each build (`tools/ovlcheck.py`) | 0.104 | §137 |
-| The keys read in the SysTick interrupt (the ladder sampled every 2 ms, the battery every 100 ms, the ADC never waited for): a press while the loop is held is taken after it instead of being lost; checked on the device (every key, chord, long presses, repeats) | 0.104k1 | §140 |
+| The keys read in the SysTick interrupt (the ladder sampled every 2 ms, the battery every 100 ms, the ADC never waited for): a press while the loop is held is taken after it instead of being lost; checked on the device (every key, chord, long presses, repeats) | 0.105 | §140 |
+| One header on every screen (title, n/N, clock, play state and mode icons, volume, battery as an icon, a percent or the music left), a folder ends with ">", the play screen with the track's number and the time left, every screen drawn without flicker (checked by the emulator's panel model) | 0.105 | §144, §147-§148, §150 |
+| The files' top level: Library, Internal memory, SD card with icons, the library's tracks and each volume's free space (counted at the library's update, kept across power-offs), the card greyed without one; BACK there opens the main menu | 0.105 | §149, §152 |
+| The main menu grouped with icons, USB inactive without the cable, System (Information, system screen, installer, loader mode) | 0.105 | §151-§152 |
+| Damaged Musepack and ALAC files cannot crash the decoders (found by fuzzing FLAC, ALAC and Musepack) | 0.105 | §146 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
 
@@ -78,36 +81,6 @@ core A causes no underrun in MP3, Vorbis or AAC; WAV 24/192 stands about 150 ms.
 session on the normal image is done (0.99r37, 14.6 h to an empty battery: no watchdog reset;
 the one fault record was the pause bug fixed in 0.101, §115). What is left of it is under "To
 do".
-
-## Since 0.104, on `rework` (not released)
-
-- 0.104k1: the keys and the battery read in the SysTick interrupt, the changes of the keys
-  queued with their times; the installer's key waits by WFI; core A's SysTick in the emulator,
-  `--stall-at` and the test `keys-stall` (§140).
-- 0.104a1: core A at 100 MHz while the music plays with the screen off (core A's divider only,
-  PCLK kept at 50 MHz, as RECHO does; 200 MHz for the screen, a track's tags, the storage task);
-  the emulator's CRU registers with their write mask, the test `clock-a` (§141). Checked on the
-  device; no gain on the battery life (0.104b1's full run: 14.6 h, as 0.104k1).
-- 0.104b1: the charging screen's text without flicker (§142). 0.104g1: the Bluetooth module's
-  pins logged at boot (§143).
-- 0.104u1: the interface, first step (§145, §147): one header on every screen (title, n/N,
-  clock, play state, play mode, battery as an icon), a folder ends with ">", the play screen
-  with the track's number and the time left, no more flickers (list mark, menu, settings, play
-  queue, seek mode); the fuzzing fixes in libmpcdec and the ALAC decoder (§146).
-- 0.104v1: the battery icon with a margin on its four sides; Settings, "Battery": the header
-  shows the icon, the percent or the music left (full runs less 10 %, §148).
-- 0.104w1: the top level of the files (point 5, §149): Library, Internal memory, SD card with
-  icons, the library's tracks and each volume's free space (counted at the library's update,
-  kept in the resume state), the card's line greyed without a card; a blank disk, a USB
-  session or an install start there. Flickers fixed: Settings scrolled, the library's update
-  screen. 0.104w2: the library's icon as stacked folders; the volume in the header (a speaker
-  and "-20 dB", §150), no longer on the play screen's format line.
-- 0.104m1: the main menu grouped (point 4, §151): Files, Now playing, Play queue, Library, USB,
-  Settings, System, with icons and what each holds at the right; USB (disk read only,
-  read/write, sound card) inactive without the cable; System: Information (a new page:
-  version, formats, volumes' size and free space, library, battery, time left), the system
-  screen, the installer (greyed without an image), the loader mode. 0.104m2: BACK at the top
-  level of the files opens the main menu; the user's icons for Settings and USB (§152).
 
 ## Version history
 
@@ -193,6 +166,13 @@ One line per version; the measurements are in `ETUDE.md`.
   image, the CPU as a fallback); the glyphs laid out once, only their pixels written, text
   twice as fast (§136); the first code overlay, the USB code over the directory listing, with
   its checks at each build (§137); a quality pass (§138).
+- 0.105: a new interface (§145, §147-§152): one header on every screen, the battery shown as
+  an icon, a percent or the music left, the volume in the header; the files' top level with
+  the volumes' free space; the main menu grouped (USB and System submenus, an Information
+  page); every screen drawn without flicker; the keys read in the SysTick interrupt (§140);
+  core A at 100 MHz with the screen off, no gain on the battery (§141); the fuzzing fixes in
+  libmpcdec and the ALAC decoder (§146); the emulator's tools: the ELF check, the panel's
+  flicker count, the disk reads by phase, foreign firmwares (§144).
 
 ## To do
 
