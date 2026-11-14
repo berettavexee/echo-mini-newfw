@@ -73,8 +73,30 @@ def wav(path, seconds=3, rate=44100):
 
 
 _LINE, _SKIP = r"^[^\n]*", r"(?:[^\n]*\n)*?[^\n]*"   # a line's start; lines between
-_INST = [(2000, "MENU", 1500)] + [(4000 + 300 * i, "VOL-") for i in range(7)] + \
-        [(6300, "PLAY"), (7600, "PLAY")]
+# The main menu and its submenus (menu.c, ETUDE §151), to reach an entry by its name
+MENU_TREE = {
+    "": ["Files", "Now playing", "Play queue", "Library", "USB", "Settings", "System"],
+    "USB": ["Disk, read only", "Disk, read/write", "Sound card"],
+    "System": ["Information", "System screen", "Install a firmware (.IMG)",
+               "USB loader mode (exit: RST)"],
+}
+
+
+def menu_to(*names):
+    """MENU held at 2 s (the menu opens at about 2.6 s, MENU let go at 3.5 s), then for each name
+    VOL- down to it and PLAY: the last PLAY by 6.1 s at most"""
+    out, t, menu = [(2000, "MENU", 1500)], 3600, ""
+    for n in names:
+        for _ in range(MENU_TREE[menu].index(n)):
+            out.append((t, "VOL-"))
+            t += 200
+        out.append((t + 100, "PLAY"))
+        t += 700
+        menu = n
+    return out
+
+
+_INST = menu_to("System", "Install a firmware (.IMG)") + [(7600, "PLAY")]
 TESTS = {
     "boot": dict(files={"A.WAV": "wav"}, keys="", ms=7000,          # the log: every 5 s
                  expect=[r"=== boot", r"font: Fusion Pixel",
@@ -121,8 +143,7 @@ TESTS = {
                       emu_args=["--vbus", "1", "--power", "1",
                                 "--gpio-at", "1500:2:5:0,7000:2:5:1,7200:2:5:0,"
                                              "9000:2:5:1,11500:2:5:0"],
-                      keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(6)],
-                                (6000, "PLAY")),
+                      keys=keys(*menu_to("USB", "Sound card")),
                       expect=[r"ovl: USB from FW1 in \d+ us", r"uac: start", r"screen off",
                               r"uac: exit \(Power 2 s\)", r"power off \(Power 2 s\)"]),
     # switched on by the cable (the charging screen, ETUDE §48): its text and gauge drawn again
@@ -133,23 +154,20 @@ TESTS = {
     # read again for the browser
     "uac-back": dict(files={"A.WAV": "wav"}, ms=12000,
                      emu_args=["--vbus", "1", "--power", "1", "--gpio-at", "1500:2:5:0"],
-                     keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(6)],
-                               (6000, "PLAY"), (8000, "BACK", 1500)),
+                     keys=keys(*menu_to("USB", "Sound card"), (8000, "BACK", 1500)),
                      expect=[r"ovl: USB from FW1 in \d+ us", r"uac: start", r"uac: exit \(BACK\)",
                              r"ui: folder [0-9a-f]+: \d+ entries"]),
     # the USB disk (read only, no host in the emulator) left by BACK: the listing read again
     "usb-disk": dict(files={"A.WAV": "wav"}, ms=20000,
                      emu_args=["--vbus", "1", "--power", "1", "--gpio-at", "1500:2:5:0"],
-                     keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(4)],
-                               (6000, "PLAY"), (8000, "BACK", 300)),
+                     keys=keys(*menu_to("USB", "Disk, read only"), (8000, "BACK", 300)),
                      expect=[r"ovl: USB from FW1 in \d+ us", r"usb: read only disk",
                              r"ui: card to be set up again", r"ui: top level: "]),
     # the same with the USB overlay damaged in the image on the eMMC: a message, no fault
     "ovl-bad": dict(files={"A.WAV": "wav"}, ms=12000,
                     emu_args=["--vbus", "1", "--power", "1", "--gpio-at", "1500:2:5:0"],
                     prep=lambda disk, tmp: damage_overlays(disk),
-                    keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(6)],
-                              (6000, "PLAY")),
+                    keys=keys(*menu_to("USB", "Sound card")),
                     expect=[r"ovl: USB: FW1: CRC mismatch", r"ui: card to be set up again"],
                     forbid=[r"uac: start"]),
     # the fault tests (ECHO_FAULT builds only: Power alone, core B faults, then is stuck; with
@@ -253,8 +271,7 @@ TESTS = {
     # the interface's language (ETUDE §112): Settings, Language (its first line) set to the
     # first catalogue (Français), back; after the reboot the setting read, the catalogue loaded
     "lang": dict(files={"A.WAV": "wav"}, ms=8000,
-                 keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "VOL-"),
-                           (4900, "PLAY"), (5500, "PLAY"), (6100, "BACK")),
+                 keys=keys(*menu_to("Settings"), (5500, "PLAY"), (6100, "BACK")),
                  expect=[r"lang: 3 catalogue\(s\) in FW1", r"lang: fr \(Français\), \d+ strings",
                          r"ui: language fr", r"ui: settings 3: .*language fr",
                          r"lang: fr \(Français\)"],
@@ -262,8 +279,7 @@ TESTS = {
     # Settings, the line Clock (under Date and time) to hidden, back; after the reboot the
     # setting read (ETUDE §120; the clock itself is not set in the emulator: nothing drawn)
     "clock-hide": dict(files={"A.WAV": "wav"}, ms=8000,
-                       keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"),
-                                 (4600, "VOL-"), (4900, "PLAY"), (5300, "VOL-"), (5600, "VOL-"),
+                       keys=keys(*menu_to("Settings"), (5300, "VOL-"), (5600, "VOL-"),
                                  (5900, "PLAY"), (6500, "BACK")),
                        expect=[r"ui: clock hidden", r"ui: settings 3: .*clock hidden"],
                        forbid=[r"ui: settings 3: .*clock shown"],
@@ -278,6 +294,24 @@ TESTS = {
                               r"keys: play", r"ui: folder 0: 1 entries",
                               r"-- panel: .*, 0 flickers"],
                       forbid=[r"ui: folder .*\n(.*\n)*.*keys: vol\+", r"tracks in \d+ folders"]),
+    # the main menu (§151): without the cable USB is greyed, PLAY there does nothing; System,
+    # Information, BACK; no flicker
+    "menu-tree": dict(files={"A.WAV": "wav"}, ms=13000,
+                      keys=keys(*menu_to("USB"), (5000, "VOL-"), (5200, "VOL-"), (5500, "PLAY"),
+                                (6000, "PLAY"), (7500, "BACK")),
+                      expect=[r"keys: menu long", r"ui: information", r"keys: back",
+                              r"-- panel: .*, 0 flickers"],
+                      forbid=[r"ovl: USB", r"uac: start"]),
+    # BACK at the top level of the files opens the main menu (§152): System, Information
+    "top-back": dict(files={"A.WAV": "wav"}, ms=12000, top=True,
+                     keys=keys((2000, "BACK"), *[(3000 + 200 * i, "VOL-") for i in range(6)],
+                               (4500, "PLAY"), (5200, "PLAY")),
+                     expect=[r"keys: back", r"ui: information"]),
+    # the menu's Library without an index (§151): built first, then its lists shown
+    "menu-library": dict(files={"A.WAV": "wav"}, ms=16000,
+                         keys=keys(*menu_to("Library")),
+                         expect=[r"library: 1 tracks \(1 read", r"space: internal \d+ MiB free",
+                                 r"library: views of 1 tracks"]),
     # the volume in the header (§150): VOL- and VOL+ on the play screen redraw it, no flicker
     "vol-header": dict(files={"A.WAV": "wav10"}, ms=9000,
                        keys=keys((2000, "PLAY"), (3500, "VOL-"), (4000, "VOL-"), (4500, "VOL+"),
@@ -287,8 +321,7 @@ TESTS = {
     # Settings, the line Battery (under Clock) to percent, then time left, drawn without flicker;
     # after the reboot the setting read
     "battery-show": dict(files={"A.WAV": "wav"}, ms=14000,
-                         keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"),
-                                   (4600, "VOL-"), (4900, "PLAY"), (5300, "VOL-"), (5600, "VOL-"),
+                         keys=keys(*menu_to("Settings"), (5300, "VOL-"), (5600, "VOL-"),
                                    (5900, "VOL-"), (6200, "PLAY"), (6600, "PLAY"), (7200, "BACK")),
                          expect=[r"ui: battery percent", r"ui: battery time left",
                                  r"ui: settings 3: .*battery time left",
@@ -915,9 +948,8 @@ def lib_build_test(variant):
     return go
 
 
-LIB_KEYS = keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "VOL-"),
-                (4900, "PLAY"),
-               *[(5200 + 250 * i, "VOL-") for i in range(13)], (8800, "PLAY"))
+LIB_KEYS = keys(*menu_to("Settings"), *[(5200 + 250 * i, "VOL-") for i in range(13)],
+                (8800, "PLAY"))
 
 
 def lib_settings(img, elf, tmp):
@@ -965,7 +997,7 @@ def lib_views(img, elf, tmp):
     songs = next(len(ln.split("\t")[4].split(",")) for ln in open(exp, encoding="utf-8")
                  if ln.startswith("view\t1\t9\t0\t"))
     dump = os.path.join(tmp, "after.img")
-    k = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"), (3400, "PLAY"), (4000, "PLAY"),
+    k = keys((2400, "VOL+"), (2800, "PLAY"), (3400, "PLAY"), (4000, "PLAY"),
              (4600, "PLAY"), (5200, "PLAY"), (6800, "MENU"), (7400, "BACK"), (7800, "BACK"),
              (8200, "BACK"), (8600, "VOL-"), (8900, "VOL-"), (9200, "VOL-"), (9500, "VOL-"),
              (9800, "PLAY"), (10400, "VOL-"), (10700, "VOL-"), (11000, "PLAY"))
@@ -1015,7 +1047,7 @@ def queue_file(img, elf, tmp):
                     dat], check=True, capture_output=True)
     mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
     dump = os.path.join(tmp, "after.img")
-    k = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"), (3400, "VOL-"), (3800, "PLAY"),
+    k = keys((2400, "VOL+"), (2800, "PLAY"), (3400, "VOL-"), (3800, "PLAY"),
              (4400, "PLAY"), (5000, "PLAY"), (7000, "MENU"), (7600, "BACK")) + \
         ",8400:VOL+,8600:VOL-,8900:NONE," + \
         keys((9400, "VOL-"), (9800, "MENU"), (10400, "VOL-"), (10800, "PLAY"), (11400, "BACK"),
@@ -1072,7 +1104,7 @@ def queue_card(img, elf, tmp):
     from fatimg import Volume
     fails = [] if Volume(card, 0).serial != Volume(card2, 0).serial else ["the same serial"]
     dump = os.path.join(tmp, "after.img")
-    k = keys((2000, "BACK"), (2400, "VOL-"), (2800, "PLAY"), (3400, "PLAY"), (4000, "PLAY"),
+    k = keys((2400, "VOL-"), (2800, "PLAY"), (3400, "PLAY"), (4000, "PLAY"),
              (5000, "MENU")) + ",5600:VOL+,5800:VOL-,6100:NONE," + \
         keys((6600, "VOL-"), (7000, "MENU"), (7600, "BACK"))
     out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
@@ -1122,7 +1154,7 @@ def lib_card(img, elf, tmp):
                    check=True, capture_output=True)
     mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
     dump = os.path.join(tmp, "after.img")
-    k = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"), (4000, "PLAY"))
+    k = keys((2400, "VOL+"), (2800, "PLAY"), (4000, "PLAY"))
     shots = os.environ.get("EMUTEST_SHOTS")
     out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--sd", card,
                           "--ms", "16000", "--steps", "30000000000", "--dump-disk", dump,
@@ -1161,7 +1193,7 @@ def lib_keep(img, elf, tmp):
     subprocess.run([sys.executable, os.path.join(TOOLS, "mklib.py"), disk, "--sd", card, "-o",
                     dat], check=True, capture_output=True)
     mtools(disk, "mcopy", dat, "::NEWFWLIB.DAT")
-    first = keys((2000, "BACK"), (2400, "VOL+"), (2800, "PLAY"),
+    first = keys((2400, "VOL+"), (2800, "PLAY"),
                  *[(3300 + 300 * i, "VOL-") for i in range(5)], (5200, "PLAY"))
     again = keys(*[(2000 + 300 * i, "VOL-") for i in range(5)], (4000, "PLAY"))  # (resumed
     dump = os.path.join(tmp, "after.img")                                       # on Artists)

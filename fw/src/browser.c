@@ -321,7 +321,7 @@ static int playing_index(void)                  /* the row of the track that pla
 }
 
 /* The top level's icons (16 x 12, glyph records, lcd_icon()): stacked folders, a chip, a card */
-static const uint8_t ic_lib[] = { 0x12, 0x10, 0x0c, 0x00, 0xff, 0xf0, 0x00, 0x9f, 0xf0, 0x80,
+const uint8_t ic_lib[] = { 0x12, 0x10, 0x0c, 0x00, 0xff, 0xf0, 0x00, 0x9f, 0xf0, 0x80,
                                   0x10, 0x9e, 0x10, 0x93, 0xff, 0x90, 0x01, 0x90, 0x01, 0x90,
                                   0x01, 0xf0, 0x01, 0x10, 0x01, 0x10, 0x01, 0x1f, 0xff };
 static const uint8_t ic_chip[] = { 0x12, 0x10, 0x0c, 0x00, 0xff, 0x09, 0x20, 0x3f, 0xf0, 0x20,
@@ -669,6 +669,15 @@ void browser_top(void)
     b_dirty = 1;
 }
 
+static void enter(int i);
+
+void browser_library(void)
+{
+    browser_top();
+    path[0].sel = 0;                            /* (the library first) */
+    enter(0);
+}
+
 /* path[1]: the root of a volume */
 void path_root(int v)
 {
@@ -920,6 +929,8 @@ int browser_key(const struct key_ev *e)
         move(-1);
     else if (k == KEY_VOLDOWN)
         move(1);
+    else if (k == KEY_BACK && ev == EV_PRESS && !depth)
+        scr_push(&menu_screen);                 /* nothing above the top level: the menu (§152) */
     else if (k == KEY_BACK && ev == EV_PRESS)
         leave();
     else if (k == KEY_PLAY && dir_n && lib_shown) {   /* a library list (ETUDE §127) */

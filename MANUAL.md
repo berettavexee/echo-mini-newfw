@@ -170,7 +170,7 @@ plays, the browser shows its progress bar at the bottom.
 | **PLAY** on a folder | open it |
 | **PLAY held** on a folder | play everything under it, subfolders included, in order (also on "Internal memory" or "SD card") |
 | **PLAY** on a file | play the folder from this file, and go to the play screen |
-| **BACK** | up one folder |
+| **BACK** | up one folder; at the top level, the main menu |
 | **MENU** | to the play screen |
 | **MENU held** | main menu |
 
@@ -241,23 +241,31 @@ Tracks of the microSD card are passed over while the card is out, or while anoth
 
 ## The main menu (MENU held)
 
-VOL+ / VOL- move, PLAY chooses, BACK or MENU closes the menu. The music goes on while the menu
-is open, except for the USB and system entries, which stop it.
+VOL+ / VOL- move, PLAY chooses, MENU closes the menu; BACK closes it, or goes back from USB
+or System to the menu. The music goes on while the menu is open, except for the USB and
+system entries, which stop it. A greyed entry cannot be used now (its reason at the right);
+PLAY does nothing there.
 
 ![Main menu](docs/manual/main-menu.png)
 
 | Entry | What it does |
 |---|---|
 | Files | the folder browser |
-| Now playing | the play screen |
-| Play queue | the play queue: its tracks, PLAY plays one, the first line empties it |
+| Now playing | the play screen (greyed with nothing to play) |
+| Play queue | the play queue: its tracks, PLAY plays one, the first line empties it; at the right its number of tracks |
+| Library | the library's lists (below); at the right its tracks, or "not built": PLAY builds it first |
+| USB > | greyed without the USB cable ("no cable"); with it, a menu: |
+| &nbsp;&nbsp;Disk, read only | the internal memory as a USB disk; the computer can read it but not write to it |
+| &nbsp;&nbsp;Disk, read/write | the same, and the computer can write to it (copy music, firmware images) |
+| &nbsp;&nbsp;Sound card | the player as a USB sound card for a computer (see below) |
 | Settings | the settings screen (below) |
-| USB disk, read only | the internal memory as a USB disk; the computer can read it but not write to it |
-| USB disk, read/write | the same, and the computer can write to it (copy music, firmware images) |
-| USB sound card | the player as a USB sound card for a computer (see below) |
-| Install a firmware (.IMG) | the installer (see "Installing") |
-| System screen | hardware state (battery, keys, plugs, clocks); any key returns |
-| USB loader mode (exit: RST) | restarts into the loader's USB mode, for recovery from a computer; leave it with the RST hole |
+| System > | a menu: |
+| &nbsp;&nbsp;Information | the version, the formats played, each volume's size and free space, the library's tracks, the battery and the music left; any key returns |
+| &nbsp;&nbsp;System screen | hardware state (battery, keys, plugs, clocks); any key returns |
+| &nbsp;&nbsp;Install a firmware (.IMG) | the installer (see "Installing"); at the right the images found in the root folder, greyed when there is none |
+| &nbsp;&nbsp;USB loader mode (exit: RST) | restarts into the loader's USB mode, for recovery from a computer; leave it with the RST hole |
+
+![System, Information](docs/manual/information.png)
 
 **USB disk**: plug the cable, then choose the entry.
 - Leave with **BACK**, after ejecting the disk on the computer.
@@ -409,9 +417,9 @@ Storage:
 
 1. Copy the image (`NEWFW104.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
    instance `NEWFW104.IMG`) to the
-   root of the internal memory. Use the stock firmware's USB disk, or "USB disk, read/write"
+   root of the internal memory. Use the stock firmware's USB disk, or USB, "Disk, read/write"
    with this firmware.
-2. Main menu → **Install a firmware (.IMG)**:
+2. Main menu → System → **Install a firmware (.IMG)**:
    - VOL+ / VOL- choose the image (long names are shown, and scroll when too long), and PLAY
      checks it;
    - PLAY then installs it, and BACK cancels.

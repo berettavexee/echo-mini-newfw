@@ -11,11 +11,11 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/browser.c src/libbrowse.c
+#: src/browser.c src/libbrowse.c src/menu.c
 msgid "Library"
 msgstr ""
 
-#: src/browser.c
+#: src/browser.c src/menu.c
 msgid "Internal memory"
 msgstr ""
 
@@ -27,20 +27,20 @@ msgstr ""
 msgid "SD card (needs FAT32 or exFAT)"
 msgstr ""
 
-#: src/browser.c
+#: src/browser.c src/menu.c
 msgid "SD card"
 msgstr ""
 
-#: src/browser.c
+#: src/browser.c src/menu.c
 msgid "not built"
 msgstr ""
 
-#: src/browser.c src/settings.c
+#: src/browser.c src/menu.c src/settings.c
 #, c-format
 msgid "%u tracks"
 msgstr ""
 
-#: src/browser.c
+#: src/browser.c src/menu.c
 msgid "no card"
 msgstr ""
 
@@ -334,24 +334,35 @@ msgstr ""
 msgid "Play queue"
 msgstr ""
 
+#. TRANSLATORS: the main menu's entry for the USB modes (disk, sound card)
+#: src/menu.c
+msgid "USB"
+msgstr ""
+
 #: src/menu.c src/settings.c
 msgid "Settings"
 msgstr ""
 
+#. TRANSLATORS: the main menu's entry for the information, installer and system screens
 #: src/menu.c
-msgid "USB disk, read only"
+msgid "System"
 msgstr ""
 
 #: src/menu.c
-msgid "USB disk, read/write"
-msgstr ""
-
-#: src/menu.c src/uac.c
-msgid "USB sound card"
+msgid "Disk, read only"
 msgstr ""
 
 #: src/menu.c
-msgid "Install a firmware (.IMG)"
+msgid "Disk, read/write"
+msgstr ""
+
+#: src/menu.c
+msgid "Sound card"
+msgstr ""
+
+#. TRANSLATORS: a page of facts: version, formats, free space, battery
+#: src/menu.c
+msgid "Information"
 msgstr ""
 
 #: src/menu.c
@@ -359,7 +370,74 @@ msgid "System screen"
 msgstr ""
 
 #: src/menu.c
+msgid "Install a firmware (.IMG)"
+msgstr ""
+
+#: src/menu.c
 msgid "Menu"
+msgstr ""
+
+#. TRANSLATORS: why the USB entry is greyed (main menu)
+#: src/menu.c
+msgid "no cable"
+msgstr ""
+
+#: src/menu.c
+#, c-format
+msgid "%u found"
+msgstr ""
+
+#: src/menu.c src/playscreen.c src/settings.c
+msgid "none"
+msgstr ""
+
+#. TRANSLATORS: a size (Information)
+#: src/menu.c
+#, c-format
+msgid "%u MB"
+msgstr ""
+
+#: src/menu.c
+#, c-format
+msgid "%u.%u GB"
+msgstr ""
+
+#: src/menu.c
+#, c-format
+msgid "%u GB"
+msgstr ""
+
+#: src/menu.c
+msgid "not readable"
+msgstr ""
+
+#. TRANSLATORS: the free space and the size of a volume (Information)
+#: src/menu.c
+#, c-format
+msgid "%s free of %s"
+msgstr ""
+
+#. TRANSLATORS: Information's lines
+#: src/menu.c
+msgid "Version"
+msgstr ""
+
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
+#: src/menu.c src/settings.c
+msgid "Battery"
+msgstr ""
+
+#: src/menu.c
+msgid "charging"
+msgstr ""
+
+#: src/menu.c
+msgid "charged"
+msgstr ""
+
+#. TRANSLATORS: the music left on the battery (Information)
+#: src/menu.c
+msgid "Time left"
 msgstr ""
 
 #: src/menu.c
@@ -526,10 +604,6 @@ msgstr ""
 msgid "VOL+/- move  PLAY go  BACK cancel"
 msgstr ""
 
-#: src/playscreen.c src/settings.c
-msgid "none"
-msgstr ""
-
 #: src/qscreen.c
 msgid "Queue emptied"
 msgstr ""
@@ -545,11 +619,6 @@ msgstr ""
 #. TRANSLATORS: the time shown at the top of the play screen and the browser
 #: src/settings.c
 msgid "Clock"
-msgstr ""
-
-#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
-#: src/settings.c
-msgid "Battery"
 msgstr ""
 
 #. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
@@ -716,6 +785,10 @@ msgstr ""
 
 #: src/uac.c
 msgid "MENU: remote off"
+msgstr ""
+
+#: src/uac.c
+msgid "USB sound card"
 msgstr ""
 
 #: src/uac.c

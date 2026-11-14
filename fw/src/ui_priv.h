@@ -109,6 +109,7 @@ void copy_name(char *d, const char *s, int max);
 void path_root(int v);                          /* path[1]: the root of a volume */
 void browser_lib_changed(void); /* the library updated: its tracks read again (top level) */
 void browser_top(void);         /* the top level, the internal memory selected */
+void browser_library(void);     /* the library's lists, from their top (the main menu) */
 int sd_open(void);                              /* the card set up and mounted, 0: ready */
 int sd_card_bad(void);                          /* the card in failed to mount (until changed) */
 void sd_forget(void);                           /* set up again at the next access */
@@ -247,8 +248,12 @@ int play_key(const struct key_ev *e);
 int seek_key(const struct key_ev *e);
 
 /* ---- menu.c ---- */
-enum { M_FILES, M_PLAYING, M_QUEUE, M_SETTINGS, M_USB_RO, M_USB_RW, M_USB_DAC, M_INSTALL, M_SYSTEM,
-       M_LOADER, M_COUNT };
+enum { M_FILES, M_PLAYING, M_QUEUE, M_SETTINGS, M_LIBRARY, M_INFO, M_USB_RO, M_USB_RW, M_USB_DAC,
+       M_INSTALL, M_SYSTEM, M_LOADER };            /* menu_choice (menu.c): from M_USB_RO on, the */
+                                                /* player stopped first (ui.c) */
+extern const struct screen info_screen;         /* System, Information (menu.c) */
+extern const uint8_t ic_lib[];                  /* the library's icon (browser.c) */
+char *bat_time_text(char *p, char *end, int pct);   /* the music left: "11h", "45m" (uidraw.c) */
 extern const struct screen menu_screen, clock_screen, queue_screen;
 extern int menu_choice;              /* the main menu's choice once closed, -1: none */
 

@@ -4882,3 +4882,21 @@ Propositions 4 et 5 écrites à la demande de l'utilisateur ; ses choix : sans c
 
 L'utilisateur a dessiné un glyphe de haut-parleur (Pixilart, `volume.pixil` : JSON, un PNG par calque ; le calque visible lu tel quel, 11 × 9) et choisi de l'afficher dans l'en-tête plutôt que sur la ligne technique. L'en-tête, de droite à gauche : batterie (42 px : icône, « 100% » ou « 45 min »), volume (54 px : le haut-parleur et « -20 dB », en gris), mode, état, horloge, « n/N » (50 px au lieu de 60, la place de « 999/999 »). Le titre perd 19 px quand un « n/N » est affiché (« Daft Punk - Disc… » au lieu de « Daft Punk - Discovery »). Le volume n'est plus sur la ligne technique de l'écran de lecture. Redessiné seulement quand il change (`hd.vol`). Test `vol-header` (VOL− et VOL+ pendant la lecture, aucun clignotement) ; 39 tests sur 39.
 
+## 151. Le menu principal regroupé, sous-menus USB et System, page Information (point 4, 0.104m1, 2026-11-14)
+
+Proposition du §149 acceptée (USB inactif sans câble).
+
+**Menu** (`menu.c`) : un écran générique piloté par des tables (`struct mitem` : nom, icône, action `M_*` ou `M_SUB(menu)`) ; trois menus : principal (Files, Now playing, Play queue, Library, USB, Settings, System ; icônes 16 × 12 dessinées par nous : dossier, note, liste, dossiers empilés, prise USB, roue dentée, « i »), USB (Disk, read only ; Disk, read/write ; Sound card), System (Information ; System screen ; Install a firmware ; USB loader mode). BACK remonte du sous-menu au menu principal sur sa ligne, MENU ferme. Les textes à droite en gris, alignés sur la colonne du chevron gardée sur chaque ligne : morceaux de la file, de la bibliothèque (« not built »), « no cable », images .IMG trouvées (racine lue à l'ouverture de System, noms 8.3). Grisées et sans effet : Now playing sans file, USB sans câble (le menu se redessine quand le câble arrive ou part), l'installateur sans image. Les lignes grisées restent sélectionnables (le nombre de VOL− jusqu'à une entrée ne dépend pas de l'état).
+
+**Library** depuis le menu : la bibliothèque construite d'abord si elle n'existe pas (l'écran de mise à jour), puis ses listes dans le navigateur (`browser_library()`).
+
+**Information** (`info_screen`) : version et date, formats lus, mémoire interne et carte (« 5.0 GB free of 7.0 GB » quand l'espace a été compté, la taille sinon ; « no card »), morceaux de la bibliothèque, batterie (tension, pourcentage), autonomie (la même estimation que l'en-tête ; « charging » / « charged » câble branché). Toute touche ferme. La ligne batterie redessinée quand elle change.
+
+**Tests** : `menu_to(*noms)` dans le banc (l'arbre du menu en Python, VOL− jusqu'à chaque nom puis PLAY) remplace les séquences comptées à la main (USB, réglages, installateur, bibliothèque). Nouveaux : `menu-tree` (USB grisé sans câble, PLAY sans effet, System, Information, aucun clignotement), `menu-library` (Library sans index : construite, puis ses vues). 41 tests sur 41.
+
+## 152. BACK à la racine des fichiers, icônes de l'utilisateur (0.104m2, 2026-11-14)
+
+Essai de 0.104m1 sur l'appareil : tout fonctionne. Demande : BACK au niveau du haut des fichiers ne doit pas laisser l'utilisateur bloqué : il ouvre le menu principal (`browser.c`, `scr_push(&menu_screen)` quand `depth` vaut 0). Les tests de la bibliothèque et de la file sur carte commençaient par un BACK (de la racine interne au niveau du haut, du temps où le démarrage se faisait dans la mémoire interne) : retiré, ils démarrent maintenant au niveau du haut. Nouveau test `top-back` (BACK, System, Information).
+
+Icônes dessinées par l'utilisateur (Pixilart, calque visible lu tel quel) : Settings, une clé plate (10 × 10) ; USB, une prise (12 × 7). 42 tests sur 42.
+

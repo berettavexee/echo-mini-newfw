@@ -102,6 +102,12 @@ do".
   session or an install start there. Flickers fixed: Settings scrolled, the library's update
   screen. 0.104w2: the library's icon as stacked folders; the volume in the header (a speaker
   and "-20 dB", §150), no longer on the play screen's format line.
+- 0.104m1: the main menu grouped (point 4, §151): Files, Now playing, Play queue, Library, USB,
+  Settings, System, with icons and what each holds at the right; USB (disk read only,
+  read/write, sound card) inactive without the cable; System: Information (a new page:
+  version, formats, volumes' size and free space, library, battery, time left), the system
+  screen, the installer (greyed without an image), the loader mode. 0.104m2: BACK at the top
+  level of the files opens the main menu; the user's icons for Settings and USB (§152).
 
 ## Version history
 
@@ -274,11 +280,9 @@ One line per version; the measurements are in `ETUDE.md`.
   6. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
   Also done (§144): `--foreign`, another firmware without an ELF (RECHO 0.10.1 runs: its
   screens, keys and files, its core B not run), for comparisons.
-- The interface, next steps (§145; 1, 3, 6 and 7 done in 0.104u1, §147; 5 in 0.104w1, §149): a
-  bar of the keys' actions at the bottom, also for short messages (2); the main menu grouped,
-  with icons, one "USB" entry inactive without the cable, a "System" submenu with an
-  Information page (4, proposal agreed); a larger text needs a second font (Fusion Pixel has
-  only 12 px).
+- The interface, next steps (§145; 1, 3, 6 and 7 done in 0.104u1, §147; 5 in 0.104w1, §149;
+  4 in 0.104m1, §151): a bar of the keys' actions at the bottom, also for short messages (2); a
+  larger text needs a second font (Fusion Pixel has only 12 px).
 - Output and DAC settings (CS43131 registers, little code each):
   - headphone gain low / high (low suits sensitive in-ear monitors);
   - volume limiter (an adjustable ceiling);

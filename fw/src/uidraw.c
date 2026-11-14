@@ -155,12 +155,11 @@ static void battery_icon(int pct, int low, int chg)
  * and the keys, which the endurance runs hardly use: better more than shown than less. Whole
  * hours (rounded down), the minutes under an hour. */
 #define BAT_FULL_MIN (145 * 6 * 9 / 10)         /* 14.5 h less 10 %: 783 minutes */
-static void time_left_text(char *b, int pct)
+char *bat_time_text(char *p, char *end, int pct)
 {
     uint32_t m = (uint32_t)pct * BAT_FULL_MIN / 100;
     /* TRANSLATORS: the music left on the battery, in hours, then in minutes (header, short) */
-    char *p = m >= 60 ? log_format(b, b + 7, T("%uh"), m / 60) : log_format(b, b + 7, T("%um"), m);
-    *p = 0;
+    return m >= 60 ? log_format(p, end, T("%uh"), m / 60) : log_format(p, end, T("%um"), m);
 }
 
 void head_status(int force)
@@ -200,7 +199,7 @@ void head_status(int force)
         else {
             char b[8];
             if (show == BAT_TIME)
-                time_left_text(b, pct);
+                *bat_time_text(b, b + 7, pct) = 0;
             else {
                 char *p = put_dec(b, (uint32_t)pct);
                 *p++ = '%';

@@ -297,6 +297,16 @@ static void menu_action(int m, int *scr)
         *scr = SCR_BROWSER;
     else if (m == M_SETTINGS)
         scr_push(&settings_screen);
+    else if (m == M_INFO)
+        scr_push(&info_screen);
+    else if (m == M_LIBRARY) {                  /* not built yet: built first (§151) */
+        if (lib_status() < 0) {
+            resume_save_later();
+            lib_update();
+        }
+        browser_library();
+        *scr = SCR_BROWSER;
+    }
     else if (m == M_QUEUE)
         scr_push(&queue_screen);
     else if (m == M_PLAYING)
