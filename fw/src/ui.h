@@ -1,6 +1,7 @@
 /* User interface: browser, now playing, main menu (ETUDE §25) */
 #ifndef UI_H
 #define UI_H
+#include <stdint.h>
 
 void ui_main(void);             /* never returns */
 void ui_background(void);       /* the player, between two key polls or during long reads */
@@ -13,5 +14,6 @@ void ui_power_off(void);        /* before switching off: the resume state */
 void list_move(int *sel, int *top, int n, int rows, int d);
 int list_text_end(int n, int rows);
 void list_scrollbar(int y, int rows, int top, int n);
+void list_mark(int y, int on, uint16_t bg);     /* the note of the track playing, or blank */
 
 #endif

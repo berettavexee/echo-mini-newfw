@@ -50,8 +50,10 @@ static uint32_t rf_sum(const struct resume_f *r)
 _Static_assert(sizeof(struct resume) <= RQ_WORD * 4, "resume overlaps resume_q");
 
 /* The track of a tree queue, to play it at power-on before its tree is walked again (0.99r23,
- * ETUDE §104): words 104 to 127, after the settings (settings.c: 40 words at most) */
+ * ETUDE §104): words 104 to 127, after the settings and the free space */
 #define RT_WORD 104
+/* The free space counted (libui.c, §149): words 96 to 103, the settings' last 8 (32 at most) */
+#define SPACE_WORD 96
 struct resume_t {
     char magic[4];                              /* "TRK1" */
     uint32_t cluster, size;
@@ -138,7 +140,7 @@ static void resume_save_do(void)
         tsum = rt->sum;
     }
     uint32_t sum = r->sum ^ rq->sum ^ ((struct resume_f *)rq)->sum ^ tsum ^
-                   settings_put(rs_buf + 64);
+                   settings_put(rs_buf + 64) ^ space_put(rs_buf + SPACE_WORD);
     if (sum == rs_last_sum)
         return;                                 /* nothing changed: no write */
     rs_last_sum = sum;
@@ -270,6 +272,7 @@ void resume_load(void)
     struct resume *r = (struct resume *)rs_buf;
     int bad = log_state_read(rs_buf);
     settings_get(rs_buf + 64);                  /* the defaults when there are none */
+    space_get(rs_buf + SPACE_WORD);
     if (bad || r->sum != rs_sum(r) ||
         (__builtin_memcmp(r->magic, "NEWFWSTATE 4", 12) &&
          __builtin_memcmp(r->magic, "NEWFWSTATE 3", 12) &&
@@ -280,7 +283,7 @@ void resume_load(void)
     struct resume_q *rq = (struct resume_q *)(rs_buf + RQ_WORD);
     struct resume_t *rt = (struct resume_t *)(rs_buf + RT_WORD);
     rs_last_sum = r->sum ^ rq->sum ^ (rt->sum == rt_sum(rt) ? rt->sum : 0) ^
-                  settings_put(rs_buf + 64);
+                  settings_put(rs_buf + 64) ^ space_put(rs_buf + SPACE_WORD);
     int tree = !__builtin_memcmp(rq->magic, "QTR1", 4) && rq->sum == rq_sum(rq) && rq->q.tree;
     struct resume_f *rf = (struct resume_f *)rq;
     int fq = !__builtin_memcmp(rf->magic, "QFL1", 4) && rf->sum == rf_sum(rf);

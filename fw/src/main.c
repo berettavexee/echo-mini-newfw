@@ -274,7 +274,8 @@ void sys_idle(void)
     rtc_service();
     perf_idle_report();
     if (millis() - sys_t_bat > 60000) {
-        static uint32_t t_win, idle_win;
+        static uint32_t t_win, idle_win, slow_win;
+        uint32_t slow = core_slow_total();
         struct rtc_tm t;
         int c = rtc_get(&t);
         uint32_t now24 = timer24(), el = now24 - t_win, sl = a_idle - idle_win;
@@ -282,11 +283,14 @@ void sys_idle(void)
         idle_win = a_idle;
         sys_t_bat = millis();
         log_printf("battery %u mV, usb %d, charge pin %d, font reads %u, clock %02u:%02u:%02u%s, "
-                   "core A busy %u.%u %%", battery_mv(), vbus(), gpio_get(PIN_CHARGING),
+                   "core A busy %u.%u %% at %u MHz, %u s below 200 MHz (%u changes)",
+                   battery_mv(), vbus(), gpio_get(PIN_CHARGING),
                    font_misses(), c < 0 ? 0 : t.hour, c < 0 ? 0 : t.min, c < 0 ? 0 : t.sec,
                    c == 1 ? "" : c ? " (not set)" : " (none)",
                    el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) / 10 : 0,
-                   el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) % 10 : 0);
+                   el > sl ? (uint32_t)((uint64_t)(el - sl) * 1000 / el) % 10 : 0,
+                   cpu_hz / 1000000, (slow - slow_win) / 1000, core_switches);
+        slow_win = slow;
         log_printf("lcd: DMA mode %d: %u transfers, %u KiB, waits %u ms (max %u us), %u failures",
                    lcd_dma_mode, lcd_dma.xfers, lcd_dma.bytes >> 10, lcd_dma.wait_us / 1000,
                    lcd_dma.wait_max, lcd_dma.fails);
@@ -372,7 +376,8 @@ void sys_power_off(const char *why)
 }
 
 /* WFI only while the 1 ms SysTick interrupt runs, so that the wait is bounded. A function of
- * its own: the emulator (tools/emu_fw.py), which has no SysTick, replaces it by a return. */
+ * its own: the emulator (tools/emu_fw.py) replaces it by a return and moves its clock to the next
+ * ms (its SysTick runs there, ETUDE §140). */
 __attribute__((noinline)) void cpu_wait(void)
 {
     if (REG(SYST_CSR) & 2) {
@@ -393,6 +398,8 @@ void sys_screen_set(int on)
         return;
     sys_screen_off = !on;
     if (on) {
+        if (core_clock(2))                      /* (power_service in ui.c, ETUDE §141) */
+            log_printf("clock: core A 200 MHz (screen on)");
         if (clock_is_low) {
             clock_low(0);                       /* the screen at full speed (ui.c power_service) */
             log_printf("screen: clocks back on the PLL, core %u Hz against the crystal "
@@ -471,6 +478,7 @@ int main(void)
     timer24_init();
     uint32_t wdt_was = wdt_init();
     log_init();
+    adc_scan_start();                           /* the keys and the battery read by SysTick */
     log_printf("=== boot %u: " FW_NAME " " FW_VERSION " (" FW_DATE "), tag %x, r0 %x r2 %x",
                logs.boots, boot_tag & 0xffff, boot_regs[0], boot_regs[2]);
     if (logs.recovered)
@@ -496,6 +504,12 @@ int main(void)
     log_printf("battery %u mV, usb %d, charge pin %d, jack 3.5 %d 4.4 %d, power key %d",
                battery_mv(), vbus(), gpio_get(PIN_CHARGING), gpio_get(PIN_JACK35),
                !gpio_get(PIN_JACK44), power_key());
+    /* The Bluetooth module's pins, left as they are (ROADMAP): GPIO2_7 its power (1 = on),
+     * GPIO2_16/2_17 UART1 TX/RX. Levels read, then direction, output data, iomux and pulls. */
+    log_printf("bt pins: power %d tx %d rx %d, gpio2 ddr %x dr %x, grf iomux2a %x 2c %x "
+               "pull2a %x 2c %x", gpio_get(2, 7), gpio_get(2, 16), gpio_get(2, 17),
+               REG(GPIO2_BASE + GPIO_DDR), REG(GPIO2_BASE + GPIO_DR), REG(GRF_BASE + 0x40),
+               REG(GRF_BASE + 0x48), REG(GRF_BASE + 0x50), REG(GRF_BASE + 0x58));
     log_flush();
     battery_check_boot();
     charge_screen(1);                           /* switched on by the USB cable: until PLAY held */

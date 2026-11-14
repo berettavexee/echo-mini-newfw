@@ -92,6 +92,7 @@
 #define SYST_CSR            0xe000e010u
 #define SYST_RVR            0xe000e014u
 #define SYST_CVR            0xe000e018u
+#define SCB_ICSR            0xe000ed04u
 
 /* PMU-SRAM words kept across a reset */
 #define PMUSRAM_FAST_MARK   0x0309ffe0u          /* set while trying 200 MHz */

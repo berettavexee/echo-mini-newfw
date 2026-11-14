@@ -25,6 +25,68 @@ int lib_status(void)
     return (int)h[9];                           /* +36: the tracks of the half in use */
 }
 
+/* ---- the free space (§149): counted after a library update, in its work memory ---- */
+static struct {
+    uint32_t serial, mib;                       /* mib: 0xffffffff, not counted */
+} space[2] = { { 0, 0xffffffffu }, { 0, 0xffffffffu } };
+
+int32_t space_free_mib(int v)
+{
+    const struct fat_vol *fv = v == FAT_VOL_SD ? &sdvol : &vol;
+    return fv->mounted && space[v].mib != 0xffffffffu && space[v].serial == fv->serial ?
+           (int32_t)space[v].mib : -1;
+}
+
+static void space_count(void)
+{
+    for (int v = FAT_VOL_INT; v <= FAT_VOL_SD; v++) {
+        const struct fat_vol *fv = v == FAT_VOL_SD ? &sdvol : &vol;
+        if (!fv->mounted)
+            continue;
+        uint32_t t0 = millis();
+        int32_t n = fat_free(v, LB_WORK, LB_WORK_BYTES, wdt_kick);
+        if (n < 0) {
+            log_printf("space: %s not counted", v ? "card" : "internal");
+            continue;
+        }
+        space[v].serial = fv->serial;
+        space[v].mib = (uint32_t)((uint64_t)(uint32_t)n * fv->spc / 2048);
+        log_printf("space: %s %u MiB free of %u in %u ms", v ? "card" : "internal", space[v].mib,
+                   (uint32_t)((uint64_t)fv->clusters * fv->spc / 2048), millis() - t0);
+    }
+}
+
+#define SPACE_MAGIC 0x31435053u                 /* "SPC1" */
+static uint32_t space_sum(const uint32_t *w)
+{
+    uint32_t s = 0x4e465350;
+    for (int i = 0; i < 5; i++)
+        s = (s << 5 | s >> 27) ^ w[i];
+    return s;
+}
+
+uint32_t space_put(uint32_t *w)
+{
+    w[0] = SPACE_MAGIC;
+    w[1] = space[0].serial;
+    w[2] = space[0].mib;
+    w[3] = space[1].serial;
+    w[4] = space[1].mib;
+    w[5] = space_sum(w);
+    return w[5];
+}
+
+void space_get(const uint32_t *w)
+{
+    if (w[0] != SPACE_MAGIC || w[5] != space_sum(w))
+        return;
+    space[0].serial = w[1];
+    space[0].mib = w[2];
+    space[1].serial = w[3];
+    space[1].mib = w[4];
+    log_printf("space: kept, internal %d MiB, card %d MiB", (int)w[2], (int)w[4]);
+}
+
 static uint32_t t_start, t_scan, last_done;
 static int last_phase = -1;
 
@@ -58,8 +120,26 @@ static int lib_progress(int phase, uint32_t done, uint32_t total)
         last_phase = phase;
         if (phase == LB_SCAN)
             t_scan = millis();
-        lcd_fill(0, 50, LCD_W, 80, BG);
+        /* the bands between the lines, the lines' margins; the lines drawn whole below (a
+         * clear of the area first flickered: §149) */
+        lcd_fill(0, 50, LCD_W, 4, BG);
+        lcd_fill(0, 54, 8, 16, BG);
         lcd_text_clip(8, 54, tr(what[phase & 3]), LCD_W - 8, FG, BG);
+        lcd_fill(LCD_W - 8, 54, 8, 16, BG);
+        lcd_fill(0, 70, LCD_W, 8, BG);
+        lcd_fill(0, 78, 8, 16, BG);             /* (the count: text_right() below) */
+        lcd_fill(LCD_W - 8, 78, 8, 16, BG);
+        lcd_fill(0, 94, LCD_W, 6, BG);
+        lcd_fill(0, 100, 4, 6, BG);             /* (the bar: progress_bar() below) */
+        lcd_fill(LCD_W - 4, 100, 4, 6, BG);
+        if (!total)
+            lcd_fill(4, 100, LCD_W - 8, 6, BG);
+        lcd_fill(0, 106, LCD_W, 6, BG);
+        lcd_fill(0, 112, 8, 16, BG);
+        if (last_left[0])                       /* the time left: only in the scan */
+            lcd_fill(8, 112, LCD_W - 16, 16, BG);
+        lcd_fill(LCD_W - 8, 112, 8, 16, BG);
+        lcd_fill(0, 128, LCD_W, 2, BG);
         last_cnt[0] = last_left[0] = 0;
         bar_w = -1;
         force = 1;
@@ -121,7 +201,11 @@ int lib_update(void)
     last_phase = -1;
     struct lb_result r;
     int e = lib_build(&hooks, &r);
-    lcd_fill(0, 50, LCD_W, LCD_H - 50, BG);
+    browser_lib_changed();
+    if (!e) {
+        space_count();
+        resume_save_later();                    /* (the counts kept, by the loop) */
+    }
     char b[64], *p;
     if (!e)
         p = log_format(b, b + sizeof b - 1, T("Library updated: %u tracks"), r.tracks);
@@ -134,7 +218,11 @@ int lib_update(void)
     else
         p = log_format(b, b + sizeof b - 1, T("The library could not be updated (%d)"), e);
     *p = 0;
+    lcd_fill(0, 50, LCD_W, 14, BG);             /* each pixel once: around the line (§149) */
+    lcd_fill(0, 64, 8, 16, BG);
     lcd_text_clip(8, 64, b, LCD_W - 8, e ? WARN : FG, BG);
+    lcd_fill(LCD_W - 8, 64, 8, 16, BG);
+    lcd_fill(0, 80, LCD_W, LCD_H - 80, BG);
     lcd_settle();
     for (uint32_t t0 = millis(); millis() - t0 < 2000;) {
         wdt_kick();

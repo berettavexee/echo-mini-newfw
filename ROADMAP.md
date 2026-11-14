@@ -3,8 +3,8 @@
 State of the ECHO MINI new firmware, kept up to date with each version. The details of every
 step (design, measurements, tests) are in `ETUDE.md` (in French), by section (§).
 
-Last update: 2026-11-11, version 0.104 (the screen drawn by DMA, text twice as fast, the
-font's tables and the log's formats out of the RAM, the first code overlay).
+Last update: 2026-11-14, version 0.105 (a new interface: one header, the files' top level with
+the volumes' free space, a grouped main menu, an Information page, no flicker).
 
 ## Done, validated on the device
 
@@ -63,6 +63,11 @@ font's tables and the log's formats out of the RAM, the first code overlay).
 | More room in core A's RAM: the font's tables read from the internal memory through a 2-way glyph cache, the log's formats kept in the image (lines made when written out) | 0.104 | §131-§133 |
 | The screen drawn by DMA: text drawn into RAM strips (a line laid out once, only the glyphs' pixels written), sent to the panel by DMAC1 while the next strip is drawn, the CPU as a fallback; the play screen's full redraw from 13.4 to 8 ms of core A, its partial one from 3.9 to 2.7 ms | 0.104 | §134-§136 |
 | Code overlays: the USB code (disk and sound card, 13.6 KiB) loaded from the internal memory into the directory listing's buffer for a USB session; code room from 29 to 42 KiB; the overlays' rules checked at each build (`tools/ovlcheck.py`) | 0.104 | §137 |
+| The keys read in the SysTick interrupt (the ladder sampled every 2 ms, the battery every 100 ms, the ADC never waited for): a press while the loop is held is taken after it instead of being lost; checked on the device (every key, chord, long presses, repeats) | 0.105 | §140 |
+| One header on every screen (title, n/N, clock, play state and mode icons, volume, battery as an icon, a percent or the music left), a folder ends with ">", the play screen with the track's number and the time left, every screen drawn without flicker (checked by the emulator's panel model) | 0.105 | §144, §147-§148, §150 |
+| The files' top level: Library, Internal memory, SD card with icons, the library's tracks and each volume's free space (counted at the library's update, kept across power-offs), the card greyed without one; BACK there opens the main menu | 0.105 | §149, §152 |
+| The main menu grouped with icons, USB inactive without the cable, System (Information, system screen, installer, loader mode) | 0.105 | §151-§152 |
+| Damaged Musepack and ALAC files cannot crash the decoders (found by fuzzing FLAC, ALAC and Musepack) | 0.105 | §146 |
 
 ## The rework (0.99r1-r37, merged in 0.100)
 
@@ -161,15 +166,22 @@ One line per version; the measurements are in `ETUDE.md`.
   image, the CPU as a fallback); the glyphs laid out once, only their pixels written, text
   twice as fast (§136); the first code overlay, the USB code over the directory listing, with
   its checks at each build (§137); a quality pass (§138).
+- 0.105: a new interface (§145, §147-§152): one header on every screen, the battery shown as
+  an icon, a percent or the music left, the volume in the header; the files' top level with
+  the volumes' free space; the main menu grouped (USB and System submenus, an Information
+  page); every screen drawn without flicker; the keys read in the SysTick interrupt (§140);
+  core A at 100 MHz with the screen off, no gain on the battery (§141); the fuzzing fixes in
+  libmpcdec and the ALAC decoder (§146); the emulator's tools: the ELF check, the panel's
+  flicker count, the disk reads by phase, foreign firmwares (§144).
 
 ## To do
 
 - Left from the rework (§97-§109):
-  - the keys read in the SysTick interrupt;
   - the screens that stop the music (USB, install, sound card, system) still in loops of their
     own;
-  - still blocking the loop: a folder opened by the browser, a card put in during playback
-    (mounted at its first use, up to 253 ms);
+  - still blocking the loop (keys pressed meanwhile are no longer lost since 0.104k1): a folder
+    opened by the browser, a card put in during playback (mounted at its first use, up to
+    253 ms);
   - at 176.4 and 192 kHz the clock rules swing between 50 and 80 MHz (10 changes a track, the
     ring kept over half); a DMA copy from SYSRAM would save about 5 MHz more there (§108);
   - ideas from the other projects (§98): still screens not redrawn and the loop in WFI
@@ -235,20 +247,36 @@ One line per version; the measurements are in `ETUDE.md`.
   1. volumes generated on demand (a sparse disk whose files, valid FLAC frames, are made when
      read): libraries larger than the PC's RAM, cluster sizes (512 bytes), the files a Mac leaves
      (Spotlight, fseventsd, `._` files);
-  2. sector reads counted by phase (FAT or data), to catch regressions;
-  3. a finer panel model: drawing windows and sweeps followed, full redraws and flicker counted,
-     the time of the first frame;
-  4. a check that the ELF matches the image (wrong symbols otherwise);
+  2. ~~sector reads counted by phase~~: done (§144, "-- eMMC reads:" FAT, folders, files,
+     firmware, other); bounds per test still to set;
+  3. ~~a finer panel model~~: done (§144): full redraws, the first frame's time, flickers
+     counted (test `charge-screen`); left: the flickers of screen changes and of the list's mark
+     column (`browser.c` `draw_row`), to fix on a proposal;
+  4. ~~a check that the ELF matches the image~~: done (§144, `--check-elf`, once in emutest);
   5. a simulated USB host (enumeration, bulk and isochronous transfers, feedback, the HID
      reports), to test the USB disk and the sound card without the device (today `uac-power`,
      `uac-back` and `usb-disk` only enter and leave their screens: 0.103o1's USB disk fault,
      §137, showed only on the device);
   6. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
+  Also done (§144): `--foreign`, another firmware without an ELF (RECHO 0.10.1 runs: its
+  screens, keys and files, its core B not run), for comparisons.
+- The interface, next steps (§145; 1, 3, 6 and 7 done in 0.104u1, §147; 5 in 0.104w1, §149;
+  4 in 0.104m1, §151): a bar of the keys' actions at the bottom, also for short messages (2); a
+  larger text needs a second font (Fusion Pixel has only 12 px).
 - Output and DAC settings (CS43131 registers, little code each):
   - headphone gain low / high (low suits sensitive in-ear monitors);
   - volume limiter (an adjustable ceiling);
   - digital filter of the DAC (the stock firmware offers fast or slow roll-off, minimum or
-    linear phase, and no oversampling);
+    linear phase, and no oversampling). `PCM_FILT_OPT` (`0x090000`): bit 7 slow/fast, bit 6
+    phase-compensated/low-latency, bit 5 NOS, with the datasheet's pop-free NOS sequence
+    (§5.9); we write `0x02` today (fast, low latency, high-pass on). Audio Science Review's
+    review of CS431xx devices ("On the distortion of Cirrus Logic CS431xx based devices",
+    2025) found a level-dependent distortion rise (the "Cirrus hump", up to about 0.06 %) on
+    several CS43131/CS43198 products, blamed on the chip's DRE; NOS mode is reported to avoid
+    it. Whether the ECHO MINI shows it is unknown (needs an audio analyser). The DRE itself is
+    not documented (`DRE_EN` is named only as a test condition in the datasheet), so it is not
+    touched. NOS costs treble (−3 dB near 0.44 Fs) and leaves the images above Fs/2 unfiltered:
+    a choice left to the listener, off by default;
   - left/right balance (the stock firmware corrects each DAC, ETUDE §3.5).
 - Music features of the stock firmware:
   - media library: done in 0.103 (§121-§129, the table above); left: the folders played with
@@ -273,6 +301,16 @@ One line per version; the measurements are in `ETUDE.md`.
 - To check on the device rather than add: the 4.4 mm balanced output (the plug is detected,
   nothing is specific to it; check by ear, and whether the stock firmware sets the DACs
   differently for it).
+- To test on the device: GPIO2_7, GPIO2_16 and GPIO2_17, the Bluetooth module's pins
+  (EchoPod `docs/hardware.md`, ReChord `bt_hw.h`): GPIO2_7 powers the module (high = on),
+  GPIO2_16/2_17 are UART1 TX/RX (group A). The stock firmware, RECHO 0.10.0 and EchoPod drive
+  all three low at boot; we leave them as inputs in their reset state. The datasheet gives
+  GPIO2_A7 an internal pull-down (the module stays off) but GPIO2_C0/C1 a pull-up (33-62 kΩ):
+  through an unpowered module's inputs that may draw up to about 0.1 mA per pin. A test image
+  that drives them low as the others do, then an endurance run against 0.104k1 (same
+  playlist); a gain of minutes at most is expected, not hours. RECHO sets no core voltage (no
+  register for it in the TRM, no PMIC on I2C, no GPIO switched at run time), so these pins are
+  the only boot difference found.
 
 ## Ideas, not decided
 

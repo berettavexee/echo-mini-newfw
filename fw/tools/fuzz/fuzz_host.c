@@ -10,8 +10,8 @@
  * Replay options: FUZZ_V=1 prints the format and frames decoded, FUZZ_PCM=file writes the output
  * words (whole file, no time limit), FUZZ_NOFORK=1 runs in this process (for gdb).
  * Target chosen at build time (build.sh): -DT_OGG (pg_packet only), -DT_VORBIS, -DT_OPUS,
- * -DT_MP3, -DT_AACPKT (codec_aac.c on a packet stream), and the core A readers: -DT_MP4
- * (src/mp4.c), -DT_AAC (mp4.c, then codec_aac.c on the stream it makes), -DT_TAGS (src/tags.c
+ * -DT_MP3, -DT_FLAC, -DT_MPC, -DT_AACPKT (codec_aac.c on a packet stream), and the core A readers: -DT_MP4
+ * (src/mp4.c), -DT_AAC and -DT_ALAC (mp4.c, then codec_aac.c or codec_alac.c on the stream it makes), -DT_TAGS (src/tags.c
  * for every format); -DREAL_HEAP keeps core B's hifi/heap.c for Vorbis (no ASan).
  * FUZZ_STREAM=file (T_MP4, T_AAC replay) writes the packet stream mp4.c makes: seeds for
  * T_AACPKT. -DT_FAT: src/fat.c (FAT32 and exFAT) on a disk given as sparse sectors (see
@@ -31,7 +31,7 @@
 #include <stdarg.h>
 #include "rt.h"
 #include "oggpage.h"
-#if defined(T_MP4) || defined(T_AAC) || defined(T_TAGS)
+#if defined(T_MP4) || defined(T_AAC) || defined(T_ALAC) || defined(T_TAGS)
 #include "mp4.h"
 #include "tags.h"
 #endif
@@ -223,7 +223,7 @@ static void run_fat(void)
 }
 #endif
 
-#if defined(T_MP4) || defined(T_AAC) || defined(T_TAGS)
+#if defined(T_MP4) || defined(T_AAC) || defined(T_ALAC) || defined(T_TAGS)
 /* ---- core A side: the file in memory ---- */
 int fat_pread(const struct fat_file *f, struct fat_cursor *c, uint32_t pos, void *buf, uint32_t n)
 {
@@ -246,7 +246,7 @@ void log_printf(const char *fmt, ...)
     }
 }
 #endif
-#if defined(T_MP4) || defined(T_AAC)
+#if defined(T_MP4) || defined(T_AAC) || defined(T_ALAC)
 /* mp4.c's packet stream from seek_ms, through the real ring (HP_IN_BASE), copied out into a
  * linear buffer (at most max bytes): its length, or 0 when mp4_open() refuses the file */
 static uint32_t mp4_stream(const struct fat_file *f, uint32_t seek_ms, uint8_t *out, uint32_t max,
@@ -320,7 +320,7 @@ static void run_one(const uint8_t *d, uint32_t n)
     c->in_wr = c->in_end = n;
     if (!getenv("FUZZ_PCM"))
         alarm(5);
-#if defined(T_MP4) || defined(T_AAC) || defined(T_TAGS)
+#if defined(T_MP4) || defined(T_AAC) || defined(T_ALAC) || defined(T_TAGS)
     struct fat_file f;
     memset(&f, 0, sizeof f);
     memcpy(f.name, "FUZZ.M4A", 9);
@@ -346,11 +346,17 @@ static void run_one(const uint8_t *d, uint32_t n)
     if (k && t.length)
         mp4_stream(&f, (uint32_t)((uint64_t)t.length * 500 / (t.rate ? t.rate : 1)), stream,
                    sizeof stream, &t);                  /* and a seek to the middle */
-#elif defined(T_AAC)
+#elif defined(T_AAC) || defined(T_ALAC)
     static uint8_t stream[1 << 20];
     struct mp4_track t;
     uint32_t k = mp4_stream(&f, 0, stream, sizeof stream, &t);
-    if (!k || t.codec != HP_CODEC_AAC)
+    if (!k || t.codec != (
+#ifdef T_ALAC
+                 HP_CODEC_ALAC
+#else
+                 HP_CODEC_AAC
+#endif
+                 ))
         return;
     in_buf = stream;
     in_len = k;
@@ -399,7 +405,7 @@ static void hot_set(const uint8_t *b, uint32_t n)
 {
     hot_lo = 0;
     hot_hi = n < 12288 ? n : 12288;
-#if defined(T_MP4) || defined(T_AAC) || defined(T_TAGS)
+#if defined(T_MP4) || defined(T_AAC) || defined(T_ALAC) || defined(T_TAGS)
     for (uint32_t i = 4; i + 4 <= n; i++)
         if (!memcmp(b + i, "moov", 4)) {
             uint32_t sz = (uint32_t)b[i - 4] << 24 | b[i - 3] << 16 | b[i - 2] << 8 | b[i - 1];
@@ -416,7 +422,7 @@ static uint32_t pos(uint32_t n)
 {
     if (!n)
         return 0;
-#if defined(T_TAGS)
+#if defined(T_TAGS) || defined(T_MPC)
     if (!rnd(8))
         return n - 1 - rnd(n < 512 ? n : 512);
 #endif
@@ -530,6 +536,12 @@ int main(int argc, char **argv)
         perror("mmap ctl");
         return 1;
     }
+    if (HP_IN_BASE < HP_CTL_ADDR || HP_IN_BASE >= HP_OUT_BASE + HP_OUT_SIZE)    /* the input ring */
+        if (mmap((void *)(uintptr_t)HP_IN_BASE, HP_IN_SIZE, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0) == MAP_FAILED) {
+            perror("mmap in ring");
+            return 1;
+        }
     cov = mmap(0, MAP_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (argc > 2 && !strcmp(argv[1], "-r")) {
         for (int i = 2; i < argc; i++) {
@@ -565,7 +577,7 @@ int main(int argc, char **argv)
     if (!ncorpus)
         return 1;
     rng ^= (uint64_t)time(0) ^ (uint64_t)getpid() << 32;     /* parallel instances differ */
-    uint32_t cap = 1 << 20;
+    uint32_t cap = 4u << 20;                     /* an SV8 file needs its end (seek table) */
     uint8_t *b = malloc(cap);
     time_t t0 = time(0), tl = t0;
     long execs = 0, crashes = 0, hangs = 0;

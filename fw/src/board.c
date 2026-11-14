@@ -3,6 +3,7 @@
 #include "board.h"
 #include "regs.h"
 #include "lcd.h"
+#include "keys.h"
 
 static const uint32_t gpio_base[3] = { GPIO0_BASE, GPIO1_BASE, GPIO2_BASE };
 
@@ -166,6 +167,10 @@ int clock_init(void)
  * fallback, where they all work. Only from the PLL state. */
 int clock_is_low;
 static uint32_t low_sel0, low_sel1;
+uint32_t core_div = 2;                          /* core A = PLL / core_div (core_clock) */
+uint32_t core_slow_ms, core_switches;           /* time below 200 MHz, changes (the log) */
+static uint32_t core_slow_t0;
+static volatile uint32_t ms_count;
 
 void clock_low(int on)
 {
@@ -199,10 +204,59 @@ void clock_low(int on)
                 spin(2000);
             }
         cpu_hz = ((REG(CRU_MODE_CON) & 1) ? 400000000u : 24000000u) / ((low_sel0 & 7) + 1);
+        core_div = (low_sel0 & 7) + 1;          /* (core_clock(): kept as it was) */
     }
     clock_is_low = on;
     timer_init();                               /* SysTick: 1 ms at the new clock */
     __asm volatile ("cpsie i");
+}
+
+/* Core A's divider on the PLL, changed on the fly, PCLK kept at 50 MHz (core / 4 at 200 MHz,
+ * / 2 at 100, / 1 at 50), as RECHO 0.10.0 does (0x03051708, ETUDE §141): the I2C buses, the
+ * backlight's PWM and the watchdog run on PCLK and see nothing. Core B's divider (CLKSEL0 bits
+ * 14:12), the PLL, the eMMC and the SARADC (from the PLL, CLKSEL7), the microSD (crystal) and
+ * TIMER1 (24 MHz) do not change; the AHB follows core A. PCLK never above 50 MHz: slowing down,
+ * the core first; speeding up, PCLK first. SysTick set again for 1 ms; the time it had into its
+ * millisecond is given as a whole one (ms_count + 1), so ticks() never goes back. Only on the
+ * PLL (not with clock_low() on, nor in the 24 MHz fallback). */
+/* The time spent below 200 MHz so far (ms) */
+uint32_t core_slow_total(void)
+{
+    return core_slow_ms + (core_div != 2 && !clock_is_low ? ms_count - core_slow_t0 : 0);
+}
+
+int core_clock(uint32_t div)
+{
+    uint32_t shift = div == 2 ? 2 : div == 4 ? 1 : div == 8 ? 0 : 3;
+    if (shift > 2 || div == core_div || clock_is_low || cpu_hz <= 24000000u ||
+        !(REG(CRU_MODE_CON) & 1))
+        return 0;
+    lcd_sync();                                 /* the screen's DMA done (ETUDE §134) */
+    __asm volatile ("cpsid i");
+    uint32_t sel0 = 0x00070000u | (div - 1), sel1 = 0x03000000u | shift << 8;
+    if (div > core_div) {
+        REG(CRU_CLKSEL0) = sel0;
+        spin(2000);
+        REG(CRU_CLKSEL1) = sel1;
+    } else {
+        REG(CRU_CLKSEL1) = sel1;
+        spin(2000);
+        REG(CRU_CLKSEL0) = sel0;
+    }
+    spin(2000);
+    if (core_div == 2)
+        core_slow_t0 = ms_count;
+    else if (div == 2)
+        core_slow_ms += ms_count - core_slow_t0;
+    core_switches++;
+    core_div = div;
+    cpu_hz = 400000000u / div;
+    REG(SYST_CSR) = 0;
+    ms_count++;
+    REG(SCB_ICSR) = 1u << 25;                   /* PENDSTCLR: a tick met meanwhile is in it */
+    timer_init();
+    __asm volatile ("cpsie i");
+    return 1;
 }
 
 void clock_fast_ok(void)
@@ -211,11 +265,14 @@ void clock_fast_ok(void)
 }
 
 /* ---- time: SysTick at the core clock, 1 ms interrupt ---- */
-static volatile uint32_t ms_count;
+static void adc_tick(void);
+static volatile uint8_t adc_scan;               /* the ADC sampled by SysTick (adc_scan_start) */
 
 void SysTick_Handler(void)
 {
     ms_count++;
+    if (adc_scan && !(ms_count & 1))
+        adc_tick();
 }
 
 void timer_init(void)
@@ -306,19 +363,66 @@ uint32_t wdt_init(void)
 
 /* ---- ADC and keys ---- */
 /* Same sequence as the IDB loader: powering the converter up with a channel starts a
- * conversion. Wait for busy to rise, then to fall: at 200 MHz the first poll comes before
- * the conversion has started, and 0.6 read the previous channel's result (battery 4995 mV
- * from the idle key ladder at 1023). */
-unsigned adc_read(int ch)
+ * conversion. */
+static void adc_start(unsigned ch)
 {
     REG(SARADC_CTRL) &= ~0x10u;
-    REG(SARADC_CTRL) = (REG(SARADC_CTRL) & ~7u) | 0x10u | (unsigned)ch;
+    REG(SARADC_CTRL) = (REG(SARADC_CTRL) & ~7u) | 0x10u | ch;
+}
+
+/* Sampling in the SysTick interrupt, every 2 ms: the result of the conversion started at the
+ * tick before is read (about 20 us: long done), and the next one started, so the interrupt never
+ * waits for the converter. Channel 1 (the keys) to keys_sample(), channel 0 (the battery) one
+ * tick in 50 (every 100 ms), kept for battery_mv(). adc_read() from the loop holds the converter:
+ * the conversion it may have restarted is not taken for the interrupt's own. */
+static volatile uint8_t adc_hold, adc_isr_ch = 0xff, bat_ok;
+static volatile uint16_t bat_raw;
+
+static void adc_tick(void)
+{
+    static unsigned n;
+
+    if (adc_hold) {
+        adc_isr_ch = 0xff;
+        return;
+    }
+    if (adc_isr_ch != 0xff && !(REG(SARADC_STAS) & 1)) {
+        unsigned v = REG(SARADC_DATA) & 0x3ff;
+        if (adc_isr_ch == 1)
+            keys_sample(v, ticks());
+        else {
+            bat_raw = (uint16_t)v;
+            bat_ok = 1;
+        }
+    }
+    unsigned ch = ++n % 50 ? 1 : 0;
+    adc_start(ch);
+    adc_isr_ch = (uint8_t)ch;
+}
+
+void adc_scan_start(void)
+{
+    adc_scan = 1;
+}
+
+/* A conversion from the loop: wait for busy to rise, then to fall (at 200 MHz the first poll
+ * comes before the conversion has started, and 0.6 read the previous channel's result: battery
+ * 4995 mV from the idle key ladder at 1023) */
+unsigned adc_read(int ch)
+{
+    adc_hold = 1;
+    __asm volatile ("" ::: "memory");
+    adc_start((unsigned)ch);
     uint32_t t0 = ticks();
     while (!(REG(SARADC_STAS) & 1) && ticks() - t0 < 200)
         ;
     while ((REG(SARADC_STAS) & 1) && ticks() - t0 < 1000)
         ;
-    return REG(SARADC_DATA) & 0x3ff;
+    unsigned v = REG(SARADC_DATA) & 0x3ff;
+    adc_isr_ch = 0xff;
+    __asm volatile ("" ::: "memory");
+    adc_hold = 0;
+    return v;
 }
 
 /* Key ladder on channel 1, medians measured on the device: VOL- 1, VOL+ 126, Play 270,
@@ -359,10 +463,11 @@ int charging(void)
     return vbus() && !gpio_get(PIN_CHARGING);
 }
 
-/* Channel 0 through a 2:1 divider, 2.5 V reference */
+/* Channel 0 through a 2:1 divider, 2.5 V reference; once the interrupt samples it, its last
+ * reading (at most 100 ms old) */
 unsigned battery_mv(void)
 {
-    return adc_read(0) * 5000 / 1024;
+    return (adc_scan && bat_ok ? bat_raw : adc_read(0)) * 5000 / 1024;
 }
 
 /* Charge in %, from the voltage: the curve measured on the device during playback (ETUDE §65:

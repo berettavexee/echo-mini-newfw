@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include "audio.h"
 #include "board.h"
+#include "font.h"
 #include "hifi.h"
 #include "keys.h"
 #include "lcd.h"
@@ -25,8 +26,15 @@
 
 int sys_power_mine;
 
+/* What draw_level() last put on the screen (-1, "": nothing since draw_frame) */
+static signed char seg_on[CH_SEGS];
+static char shown_text[48];
+
 static void draw_frame(void)
 {
+    for (int i = 0; i < CH_SEGS; i++)
+        seg_on[i] = -1;
+    shown_text[0] = 0;
     lcd_fill(0, 0, LCD_W, LCD_H, BG);
     lcd_fill(CH_X, CH_Y, CH_W, 3, FG);
     lcd_fill(CH_X, CH_Y + CH_H - 3, CH_W, 3, FG);
@@ -37,7 +45,10 @@ static void draw_frame(void)
     lcd_text((LCD_W - lcd_text_width(h)) / 2, 150, h, DIM, BG);
 }
 
-/* The bar, the last segment blinking while charging, and the text under it */
+/* The bar, the last segment blinking while charging, and the text under it. Only what changed
+ * is drawn, and the text without erasing it first: its line filled left of it, then the text,
+ * whose strips fill the rest up to the right edge (0.104b1: erased then written, it flickered
+ * twice a second once the screen went by DMA) */
 static void draw_level(unsigned pct, int full, int blink)
 {
     int segs = full ? CH_SEGS : (int)(pct * CH_SEGS + 50) / 100, sw = (CH_W - 14) / CH_SEGS;
@@ -46,7 +57,9 @@ static void draw_level(unsigned pct, int full, int blink)
         segs = 1;
     for (int i = 0; i < CH_SEGS; i++) {
         int on = i < segs && !(blink && !full && i == segs - 1);
-        lcd_fill(x0 + i * sw, CH_Y + 7, sw - 3, CH_H - 14, on ? CH_FG : BG);
+        if (seg_on[i] != on)
+            lcd_fill(x0 + i * sw, CH_Y + 7, sw - 3, CH_H - 14, on ? CH_FG : BG);
+        seg_on[i] = (signed char)on;
     }
     char b[48], *p;                             /* 100 %: when the charger says so */
     if (full)
@@ -55,8 +68,18 @@ static void draw_level(unsigned pct, int full, int blink)
         /* TRANSLATORS: the battery's charge, in percent */
         p = log_format(b, b + sizeof b - 1, T("Charging %u%%"), pct > 99 ? 99 : pct);
     *p = 0;
-    lcd_fill(0, 116, LCD_W, 26, BG);
-    lcd_text_clip_x((LCD_W - lcd_text_width_x(b, 2)) / 2, 116, b, LCD_W, FG, BG, 2);
+    int same = 1;
+    for (int i = 0; same && (b[i] || shown_text[i]); i++)
+        same = b[i] == shown_text[i];
+    if (same)
+        return;
+    for (int i = 0; i < (int)sizeof shown_text; i++)
+        if (!(shown_text[i] = b[i]))
+            break;
+    int x = (LCD_W - lcd_text_width_x(b, 2)) / 2;
+    if (x > 0)
+        lcd_fill(0, 116, x, 2 * FONT_LINE, BG);
+    lcd_text_clip_x(x > 0 ? x : 0, 116, b, LCD_W, FG, BG, 2);
 }
 
 static void start(int at_boot, const char *how)

@@ -217,6 +217,62 @@ int fat_list_root(int (*fn)(const struct fat_file *f, void *ctx), void *ctx)
     return 0;
 }
 
+int32_t fat_free(int vn, void *buf, uint32_t bytes, void (*yield)(void))
+{
+    const struct fat_vol *v = V(vn);
+    const uint8_t *b = (const uint8_t *)sec;
+    uint32_t n = 0, chunk = bytes / 512;
+    if (!v->mounted || !chunk)
+        return -1;
+    if (!v->exfat) {                            /* entries 2 .. clusters + 1, 4 bytes each */
+        uint32_t last = v->clusters + 2, secs = (last * 4 + 511) / 512;
+        for (uint32_t s = 0; s < secs; s += chunk) {
+            uint32_t k = secs - s < chunk ? secs - s : chunk;
+            if (dev_read(v, v->fat + s, k, buf))
+                return -1;
+            const uint32_t *e = buf;
+            for (uint32_t i = 0, c = s * 128; i < k * 128 && c < last; i++, c++)
+                if (c >= 2 && !(e[i] & 0x0fffffffu))
+                    n++;
+            if (yield)
+                yield();
+        }
+        return (int32_t)n;
+    }
+    struct fat_file f = { .vol = (uint8_t)vn };     /* the bitmap: an entry 0x81 of the root's */
+    for (uint32_t s = 0; s < v->spc && !f.cluster; s++) {   /* first cluster */
+        if (dev_read(v, cluster_lba(v, v->root) + s, 1, sec))
+            return -1;
+        for (int i = 0; i < 512; i += 32)
+            if (b[i] == 0x81 && le32(b + i + 20) >= 2) {
+                f.cluster = le32(b + i + 20);
+                f.size = le32(b + i + 24);
+                break;
+            }
+    }
+    if (!f.cluster || f.size < (v->clusters + 7) / 8)
+        return -1;
+    f.size = (v->clusters + 7) / 8;
+    fat_open(&f);
+    uint32_t used = 0;
+    while (f.pos < f.size) {
+        uint32_t at = f.pos;
+        int r = fat_read(&f, buf, chunk * 512);
+        if (r <= 0)
+            return -1;
+        const uint8_t *m = buf;
+        for (uint32_t i = 0; i < (uint32_t)r && at + i < f.size; i++) {
+            uint32_t x = m[i];
+            if (at + i == f.size - 1 && (v->clusters & 7))  /* the bits past the last cluster */
+                x &= 0xffu >> (8 - (v->clusters & 7));
+            used += (uint32_t)__builtin_popcount(x);
+        }
+        if (yield)
+            yield();
+    }
+    return (int32_t)(v->clusters - used);
+}
+
 void fat_open(struct fat_file *f)
 {
     f->pos = 0;

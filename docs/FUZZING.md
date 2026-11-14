@@ -27,6 +27,9 @@ The firmware's own code, unchanged, built for the PC:
 | `vorbis-heap` | the same with core B's allocator (`fw/hifi/heap.c`), no ASan | an Ogg Vorbis file |
 | `opus` | `fw/hifi/codec_opus.c` + libopus 1.5.2, fixed point | an Ogg Opus file |
 | `mp3` | `fw/hifi/codec_mp3.c` + pvmp3dec (AOSP) | an MP3 file |
+| `flac` | `fw/hifi/codec_flac.c` + dr_flac, accelerator off | a FLAC file |
+| `alac` | `mp4.c`, then `fw/hifi/codec_alac.c` + `alacdec.c` on the packet stream it makes, accelerator stubbed (`ECHO_NO_HWALAC`) | an M4A file with ALAC |
+| `mpc` | `fw/hifi/codec_mpc.c` + libmpcdec (fixed point), SYNTH off | a Musepack file, SV7 or SV8 |
 | `mp4` | `fw/src/mp4.c` (core A): the MP4 container, then the whole packet stream, then a seek | an M4A file |
 | `aac` | `mp4.c`, then `fw/hifi/codec_aac.c` + pvaacdec (AOSP) on the packet stream it makes | an M4A file |
 | `aacpkt` | `codec_aac.c` + pvaacdec alone | a packet stream (`hifi_proto.h`), configuration included |
@@ -98,7 +101,11 @@ Several instances can run side by side on the same seeds (each draws its own ran
 for i in 1 2 3 4 5 6; do build/fat/fuzz seeds/fat out/fat$i 7200 > out/fat$i.log & done
 ```
 
-`mkseeds.sh` encodes a few seconds of tone and noise at several rates, channel counts and
+For the three new targets, `mkseeds.sh` encodes FLAC (16 and 32 bits, mono and stereo, 8 to 96 kHz, several
+compression levels) and ALAC in M4A. ffmpeg cannot encode Musepack: the `mpc` seeds are copied
+from `work/testsets/mpc_test` (or a folder given as third argument), the originals untouched. SV7
+files are cut to 40,000 bytes; an SV8 file is kept whole, because `mpc_demux_init` reads its end
+(the seek table), and the fuzzer's input limit is 4 MiB for it. `mkseeds.sh` encodes a few seconds of tone and noise at several rates, channel counts and
 qualities: Vorbis, Opus, MP3 (MPEG-1, 2 and 2.5, CBR and VBR, with and without the Xing frame,
 ID3v2 and ID3v1 tags) and M4A (8 to 96 kHz, the `moov` box at the start or at the end). Given a
 music folder, it also takes a few files of each format from it. These are remuxed without
@@ -214,6 +221,40 @@ Six instances of the `fat` target for two hours each, on the seeds of `mkfatseed
 68 corpus entries per instance): more varied seeds (other cluster sizes, deeper and larger
 folders, a damaged FAT) would be the next step.
 
+## Results: FLAC, ALAC and Musepack (version 0.104, November 2026)
+
+Four instances per target for 60 minutes (12-thread PC), on the seeds of `mkseeds.sh`:
+
+| Target | Runs | Corpus (per instance) | Crashes | Hangs |
+|---|---|---|---|---|
+| `flac` | 1,314,009 | 217 to 243 | 0 | 0 |
+| `alac` | 987,256 | 55 to 67 | 245 saved (shift only, below) | 0 |
+| `alac-ns` (25 min) | 573,289 | 60 to 65 | 0 | 0 |
+| `mpc` | 660,716 | 39 to 47 | 9,419 saved, one defect | 0 |
+| `mpc` with the fix below (25 min, 8 instances) | 914,515 | 40 to 51 | 0 | 0 |
+
+- **FLAC** (dr_flac, `codec_flac.c`): nothing in any run.
+- **Musepack, SV7** (`mpc_decoder.c`, `mpc_decoder_requantisierung`): a global buffer overflow
+  on `Cc[]`, which has 18 entries. In SV7 each band's resolution is the previous one plus a
+  decoded difference (`Res_L[n - 1] + idx`), never checked, so it leaves 0 to 17 on damaged
+  streams and indexes the table outside. All 9,419 saved crashes are this one defect, reported at
+  a dozen lines of the function (one per access). A clamp where the resolution is decoded
+  (`(mpc_uint32_t)Res > 17` gives 0) makes them replay clean, and 25 minutes on 8 instances
+  then found nothing. The firmware is not changed yet. The SV8 seed (kept whole) never crashed;
+  the SV8 resolutions are wrapped (`> 15` gives `- 17`) but not bounded either, which is worth
+  the same clamp.
+- **ALAC** (`alacdec.c`): only shifts of 32 bits or more or by a negative count, on streams the
+  encoders do not make: a `denshift` of 0 (`1 << (denshift - 1)`, line 201), a `k` of 0
+  (`>> (32 - k)`, line 95), a `mixbits` of 32 or more (`>> mixbits`, lines 437 and 450). They are
+  well defined on the ARM target and the Apple reference code does the same; UBSan stops the run
+  on them, which hides what comes after. The `alac-ns` build leaves that one check out; with it,
+  no other defect in 25 minutes.
+
+Bench fixes made on the way: `fuzz_host.c` did not map the input ring at its present address
+(`HP_IN_BASE`, SYSRAM), so `mp4` and `aac` crashed at once on every input since the ring moved;
+it does now. `codec_mpc.c` defines `malloc`, `free` and `sprintf` for libmpcdec; the `mpc`
+target renames them in that file only (`build.sh`), as they recursed on the PC.
+
 ## Limits
 
 - The PC build is 64-bit and uses the C versions of the ARM assembly macros and routines (Tremor,
@@ -226,8 +267,12 @@ folders, a damaged FAT) would be the next step.
   before a table on their last pass, a value never used.
 - Coverage guidance is simple (no comparison tracing, no dictionaries): checksums or magic values
   deep in a stream are reached slowly. The Ogg page CRC is not checked by our reader, which helps.
-- FLAC, ALAC, Musepack, WAV and AIFF have no decoder target yet (their tags are covered by
-  `tags`). Each would need a small entry in `build.sh` and `fuzz_host.c`.
+- WAV and AIFF have no decoder target yet (their tags are covered by `tags`). Each would need a
+  small entry in `build.sh` and `fuzz_host.c`.
+- The hardware paths (HIFIACC for FLAC and ALAC, SYNTH for Musepack) are not built: the PC runs
+  the software decoders only. For `mpc`, `codec_mpc.c` defines `malloc`, `free`, `sprintf`...
+  for libmpcdec; on the PC they are renamed in that file only (`build.sh`), so libmpcdec uses
+  libc's and ASan sees its blocks.
 
 ## A lesson for the firmware build
 

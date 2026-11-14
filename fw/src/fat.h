@@ -56,6 +56,11 @@ struct fat_cursor {
 int fat_pread(const struct fat_file *f, struct fat_cursor *c, uint32_t pos, void *buf, uint32_t n);
 int fat_extent(const struct fat_file *f, uint32_t *first, uint32_t *count);  /* contiguous only */
 
+/* The free clusters of a volume (FAT_VOL_INT, FAT_VOL_SD): FAT32 its FAT read whole (FSInfo's
+ * count is not kept: we write it "unknown"), exFAT its allocation bitmap; buf, of 'bytes' (a
+ * multiple of 512), is the work memory; yield called between reads. The count, or < 0. */
+int32_t fat_free(int v, void *buf, uint32_t bytes, void (*yield)(void));
+
 /* Directory listing with long names (VFAT): 'name' is the long name in UTF-8 (cut to
  * FAT_NAME_MAX - 1 bytes on a character boundary), or the 8.3 name when there is none; '.', '..',
  * the volume label, hidden or system entries and names starting with '.' are left out.

@@ -204,7 +204,14 @@ int list_load(struct listing *l, const struct fat_dir *d)
     return r;
 }
 
-/* The top level (ETUDE §38): the internal volume, then the card when one is in */
+/* The top level (ETUDE §38, §149): the library, the internal volume, the card (greyed when there
+ * is none); at the right of each, in grey, its tracks or its free space */
+static int top_tracks = -1;                     /* the library's, read with the top level; */
+                                                /* -2: to read again (an update) */
+void browser_lib_changed(void)
+{
+    top_tracks = -2;
+}
 static int sd_bad;                              /* the card in did not mount: SD_NOREPLY, SD_NOFS */
 enum { SD_NOREPLY = 1, SD_NOFS = 2 };
 
@@ -233,10 +240,13 @@ int dir_load(const struct fat_dir *d)
         dir_l.n = dir_l.full = 0;
         dir_l.used = 0;
         top_entry(T("Library"), F_LIB);         /* (first: ETUDE §127) */
-        top_entry(T("Internal"), 0);           /* (the names of the volumes: the language of */
+        top_entry(T("Internal memory"), 0);     /* (the names of the volumes: the language of */
         if (sd_present())                       /* the listing's load) */
             top_entry(sd_bad == SD_NOREPLY ? T("SD card (not responding)") :
                       sd_bad == SD_NOFS ? T("SD card (needs FAT32 or exFAT)") : T("SD card"), F_SD);
+        else
+            top_entry(T("SD card"), F_SD | F_ABSENT);   /* greyed, "no card" (§149) */
+        top_tracks = lib_status();
     } else {
         r = list_load(&dir_l, d);
         if (r < 0 && d->vol == FAT_VOL_SD) {    /* a read error: mounted again at the next */
@@ -250,6 +260,9 @@ int dir_load(const struct fat_dir *d)
     if (d->vol != VOL_TOP)
         log_printf("ui: folder %s%x: %d entries%s in %u ms", d->vol == FAT_VOL_SD ? "sd:" : "",
                    d->cluster, dir_n, dir_full ? " (more not shown)" : "", (ticks() - t0) / 1000);
+    else
+        log_printf("ui: top level: library %d tracks, card %s", top_tracks,
+                   !sd_present() ? "none" : sd_bad ? "not readable" : "in");
     return r;
 }
 
@@ -307,6 +320,54 @@ static int playing_index(void)                  /* the row of the track that pla
     return -1;
 }
 
+/* The top level's icons (16 x 12, glyph records, lcd_icon()): stacked folders, a chip, a card */
+const uint8_t ic_lib[] = { 0x12, 0x10, 0x0c, 0x00, 0xff, 0xf0, 0x00, 0x9f, 0xf0, 0x80,
+                                  0x10, 0x9e, 0x10, 0x93, 0xff, 0x90, 0x01, 0x90, 0x01, 0x90,
+                                  0x01, 0xf0, 0x01, 0x10, 0x01, 0x10, 0x01, 0x1f, 0xff };
+static const uint8_t ic_chip[] = { 0x12, 0x10, 0x0c, 0x00, 0xff, 0x09, 0x20, 0x3f, 0xf0, 0x20,
+                                   0x10, 0xec, 0x1c, 0x2c, 0x10, 0xe0, 0x1c, 0x20, 0x10, 0xe0,
+                                   0x1c, 0x20, 0x10, 0x3f, 0xf0, 0x09, 0x20, 0x00, 0x00 };
+static const uint8_t ic_sd[] = { 0x12, 0x10, 0x0c, 0x00, 0xff, 0x07, 0xf8, 0x08, 0x04, 0x12,
+                                 0xa4, 0x22, 0xa4, 0x22, 0xa4, 0x20, 0x04, 0x20, 0x04, 0x20,
+                                 0x04, 0x20, 0x04, 0x20, 0x04, 0x20, 0x04, 0x3f, 0xfc };
+
+static void top_icon(int y, const struct entry *e, uint16_t fg, uint16_t bg)
+{
+    const uint8_t *ic = e->flags & F_LIB ? ic_lib : e->flags & F_SD ? ic_sd : ic_chip;
+    lcd_fill(0, y, 3, 16, bg);
+    int w = lcd_icon(3, y, ic, fg, bg);
+    lcd_fill(3 + w, y, 22 - 3 - w, 16, bg);
+}
+
+/* At the right of a top level's line: the library's tracks ("not built"), a volume's free space
+ * once counted (at the library's update), "no card" */
+static void top_info(char *b, const struct entry *e)
+{
+    char *p = b, *end = b + 31;
+    if (top_tracks == -2)
+        top_tracks = lib_status();
+    if (e->flags & F_LIB)
+        p = top_tracks < 0 ? log_format(p, end, "%s", T("not built")) :
+            log_format(p, end, T("%u tracks"), (uint32_t)top_tracks);
+    else if (ABSENT(e))
+        p = log_format(p, end, "%s", T("no card"));
+    else {
+        int32_t m = space_free_mib(e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT);
+        uint32_t u = (uint32_t)m;
+        if (m < 0 || ((e->flags & F_SD) && sd_bad))
+            ;
+        else if (u < 1024)
+            /* TRANSLATORS: the free space of a volume (the top level of the files) */
+            p = log_format(p, end, T("%u MB free"), u);
+        else if (u < 100 * 1024)
+            /* TRANSLATORS: the free space of a volume, GB with one decimal */
+            p = log_format(p, end, T("%u.%u GB free"), u / 1024, u % 1024 * 10 / 1024);
+        else
+            p = log_format(p, end, T("%u GB free"), u / 1024);
+    }
+    *p = 0;
+}
+
 static void draw_row(int r, int sel, int mark)
 {
     int i = path[depth].top + r, y = ROW_Y0 + 16 * r;
@@ -319,14 +380,32 @@ static void draw_row(int r, int sel, int mark)
     }
     const struct entry *e = ent(i);
     uint16_t bg = i == sel ? SEL_BG : BG;
-    int dirent = e->flags & F_DIR;
-    /* a fixed column for the mark: » folder, ♪ the track that plays */
-    lcd_fill(0, y, 22, 16, bg);
-    if (dirent || i == mark)
-        lcd_glyph(dirent ? 6 : 3, y, dirent ? 0xbb : 0x266a, dirent ? DIR_FG : TITLE_FG, bg);
+    int dirent = e->flags & F_DIR, top = e->flags & F_VOLROOT;
+    int absent = ABSENT(e);
+    /* a fixed column for the mark (♪ the track that plays), or the top level's icons; a folder
+     * ends with ">" (§147), unless it cannot be opened */
+    if (top)
+        top_icon(y, e, absent ? DIM : i == sel ? FG : DIR_FG, bg);
+    else
+        list_mark(y, i == mark, bg);
     const char *name = ent_name(i);
-    int xmax = list_text_end(dir_n, ROWS);
-    uint16_t fg = dirent ? DIR_FG : e->size ? FG : DIM;
+    int xend = list_text_end(dir_n, ROWS), xmax = dirent ? xend - 12 : xend;
+    if (absent)                                 /* the chevron's place, blank */
+        lcd_fill(xmax, y, xend - xmax, 16, bg);
+    else if (dirent) {
+        lcd_fill(xmax, y, 2, 16, bg);
+        int w = lcd_glyph(xmax + 2, y, '>', i == sel ? FG : DIM, bg);
+        lcd_fill(xmax + 2 + w, y, xend - xmax - 2 - w, 16, bg);
+    }
+    if (top) {                                  /* its tracks, its free space, "no card" */
+        char b[32];
+        top_info(b, e);
+        int x0 = xmax - (b[0] ? lcd_text_width(b) + 8 : 0);
+        if (x0 < xmax)
+            text_right(x0, xmax, y, b, DIM, bg);
+        xmax = x0;
+    }
+    uint16_t fg = absent ? DIM : dirent ? DIR_FG : e->size ? FG : DIM;
     if (i == sel && (dirent || e->size)) {
         if (browser_mq.index != i || browser_mq.top != path[depth].top || b_dirty) {
             browser_mq.index = (uint16_t)i;
@@ -446,12 +525,13 @@ int browser_walk_poll(void)
     return 0;
 }
 
-static void draw_count(int sel)
+static char *count_text(char *b, int sel)
 {
-    char b[24], *p = b;
+    char *p = b;
     if (walk.state == WALK_RUNNING) {
-        text_right(LCD_W - 110, LCD_W - 4, 0, T("reading..."), DIM, BG);
-        return;
+        p = put_str(b, T("reading..."));
+        *p = 0;
+        return p;
     }
     if (dir_n) {
         p = put_dec(p, (uint32_t)sel + 1);
@@ -461,7 +541,14 @@ static void draw_count(int sel)
     if (dir_full)
         *p++ = '+';
     *p = 0;
-    text_right(LCD_W - 70, LCD_W - 4, 0, b, DIM, BG);
+    return b;
+}
+
+static void draw_count(int sel)                 /* "selected/count" in the header */
+{
+    char b[40];
+    count_text(b, sel);
+    head_extra(b);
 }
 
 void browser_marquee_tick(void)
@@ -512,26 +599,26 @@ static void draw_browser_do(void)
         b_mark = mark;
         if (q_playing && player_heard.length_ms)
             progress_bar(ROW_Y0 + 16 * ROWS + 3, 4, player_heard.time_ms, player_heard.length_ms);
-        draw_clock(LCD_W - 114, LCD_W - 70, 0);
+        head_status(0);
         return;
     }
     if (b_dirty) {                              /* every band once, nothing cleared first */
-        lcd_fill(0, 0, 4, 16, BG);
-        const char *title = depth ? path[depth].name : T("Storage");
+        const char *title = depth ? path[depth].name : T("Files");
         uint16_t tfg = TITLE_FG;
         if (qmsg_on)
             title = qmsg, tfg = SK_FG;
         else if (qmode)
             title = T("Queue: PLAY next, MENU add"), tfg = SK_FG;
-        lcd_text_clip(4, 0, title, LCD_W - 114, tfg, BG);
-        draw_clock(LCD_W - 114, LCD_W - 70, 1);
-        lcd_fill(LCD_W - 4, 0, 4, 16, BG);
-        lcd_fill(0, 16, LCD_W, ROW_Y0 - 16, BG);
-    }
+        char b[40];
+        count_text(b, sel);
+        head_title(title, tfg, b);
+        head_status(1);
+    } else
+        head_status(0);
     for (int r = 0; r < ROWS; r++)
         draw_row(r, sel, mark);
     list_scrollbar(ROW_Y0, ROWS, top, dir_n);
-    if (b_dirty || sel != b_sel)
+    if (!b_dirty && sel != b_sel)
         draw_count(sel);
     b_sel = sel;
     b_top = top;
@@ -562,13 +649,33 @@ void draw_browser(void)
  * path's first levels) taken again; the folder shown, redrawn */
 void browser_lang_changed(void)
 {
-    copy_name(path[0].name, T("Storage"), sizeof path[0].name);
+    copy_name(path[0].name, T("Files"), sizeof path[0].name);
     if (depth >= 1)
-        copy_name(path[1].name, path[1].dir.vol == FAT_VOL_SD ? T("SD card") : T("Internal"),
+        copy_name(path[1].name, path[1].dir.vol == FAT_VOL_SD ? T("SD card") : T("Internal memory"),
                   sizeof path[1].name);
     if (!depth)
         dir_load(&path[0].dir);                 /* the top level: no disk read */
     b_dirty = 1;
+}
+
+/* The top level, the internal memory's line selected (at power-on with nothing saved, after a
+ * USB session or an install: §149) */
+void browser_top(void)
+{
+    depth = 0;
+    path[0].sel = 1;
+    path[0].top = 0;
+    dir_load(&path[0].dir);
+    b_dirty = 1;
+}
+
+static void enter(int i);
+
+void browser_library(void)
+{
+    browser_top();
+    path[0].sel = 0;                            /* (the library first) */
+    enter(0);
 }
 
 /* path[1]: the root of a volume */
@@ -578,7 +685,8 @@ void path_root(int v)
     path[0].sel = v == FAT_VOL_SD ? 2 : 1;      /* (the library first) */
     path[0].top = 0;
     fat_root(v, &path[1].dir);
-    copy_name(path[1].name, v == FAT_VOL_SD ? T("SD card") : T("Internal"), sizeof path[1].name);
+    copy_name(path[1].name, v == FAT_VOL_SD ? T("SD card") : T("Internal memory"),
+              sizeof path[1].name);
     path[1].sel = path[1].top = 0;
 }
 
@@ -643,7 +751,7 @@ static void enter(int i)
 {
     const struct entry *e = ent(i);
     struct fat_dir d;
-    if (depth + 1 >= DEPTH_MAX)
+    if (depth + 1 >= DEPTH_MAX || ABSENT(e))
         return;
     dir_of_entry(e, &d);
     b_dirty = 1;
@@ -821,6 +929,8 @@ int browser_key(const struct key_ev *e)
         move(-1);
     else if (k == KEY_VOLDOWN)
         move(1);
+    else if (k == KEY_BACK && ev == EV_PRESS && !depth)
+        scr_push(&menu_screen);                 /* nothing above the top level: the menu (§152) */
     else if (k == KEY_BACK && ev == EV_PRESS)
         leave();
     else if (k == KEY_PLAY && dir_n && lib_shown) {   /* a library list (ETUDE §127) */
@@ -861,6 +971,8 @@ int browser_key(const struct key_ev *e)
         }
     } else if (k == KEY_PLAY && dir_n) {
         int sel = path[depth].sel;
+        if (ABSENT(ent(sel)))                   /* no card: nothing to open */
+            return UI_FULL;
         if ((ent(sel)->flags & F_DIR) && ev == EV_PRESS)
             enter(sel);
         else if (ent(sel)->flags & F_DIR) {

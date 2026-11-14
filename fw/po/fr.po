@@ -830,3 +830,145 @@ msgstr "Carte SD illisible (FAT32 ou exFAT seulement)"
 #: src/ovl.c
 msgid "This part of the firmware is damaged: install it again"
 msgstr "Cette partie du micrologiciel est abîmée : réinstallez-le"
+
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
+#: src/settings.c
+msgid "Battery"
+msgstr "Batterie"
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "icon"
+msgstr "icône"
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "percent"
+msgstr "pourcentage"
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "time left"
+msgstr "autonomie"
+
+#. TRANSLATORS: the music left on the battery, in hours, then in minutes (header, short)
+#: src/uidraw.c
+#, c-format
+msgid "%uh"
+msgstr "%u h"
+
+#. TRANSLATORS: the music left on the battery, in hours, then in minutes (header, short)
+#: src/uidraw.c
+#, c-format
+msgid "%um"
+msgstr "%u min"
+
+#: src/browser.c
+msgid "Internal memory"
+msgstr "Mémoire interne"
+
+#: src/browser.c
+msgid "not built"
+msgstr "à créer"
+
+#: src/browser.c
+msgid "no card"
+msgstr "pas de carte"
+
+#. TRANSLATORS: the free space of a volume (the top level of the files)
+#: src/browser.c
+#, c-format
+msgid "%u MB free"
+msgstr "%u Mo libres"
+
+#. TRANSLATORS: the free space of a volume, GB with one decimal
+#: src/browser.c
+#, c-format
+msgid "%u.%u GB free"
+msgstr "%u,%u Go libres"
+
+#: src/browser.c
+#, c-format
+msgid "%u GB free"
+msgstr "%u Go libres"
+
+#. TRANSLATORS: the main menu's entry for the USB modes (disk, sound card)
+#: src/menu.c
+msgid "USB"
+msgstr "USB"
+
+#. TRANSLATORS: the main menu's entry for the information, installer and system screens
+#: src/menu.c
+msgid "System"
+msgstr "Système"
+
+#: src/menu.c
+msgid "Disk, read only"
+msgstr "Disque, lecture seule"
+
+#: src/menu.c
+msgid "Disk, read/write"
+msgstr "Disque, lecture/écriture"
+
+#: src/menu.c
+msgid "Sound card"
+msgstr "Carte son"
+
+#. TRANSLATORS: a page of facts: version, formats, free space, battery
+#: src/menu.c
+msgid "Information"
+msgstr "Informations"
+
+#. TRANSLATORS: why the USB entry is greyed (main menu)
+#: src/menu.c
+msgid "no cable"
+msgstr "pas de câble"
+
+#: src/menu.c
+#, c-format
+msgid "%u found"
+msgstr "%u trouvée(s)"
+
+#. TRANSLATORS: a size (Information)
+#: src/menu.c
+#, c-format
+msgid "%u MB"
+msgstr "%u Mo"
+
+#: src/menu.c
+#, c-format
+msgid "%u.%u GB"
+msgstr "%u,%u Go"
+
+#: src/menu.c
+#, c-format
+msgid "%u GB"
+msgstr "%u Go"
+
+#: src/menu.c
+msgid "not readable"
+msgstr "illisible"
+
+#. TRANSLATORS: the free space and the size of a volume (Information)
+#: src/menu.c
+#, c-format
+msgid "%s free of %s"
+msgstr "%s libres sur %s"
+
+#. TRANSLATORS: Information's lines
+#: src/menu.c
+msgid "Version"
+msgstr "Version"
+
+#: src/menu.c
+msgid "charging"
+msgstr "en charge"
+
+#: src/menu.c
+msgid "charged"
+msgstr "chargée"
+
+#. TRANSLATORS: the music left on the battery (Information)
+#: src/menu.c
+msgid "Time left"
+msgstr "Autonomie"

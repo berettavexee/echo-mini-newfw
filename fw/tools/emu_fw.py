@@ -14,7 +14,12 @@ PIO model over a disk image; writes kept in memory, never written back, and chec
 the firmware area), time (ticks() replaced by a counter advancing 50 us per call; cpu_wait()
 goes on to the next 1 ms tick, as its WFI on the device, with core B run meanwhile).
 Shortcuts (most of the time went into Python callbacks, ETUDE §80): lcd_fill() drawn into the
-model at once (--no-fast-fill: through VOP_DATA), the SARADC busy bit read once per conversion.
+model at once (--no-fast-fill: through VOP_DATA), the SARADC busy bit read once per conversion
+(within 1 ms of its start).
+Core A's SysTick (ETUDE §140, firmwares from 0.104k1, which read the keys and the battery in it):
+its handler run at each ms of the simulated time, between two blocks, when not masked.
+--stall-at MS:DUR (not with --cycles): the loop held DUR ms at its first key_poll() from MS on,
+the SysTick and core B running meanwhile, as during a long operation.
 --ms stops at a simulated time (--steps stays a bound). EMU_COUNT=1 counts the MMIO accesses by
 address and lists the busiest at the end.
 --keys holds a key from a simulated time on (VOL-, VOL+, PLAY, MENU, BACK, NONE), --shots
@@ -45,6 +50,17 @@ durations.
 --boot-disk: the image is not taken from IMG but from the disk, as the stock loader chooses it
 (ETUDE 2.2): FW1 when its RKnanoFW signature and its header copy at fw_end match, else FW2
 (no CRC); IMG then only names the ELF.
+The ELF is checked against the image first (its loaded sections, ovl_tag left out): a stale ELF
+stops the run (exit 3); --check-elf only checks. Not with --boot-disk (the copy on the disk may
+be another build, an installed one, whose ELF is IMG's).
+At the end (ETUDE §144): "-- panel:" the full redraws, the time of the first, and the flickers
+(a fill drawn back as it was within 200 ms; those of full clears apart); "-- eMMC reads:" and
+"-- microSD reads:" the sectors read by phase (FAT, folders, files, firmware area, other).
+--foreign: another firmware without an ELF (RECHO, the stock one): no hooks on our functions;
+the time from the instructions (as --cycles) at the clock the CRU gives (PLL and CLKSEL0), its
+SysTick handler from the vector table each millisecond, SysTick's counter (SYST_CVR, COUNTFLAG)
+from the simulated time for its short waits; the SysTick handler read through VTOR (its own
+vector table); keys and shots at each slice. Its core B is not run (another protocol): no sound.
 """
 import os
 import struct
@@ -53,7 +69,12 @@ from unicorn import (Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_BLO
                      UC_HOOK_MEM_UNMAPPED)
 from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3,
                                UC_ARM_REG_R12, UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR,
-                               UC_ARM_REG_XPSR, UC_ARM_REG_IPSR)
+                               UC_ARM_REG_XPSR, UC_ARM_REG_IPSR, UC_ARM_REG_PRIMASK,
+                               UC_ARM_REG_APSR)
+from unicorn import arm_const as _ac
+
+ST_REGS = [getattr(_ac, f"UC_ARM_REG_R{i}") for i in range(13)] + [UC_ARM_REG_SP, UC_ARM_REG_LR,
+                                                                     UC_ARM_REG_PC, UC_ARM_REG_XPSR]
 
 
 # --mmc-lat by default with --cycles: a 2 MiB install takes 1,541 ms, the device 1,387 to 1,578
@@ -82,6 +103,39 @@ def symbols(path):
     return out
 
 
+def elf_mismatch(path, u, d, sym):
+    """The ELF's loaded sections against what load() put in memory from the image: None when
+    they match, else the first difference. A stale ELF gives wrong symbols (ticks(), cpu_wait()
+    and the others the emulator hooks), and the run goes astray without a word. The word at
+    ovl_tag is left out: mkimg.py writes the build's tag there after the link."""
+    e = open(path, "rb").read()
+    tag = sym.get("ovl_tag")
+    code_off = struct.unpack_from("<I", d, 0x6c)[0]
+    tab = d[code_off:code_off + 0x200]
+    spans = []                                                  # (exec address, length) loaded
+    for i in range(3):
+        cl, ce, cs, dl, de, ds, be, bs = struct.unpack_from("<8I", tab, 8 + 32 * i)
+        spans += [(ce, cs), (de, ds)]
+    phoff, = struct.unpack_from("<I", e, 0x1c)
+    phentsize, phnum = struct.unpack_from("<HH", e, 0x2a)
+    checked = 0
+    for i in range(phnum):
+        p_type, off, vaddr, _, filesz = struct.unpack_from("<5I", e, phoff + i * phentsize)
+        if p_type != 1 or not filesz:                           # PT_LOAD with contents
+            continue
+        if not any(a <= vaddr and vaddr + filesz <= a + n for a, n in spans):
+            continue                                            # an overlay, loaded later
+        got = bytearray(u.mem_read(vaddr, filesz))
+        want = bytearray(e[off:off + filesz])
+        if tag is not None and vaddr <= tag and tag + 4 <= vaddr + filesz:
+            got[tag - vaddr:tag - vaddr + 4] = want[tag - vaddr:tag - vaddr + 4]
+        if got != want:
+            k = next(j for j in range(filesz) if got[j] != want[j])
+            return f"ELF {path} does not match the image at {vaddr + k:#x}"
+        checked += filesz
+    return None if checked else f"ELF {path}: no loaded segment found in the image"
+
+
 def load(u, d):
     fw_end = struct.unpack_from("<I", d, 0x1f4)[0]
     assert d[0x1f8:0x200] == b"RKnanoFW" and d[:0x200] == d[fw_end:fw_end + 0x200], "header"
@@ -102,12 +156,61 @@ def load(u, d):
 
 
 class Panel:
+    """The ST7789 behind the VOP, 320 x 170 pixels from row 35. Also counted: the full redraws
+    (a transfer of the whole screen) and the time of the first, and the flickers: a fill over
+    pixels of another colour that are drawn back as they were within FLICKER_MS (A, then the
+    fill's colour, then A again: the erase showed for a moment, as the charging screen's text
+    did, ETUDE §142). With the screen drawn by DMA, the fill and what follows leave in separate
+    transfers, so even a short gap shows. Counted apart: those of a full clear (a screen change
+    whose new screen shares pixels with the old one, the status bar for instance)."""
+    FLICKER_MS = 200
+    FULL = 320 * 170
+
     def __init__(self):
         self.fb = [[0] * 320 for _ in range(170)]
         self.cmd, self.args, self.cmds = None, [], []
         self.x0 = self.x1 = self.y0 = self.y1 = self.x = self.y = 0
         self.hi = None
         self.pixels = 0
+        self.now = lambda: 0                                    # ms, set once the clock exists
+        self.full, self.first_full = 0, None
+        self.pending, self.flickers = [], []                    # fills to check; found
+
+    def counted(self, n):
+        if n >= self.FULL:
+            self.full += 1
+            if self.first_full is None:
+                self.first_full = self.now()
+
+    def check(self, force=False):
+        """fills older than FLICKER_MS: the pixels that came back to their colour before it"""
+        t = self.now()
+        keep = []
+        for p in self.pending:
+            t0, x, y, w, h, color, old = p
+            if not force and t - t0 < self.FLICKER_MS:
+                keep.append(p)
+                continue
+            n = 0
+            for r, before in zip(range(max(y, 0), min(y + h, 170)), old):
+                lo = max(x, 0)
+                now_row = self.fb[r][lo:lo + len(before)]
+                n += sum(1 for a, b in zip(before, now_row) if a == b and a != color)
+            if n:
+                self.flickers.append((t0, x, y, w, h, n))
+        self.pending = keep
+
+    def report(self):
+        self.check(force=True)
+        first = f"first at {self.first_full} ms" if self.first_full is not None else "none"
+        part = [f for f in self.flickers if f[3] * f[4] < self.FULL]
+        full = [f for f in self.flickers if f[3] * f[4] >= self.FULL]
+        line = (f"-- panel: {self.full} full redraws ({first}), {len(part)} flickers "
+                f"({sum(f[5] for f in part)} pixels), {len(full)} on full clears "
+                f"({sum(f[5] for f in full)} pixels)")
+        for t0, x, y, w, h, n in (part + full)[:8]:
+            line += f"\n--   flicker at {t0} ms: fill {x},{y} {w}x{h}, {n} pixels drawn back"
+        return line
 
     def command(self, c):
         self.flush()
@@ -120,6 +223,7 @@ class Panel:
             self.cmds.append((self.cmd, self.args))
         elif self.cmd == 0x2c:
             self.cmds.append((0x2c, [f"{self.pixels} px"]))
+            self.counted(self.pixels)
             self.pixels = 0
 
     def data(self, v):
@@ -164,6 +268,12 @@ class Panel:
     def fill(self, x, y, w, h, color):
         """lcd_fill() at once (emu_fw's hook): the same window, command and pixels"""
         self.flush()
+        self.check()
+        lo, hi = max(x, 0), min(x + w, 320)
+        old = [self.fb[r][lo:hi] for r in range(max(y, 0), min(y + h, 170))]
+        if any(p != color for row in old for p in row):
+            self.pending.append((self.now(), x, y, w, h, color, old))
+        self.counted(w * h)
         self.cmds += [(0x2a, [x >> 8, x & 255, (x + w - 1) >> 8, (x + w - 1) & 255]),
                       (0x2b, [(y + 35) >> 8, (y + 35) & 255, (y + h + 34) >> 8, (y + h + 34) & 255]),
                       (0x2c, [f"{w * h} px"])]
@@ -193,9 +303,90 @@ CLOCK = 0x0309f000
 FW1 = 0x2000
 
 
+class Volumes:
+    """Where a sector lies on a disk image, for the reads counted by phase: the firmware area
+    (eMMC), the FAT, the folders (FAT32: the clusters of every folder, walked from the root at
+    the start), the files' data, the rest (MBR, boot sectors, reserved, and fat_mount's search:
+    one sector a MiB from the firmware area's end to the volume, about 400 at each mount).
+    The FAT32 or exFAT volumes alone or behind an MBR, at sector 0 (the card) or 0x81000 (the
+    eMMC, mkdisk.py)."""
+    PHASES = ("FAT", "folders", "files", "firmware", "other")
+
+    def __init__(self, sector, fw=None):
+        self.fw = fw                                              # (first, count) or None
+        self.vols, self.dirs = [], set()
+        starts = []
+        for base in (0, 0x81000) if fw else (0,):                # the eMMC's volume: an MBR at
+            b0 = sector(base)                                   # 0x81000 (mkdisk.py, the device)
+            if b0[82:87] == b"FAT32" or b0[3:11] == b"EXFAT   ":
+                starts.append(base)
+            elif b0[510:512] == b"\x55\xaa":
+                starts += [base + struct.unpack_from("<I", b0, 446 + 16 * i + 8)[0]
+                           for i in range(4) if b0[446 + 16 * i + 4] in (0x0b, 0x0c, 0x07)]
+        for st in starts:
+            try:
+                self.volume(sector, st)
+            except (struct.error, ValueError, ZeroDivisionError):
+                pass
+
+    def volume(self, sector, st):
+        b = sector(st)
+        if b[3:11] == b"EXFAT   ":
+            fat, fatlen, heap = struct.unpack_from("<III", b, 0x50)
+            self.vols.append((st + fat, st + fat + fatlen, st + heap))
+            return
+        if b[82:87] != b"FAT32":
+            return
+        bps, spc, res, nfat = struct.unpack_from("<HBHB", b, 11)
+        fatsz, root = struct.unpack_from("<I", b, 36)[0], struct.unpack_from("<I", b, 44)[0]
+        if bps != 512 or not spc:
+            return
+        fat0, data = st + res, st + res + nfat * fatsz
+        self.vols.append((fat0, fat0 + nfat * fatsz, data))
+        seen, todo = set(), [root]
+
+        def chain(c):
+            out = []
+            while 2 <= c < 0x0ffffff8 and c not in seen and len(seen) < 200000:
+                seen.add(c)
+                out.append(c)
+                e = sector(fat0 + c * 4 // 512)
+                c = struct.unpack_from("<I", e, c * 4 % 512)[0] & 0x0fffffff
+            return out
+        while todo:
+            for c in chain(todo.pop()):
+                first = data + (c - 2) * spc
+                self.dirs.update(range(first, first + spc))
+                for k in range(spc):
+                    d = sector(first + k)
+                    for o in range(0, 512, 32):
+                        if d[o] == 0:
+                            break
+                        if d[o] == 0xe5 or d[o + 11] == 0x0f or not d[o + 11] & 0x10:
+                            continue
+                        if d[o:o + 2] == b". " or d[o:o + 3] == b".. ":
+                            continue
+                        todo.append(struct.unpack_from("<H", d, o + 20)[0] << 16 |
+                                    struct.unpack_from("<H", d, o + 26)[0])
+
+    def phase(self, n):
+        if self.fw and self.fw[0] <= n < self.fw[0] + self.fw[1]:
+            return "firmware"
+        if n in self.dirs:
+            return "folders"
+        for f0, f1, data in self.vols:
+            if f0 <= n < f1:
+                return "FAT"
+        for f0, f1, data in self.vols:
+            if n >= data:
+                return "files"
+        return "other"
+
+
 class MMC:
     """dw_mmc in PIO mode: CMD17/18 reads, CMD24/25 writes, auto-stop; disk image read-only,
-    written sectors kept in a dictionary."""
+    written sectors kept in a dictionary. The sectors read are counted by phase (Volumes)."""
+    NAME, FW = "eMMC", True
 
     def __init__(self, path, log):
         self.f = open(path, "rb") if path else None
@@ -209,6 +400,19 @@ class MMC:
         self.cut_done = False
         self.now, self.lat = None, None                           # --mmc-lat / --sd-lat
         self.pending, self.ready_at, self.wbusy_until = None, 0, 0
+        self.vol, self.reads = None, {}
+
+    def count(self, lba, n):
+        if self.vol is None:
+            self.vol = Volumes(self.sector, (FW1, self.p) if self.FW else None)
+        for i in range(n):
+            ph = self.vol.phase(lba + i)
+            self.reads[ph] = self.reads.get(ph, 0) + 1
+
+    def reads_line(self):
+        return (f"-- {self.NAME} reads: " +
+                ", ".join(f"{ph} {self.reads.get(ph, 0)}" for ph in Volumes.PHASES) +
+                f" (sectors; {sum(self.reads.values())} in all)")
 
     def tick(self):
         """--*-lat: the data of a read shows, a write ends, once its time has come"""
@@ -297,6 +501,17 @@ class MMC:
         data, wr, self.auto = val & 0x200, val & 0x400, val & 0x1000
         self.cmds += 1
         self.rint |= 4
+        if self.NAME == "eMMC" and not val & (1 << 21):         # responses, for a firmware that
+            r = {0x30: 0x900, 0x34: 0, 0x38: 0, 0x3c: 0}        # sets the eMMC up again (RECHO):
+            if idx == 1:                                        # OCR ready, sector addressing
+                r[0x30] = 0xC0FF8080
+            elif idx == 2:                                      # CID
+                r = {0x30: 0x01020304, 0x34: 0, 0x38: 0, 0x3c: 0x15010045}
+            elif idx == 9:                                      # CSD 4.x (size from EXT_CSD)
+                r = {0x30: 0, 0x34: 0x0fff8000, 0x38: 0x5f5a83ff, 0x3c: 0xd04f0132}
+            elif idx == 0:
+                r[0x30] = 0
+            self.regs.update(r)                                 # else R1: ready, transfer state
         if not data:
             return
         n = self.regs.get(0x20, 0) // 512
@@ -314,6 +529,7 @@ class MMC:
             self.rq = list(struct.unpack("<128I", bytes(raw)))
         else:
             raw = b"".join(self.sector(arg + i) for i in range(n))
+            self.count(arg, n)
             self.rq = list(struct.unpack("<%dI" % (len(raw) // 4), raw))
             if self.lat:                                          # held until its time
                 self.pending, self.rq = self.rq, []
@@ -346,6 +562,7 @@ class MMC:
 class SDCard(MMC):
     """microSD card behind the second dw_mmc (0x60020000): SD 2.0 identification (CMD0, CMD8,
     ACMD41, CMD2, CMD3, CMD9, CMD7, ACMD6), SDHC block addressing, reads only."""
+    NAME, FW = "microSD", False
 
     def __init__(self, path, log):
         super().__init__(path, log)
@@ -409,7 +626,8 @@ def main():
     d = open(img, "rb").read()
     if "--boot-disk" in sys.argv:
         d, _ = boot_from_disk(opt("--disk", None))
-    sym = symbols(opt("--elf", img.rsplit("/", 1)[0] + "/fw.elf"))
+    foreign = "--foreign" in sys.argv          # another firmware (RECHO, the stock one): no ELF
+    sym = {} if foreign else symbols(opt("--elf", img.rsplit("/", 1)[0] + "/fw.elf"))
     steps = int(opt("--steps", "60000000"))
     stop_us = int(opt("--ms", "0")) * 1000                      # --ms: stop at this simulated time
     adc = {0: 820, 1: int(opt("--adc1", "1023")), 2: 300, 3: 300}
@@ -427,18 +645,27 @@ def main():
     if opt("--fast", "0") == "1":
         u.mem_write(0x0309ffe0, b"FAST")
     vt, sp, pc = load(u, d)
+    bad = None if foreign or "--boot-disk" in sys.argv else \
+        elf_mismatch(opt("--elf", img.rsplit("/", 1)[0] + "/fw.elf"), u, d, sym)
+    if bad:
+        print("emu: " + bad + " (stale ELF: build both together)")
+        sys.exit(3)
+    if "--check-elf" in sys.argv:
+        print("emu: ELF matches the image")
+        return
     # Unicorn handles the system space itself and has no running SysTick: ticks() is replaced
     # by a counter that advances by 50 us per call (stored in unused PMU-SRAM).
-    t = sym["ticks"] & ~1
-    cycles = "--cycles" in sys.argv
+    t = sym["ticks"] & ~1 if "ticks" in sym else None
+    cycles = "--cycles" in sys.argv or foreign
     sh.lazy = cycles                              # core B woken: it runs in A's slices
     # --cycles: a read only (ldr, ldr, nop, nop, bx lr): a store back could, when a slice ends
     # between the load and the store, put the clock back to its value before the slice
     stub = bytes.fromhex("0249" "0868" + ("00bf00bf" if cycles else "32300860") + "7047" "00bf") + \
         struct.pack("<I", CLOCK)                  # else: adds r0, #50; str r0, [r1]
-    if t & 2:
+    if t is not None and t & 2:
         stub = bytes.fromhex("00bf") + stub
-    u.mem_write(t, stub)
+    if t is not None:
+        u.mem_write(t, stub)
     if "millis" in sym:                       # no SysTick: from the counter, by a stub next to it
         ms = (bytes.fromhex("0349" "0868" "40f2e831" "b0fbf1f0" "7047" "00bf")   # ldr r1, =CLOCK;
               + struct.pack("<I", CLOCK))         # ldr r0, [r1]; movw r1, #1000; udiv r0, r0, r1
@@ -481,19 +708,99 @@ def main():
             last = (last + n) % OUT_SIZE
         cap["start"] = last
 
+    # Core A's SysTick (ETUDE §140): the firmware's handler run at each millisecond of the
+    # simulated time, as an interrupt between two blocks: the run stopped (by the hooks of ticks()
+    # and cpu_wait, or between the slices of --cycles), the handler run alone up to a stop address
+    # (its return), the registers and flags put back. Not while the interrupts are masked
+    # (PRIMASK) or in a handler (IPSR); missed ticks are dropped, as the pending bit merges them.
+    # The clock does not move during the handler (its ticks() calls are free).
+    systick = {"in": False, "next": None, "due": False, "n": 0}
+    ST_STOP = CLOCK + 0x40                        # a "b ." in unused PMU-SRAM: the return
+    u.mem_write(ST_STOP, bytes.fromhex("fee7"))
+    st_vec = struct.unpack("<I", u.mem_read(vt + 4 * 15, 4))[0] & ~1 \
+        if "adc_scan_start" in sym or foreign else 0  # before 0.104k1: no SysTick work
+
+    def systick_ask(uc):
+        """A tick due: the run stopped for it (at the entry of ticks() or cpu_wait())"""
+        if not st_vec or systick["in"]:
+            return
+        now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
+        if systick["next"] is None:
+            systick["next"] = (now // 1000 + 1) * 1000
+        elif now >= systick["next"]:
+            systick["due"] = True
+            uc.emu_stop()
+
+    def systick_run(uc):
+        systick["due"] = False
+        now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
+        systick["next"] = (now // 1000 + 1) * 1000
+        if uc.reg_read(UC_ARM_REG_PRIMASK) & 1 or uc.reg_read(UC_ARM_REG_IPSR) & 0x1ff:
+            return
+        vec = st_vec
+        if foreign:                                     # its own table, moved by VTOR (RECHO)
+            vtor = regs.get(0xE000E000 + 0xED08, 0) or vt
+            vec = struct.unpack("<I", uc.mem_read(vtor + 4 * 15, 4))[0] & ~1
+        ctx = [uc.reg_read(r) for r in ST_REGS]
+        clock = uc.mem_read(CLOCK, 4)
+        uc.reg_write(UC_ARM_REG_SP, (ctx[13] - 0x20) & ~7)   # the frame the core would push
+        uc.reg_write(UC_ARM_REG_LR, ST_STOP | 1)
+        systick["in"] = True
+        try:
+            uc.emu_start(vec | 1, ST_STOP, count=200_000)
+        finally:
+            systick["in"] = False
+            uc.mem_write(CLOCK, bytes(clock))
+            for r, v in zip(ST_REGS[:16], ctx[:16]):
+                uc.reg_write(r, v)
+            uc.reg_write(UC_ARM_REG_APSR, ctx[16] & 0xf80f0000)
+        systick["n"] += 1
+
+    # --stall-at MS:DUR (not with --cycles): at its first key_poll() from MS on, the loop held
+    # DUR ms, as a long operation would hold it (a card mounted, a folder opened): the time goes
+    # on by ms, the SysTick handler runs, core B too; nothing else of core A
+    stall = [int(v) for v in opt("--stall-at", "0:0").split(":")]
+
+    def stall_hook(uc, addr, size, _):
+        if stall[1] and not systick["in"] and \
+                struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] >= stall[0] * 1000:
+            state["stall"] = stall[1]
+            stall[1] = 0
+            uc.emu_stop()
+    if stall[1] and "key_poll" in sym:
+        u.hook_add(UC_HOOK_BLOCK, stall_hook, begin=sym["key_poll"] & ~1,
+                   end=(sym["key_poll"] & ~1) + 1)
+
+    def stall_run(uc, ms):
+        at = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] // 1000
+        log.append(f"STALL of the loop: {ms} ms at {at} ms")
+        for _ in range(ms):
+            now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] + 1000
+            uc.mem_write(CLOCK, struct.pack("<I", now))
+            if sh.b and not sh.b.sleeping:
+                sh.b.step(int(1000 * b_ips(uc) / 1e6))
+            if sh.b:
+                sh.b.systick(now, b_hz(uc))
+            if st_vec:
+                systick_run(uc)
+
     def coreb_tick(uc, addr, size, _):
+        if systick["in"]:
+            return                                # the SysTick handler: its time does not count
         if stop_us and struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] >= stop_us:
             uc.emu_stop()                         # --ms, also in a busy wait (no cpu_wait)
         if cycles:
             return                                # --cycles: core B runs per slice
+        systick_ask(uc)
         if sh.b and not sh.b.sleeping:
             sh.b.step(5000)
         if sh.b:
             sh.b.systick(struct.unpack("<I", uc.mem_read(CLOCK, 4))[0], b_hz(uc))
         if pcm_out and sh.b:
             capture()
-    u.hook_add(UC_HOOK_BLOCK, coreb_tick, begin=t, end=t + 4)
-    panel, log, regs = Panel(), [], {}
+    if t is not None:
+        u.hook_add(UC_HOOK_BLOCK, coreb_tick, begin=t, end=t + 4)
+    panel, log, regs, regs_old, pll = Panel(), [], {}, {}, {}
 
     # --ring-trace FILE (with --cycles): every 5 ms of simulated time, the fill of core B's input
     # ring (ring bytes held: in_wr - rb_rd, version 3) and of the PCM ring (pcm_wr - pcm_rd),
@@ -523,6 +830,8 @@ def main():
     # cpu_wait (a return here, no SysTick): the time goes on to the next 1 ms tick, as the WFI
     # waits on the device, and core B runs for it (at its clock)
     def idle_tick(uc, addr, size, _):
+        if systick.pop("resumed", False):
+            return                                # resumed here after a SysTick: already moved
         now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
         nxt = (now // 1000 + 1) * 1000
         uc.mem_write(CLOCK, struct.pack("<I", nxt))
@@ -534,6 +843,8 @@ def main():
             sh.b.systick(nxt, b_hz(uc))
         if pcm_out and sh.b:
             capture()
+        if not cycles:
+            systick_ask(uc)
     if "cpu_wait" in sym:
         w = sym["cpu_wait"] & ~1
         u.hook_add(UC_HOOK_BLOCK, idle_tick, begin=w, end=w + 1)
@@ -590,6 +901,7 @@ def main():
 
     def now_ms(uc):
         return struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] // 1000
+    panel.now = lambda: now_ms(u)
 
     def events(uc):
         t = now_ms(uc)
@@ -629,6 +941,15 @@ def main():
         state["screen_dma"] = state.get("screen_dma", 0) + 1
         for sar, ctl, ctlh in blocks:
             n = ctlh & 0xfff
+            if (ctl >> 4) & 7 == 1 and not con & 0x800:          # 16-bit source (RECHO's
+                if (ctl >> 9) & 3 == 2:                          # "dma16"): a pixel a transfer
+                    hw = [struct.unpack("<H", uc.mem_read(sar, 2))[0]] * n
+                else:
+                    hw = list(struct.unpack(f"<{n}H", uc.mem_read(sar, 2 * n)))
+                if con & 0x20:
+                    hw = [(h & 0xff) << 8 | h >> 8 for h in hw]
+                panel.stream(hw)
+                continue
             if (ctl >> 9) & 3 == 2:                              # source fixed: a fill
                 words = [struct.unpack("<I", uc.mem_read(sar, 4))[0]] * n
             else:
@@ -668,7 +989,9 @@ def main():
             if 0x60020000 <= a < 0x60024000:
                 return sdc.read(a - 0x60020000) if sdc else regs.get(a, 0) & 0x7fffffff
             if a == 0x400d0004:                                  # SARADC STAS (see the write)
-                return state.pop("adc_busy", 0)
+                busy = state.pop("adc_busy", 0)
+                now = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]
+                return busy if now - state.get("adc_t", 0) < 1000 else 0
             if a == 0x4004001c:                                  # I2C0 IPD: all done, no NAK
                 return 0x3f
             if a == 0x40030020:                                  # I2S1 CLR: done
@@ -715,6 +1038,13 @@ def main():
         def wr(uc, off, size, val, _):
             a = base + off
             regs[a] = val
+            if a in (0x40180000, 0x40180004):            # PLL_CON0/1, hiword-masked: merged
+                m = val >> 16                            # into a copy for cru_hz (--foreign)
+                pll[a] = (pll.get(a, 0) & ~m | val & m) & 0xffff
+            if a in (0x40180010, 0x40180014, 0x40180018):  # CRU MODE_CON, CLKSEL0/1: the upper
+                m = val >> 16                            # half says which bits are written (the
+                regs[a] = (regs_old.get(a, 0) & ~m | val & m) & 0xffff  # ACODEC's clock source
+                regs_old[a] = regs[a]                    # kept the core on the PLL, ETUDE §141)
             if a == 0x40120000 and regs.get(0x40120000 + 0x100, 0) & 1:
                 regs[a] = val | 1                                # once on, it stays on (device)
             if a == 0x40120000 and val & 1:
@@ -752,6 +1082,8 @@ def main():
             if a == 0x401800cc and val & 0x40000:                # core B reset (SOFTRST3 bit 2)
                 if val & 4:
                     sh.b = None
+                elif foreign:                                    # its core B speaks its own
+                    log.append("core B released: not run (--foreign)")   # protocol: not modelled
                 else:
                     sh.b = CoreB(sh, "--trace-b" in sys.argv)
                     if os.environ.get("EMU_WATCH"):
@@ -765,10 +1097,15 @@ def main():
             elif a == 0x400d0008:
                 state["adc_ch"] = val & 7
                 if val & 0x10:                                   # a conversion starts: STAS
-                    state["adc_busy"] = 1                        # reads busy once, then done
+                    state["adc_busy"] = 1                        # reads busy once, then done,
+                    state["adc_t"] = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0]                  # if read within 1 ms (the
+                                                                 # SysTick sampling: done)
             elif a == 0x60070028:
                 panel.command(val & 0xff)
             elif a == 0x6007002c:
+                con = regs.get(0x60070000, 0)
+                if con & 0x2 and not con & 0x800 and panel.cmd == 0x2c:   # SPLIT2 (RECHO): a
+                    panel.data(val >> 8)                         # pixel a write, high byte first
                 panel.data(val)
             elif a == 0x40040010:                                # I2C0 MTXCNT: one message
                 b = b"".join(regs.get(0x40040100 + 4 * i, 0).to_bytes(4, "little")
@@ -805,8 +1142,35 @@ def main():
     sar_rd = periph(0x60000000)[0]                # core B reads the DMA's SAR too (ETUDE §103)
     sh.sar_read = lambda: sar_rd(u, 0x1b8, 4, None) if "dma" in state else 0
 
+    def cru_hz():
+        """core A's clock from the CRU (--foreign: no cpu_hz variable): the PLL (CON0 bits 11:0
+        feedback, 14:12 post 1; CON1 bits 5:0 reference, 8:6 post 2) over CLKSEL0's divider"""
+        if not regs.get(0x40180010, 0) & 1:
+            return 24000000
+        c0, c1 = pll.get(0x40180000, 0x1064), pll.get(0x40180004, 0x1046)
+        fb, p1, ref, p2 = c0 & 0xfff, (c0 >> 12) & 7 or 1, c1 & 0x3f or 1, (c1 >> 6) & 7 or 1
+        return 24000000 * fb // ref // p1 // p2 // ((regs.get(0x40180014, 0) & 7) + 1)
+
+    # SysTick's counter (--foreign: other firmwares time their short waits with it; ours never
+    # reads it): counts down at the core clock from the simulated time, COUNTFLAG on a wrap
+    st_seen = {"wraps": 0}
+
+    def st_count(uc):
+        load = (regs.get(0xE000E000 + 0xE014, 0) & 0xffffff) + 1
+        n = struct.unpack("<I", uc.mem_read(CLOCK, 4))[0] * (cru_hz() // 1000000)
+        return load, n
+
     def st_rd(uc, off, size, _):
-        return regs.get(0xE000E000 + off, 0)
+        if foreign and off == 0xE018:                           # SYST_CVR
+            load, n = st_count(uc)
+            return (load - 1 - n % load) & 0xffffff
+        v = regs.get(0xE000E000 + off, 0)
+        if foreign and off == 0xE010:                           # SYST_CSR: COUNTFLAG, cleared
+            load, n = st_count(uc)                              # by the read
+            wraps, seen = n // load, st_seen["wraps"]
+            st_seen["wraps"] = wraps
+            return v | (1 << 16) if wraps != seen else v
+        return v
 
     def st_wr(uc, off, size, val, _):
         regs[0xE000E000 + off] = val
@@ -883,17 +1247,29 @@ def main():
     u.reg_write(UC_ARM_REG_R1, sp)
     u.reg_write(UC_ARM_REG_R2, pc)
     k, done, now = int(opt("--slice", "20000")), 0, 0.0
+
     hz_at = sym.get("cpu_hz")
     cur, faults = pc, 0
     while True:
         try:
             if not cycles:
-                u.emu_start(cur, 0xffffffff, count=steps)
+                u.emu_start(cur | 1, 0xffffffff, count=steps)
+                stopped = (stop_us and struct.unpack("<I", u.mem_read(CLOCK, 4))[0] >= stop_us) \
+                    or mmc.cut_done
+                if state.get("stall") and not stopped:
+                    cur = u.reg_read(UC_ARM_REG_PC)
+                    stall_run(u, state.pop("stall"))
+                    continue
+                if systick["due"] and not stopped:
+                    cur = u.reg_read(UC_ARM_REG_PC)
+                    systick_run(u)
+                    systick["resumed"] = "cpu_wait" in sym and (cur & ~1) == sym["cpu_wait"] & ~1
+                    continue
             else:                                     # slices: the clock from the instructions
                 while done < steps:
                     u.emu_start(cur | 1, 0xffffffff, count=k)
                     done += k
-                    hz = struct.unpack("<I", u.mem_read(hz_at, 4))[0] if hz_at else 24000000
+                    hz = struct.unpack("<I", u.mem_read(hz_at, 4))[0] if hz_at else cru_hz()
                     clk = struct.unpack("<I", u.mem_read(CLOCK, 4))[0]
                     start = max(now, float(clk))
                     now = start + k * 1e6 / max(hz, 1000000)
@@ -910,6 +1286,11 @@ def main():
                             sh.b.t_back = 0
                     if sh.b:
                         sh.b.systick(int(now), b_hz(u))
+                    if foreign:
+                        events(u)                       # keys and shots: no hook of ours
+                    systick_ask(u)
+                    if systick["due"]:
+                        systick_run(u)
                     if regs.get(0x40120000, 0) & 1 and wdt_check(int(now), hz):
                         cur = u.reg_read(UC_ARM_REG_PC) | 1
                         continue
@@ -952,6 +1333,7 @@ def main():
         print(l)
     print(f"-- stopped at pc {u.reg_read(UC_ARM_REG_PC):#x}, simulated time {ms} ms, "
           f"{len(panel.cmds)} panel commands")
+    print(panel.report())
     print(f"-- GPIO2 out {struct.unpack('<I', u.mem_read(0x50030000, 4))[0]:#010x} "
           f"(bit 6 power hold, bit 4 backlight)")
     if "--trace-lcd" in sys.argv:
@@ -959,6 +1341,9 @@ def main():
             print(f"  {c:02x} " + " ".join(f"{x:02x}" if isinstance(x, int) else x for x in args))
     if "--png" in sys.argv:
         panel.png(opt("--png", "screen.png"))
+    print(mmc.reads_line())
+    if sdc:
+        print(sdc.reads_line())
     mmc.report(opt("--expect-fw", None))
     if opt("--dump-disk", None):                                  # disk with the writes applied
         out = opt("--dump-disk", None)

@@ -92,7 +92,7 @@ __attribute__((noinline)) static int dyn_decomp(struct bits *b, int32_t *pc, uin
         } else {
             pos += n + 1;
             if (k != 1) {
-                uint32_t v = (s << (n + 1)) >> (32 - k);
+                uint32_t v = k ? (s << (n + 1)) >> (32 - k) : 0;     /* k 0: a damaged stream */
                 pos += k - 1;
                 n *= m;
                 if (v >= 2) {
@@ -158,7 +158,7 @@ static inline __attribute__((always_inline)) void pred_fixed(const int32_t *pc, 
         uint32_t num, int16_t *coefs, const int n, uint32_t cs, uint32_t denshift)
 {
     int16_t a[8];
-    int32_t denhalf = 1 << (denshift - 1);
+    int32_t denhalf = denshift ? 1 << (denshift - 1) : 0;
     for (int i = 0; i < n; i++)
         a[i] = coefs[i];
     const int32_t *po = out + n;                /* po[-i]: the sample i + 1 before */
@@ -198,7 +198,7 @@ __attribute__((noinline)) static void unpc_block_sw(const int32_t *pc, int32_t *
                        int16_t *coefs, uint32_t act, uint32_t chanbits, uint32_t denshift)
 {
     uint32_t cs = 32 - chanbits;
-    int32_t denhalf = 1 << (denshift - 1);
+    int32_t denhalf = denshift ? 1 << (denshift - 1) : 0;
     out[0] = pc[0];
     if (act == 0) {
         if (num > 1 && pc != out)
@@ -398,6 +398,8 @@ int alac_decode(struct alac *a, const uint8_t *pkt, uint32_t n, uint32_t *out, u
             struct chan cu, cv;
             mixbits = (int32_t)get(&b, 8);
             mixres = (int8_t)get(&b, 8);
+            if (mixbits > 31)
+                return -1;                      /* encoders write 0 to about 2; a shift of 32+ */
             chan_header(&b, &cu);
             if (stereo)
                 chan_header(&b, &cv);

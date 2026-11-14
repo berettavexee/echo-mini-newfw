@@ -25,6 +25,9 @@ int key_is_vol(int k);          /* VOL+ or VOL- */
 int plug_present(int src);      /* SRC_*: plugged in, as the last event said */
 const char *key_name(int k);
 
+/* The ladder's reading, every 2 ms from the SysTick interrupt (board.c) */
+void keys_sample(unsigned v, uint32_t now);
+
 /* Simple screens (system, installer): the key newly down, once, else KEY_NONE */
 int key_edge(void);
 void key_edge_sync(void);       /* the key down now is not new */

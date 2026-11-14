@@ -1,11 +1,31 @@
 # User manual
 
-This manual is for the ECHO MINI new firmware, version 0.104. It describes what the player shows
+This manual is for the ECHO MINI new firmware, version 0.105. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
-The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing Daft
-Punk's "Discovery" in Opus. The emulator has no real-time clock, so the clock is missing from the
-status line and the date screen says it is not set.
+The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing a few
+tracks of Daft Punk's "Discovery" in Opus. The emulator has no real-time clock, so the clock is
+missing from the header and the date screen says it is not set.
+
+## The header
+
+Every screen (browser, play screen, menu, settings, play queue) starts with the same header, a
+thin line under it:
+
+- at the left, the screen's title (the folder's name in the browser);
+- the position in the list or in the play queue, as "3/5";
+- the clock (Settings: "Clock");
+- what plays: a play sign, two bars when paused, a square when stopped, nothing when the queue
+  is empty;
+- the play mode, unless it is "in order": a loop for repeat all, a loop with a 1 for repeat one,
+  crossed arrows for shuffle;
+- the volume: a speaker and the attenuation in dB ("-20 dB": 0 is the loudest);
+- the battery (Settings: "Battery"): an icon, its percent, or the music left ("11h", then
+  "45m" under an hour). The level follows the voltage over about a minute, so it does not jump
+  when a track starts; on battery it only goes down (a pause lets the voltage rise a little:
+  that is not shown), and while charging it stops at 99 % until the charger has finished. With
+  the cable in, the battery is blue while charging, and the music left shows the percent
+  instead. The battery turns red under 3.425 V.
 
 ## The keys
 
@@ -58,28 +78,19 @@ Holding Power 2 s while playing with the cable in also leads to the charging scr
 
 ## The play screen
 
-![Play screen: playing, track 4 of 14, repeat all, title on two lines, artist, album, time, bar, format line with the track gain on yellow](docs/manual/play-screen.png)
+![Play screen: playing, track 3 of 5, repeat all, title, artist, track number and album, time and time left, bar, format line](docs/manual/play-screen.png)
 
 From top to bottom:
 
-1. **The status line**:
-   - the state: playing, paused or stopped;
-   - the position in the play queue;
-   - the play mode, unless it is "in order";
-   - the clock;
-   - the battery. "CHG" means charging and "USB" means charged, with the cable in. The
-     percent follows the voltage over about a minute, so it does not jump when a track starts;
-     on battery it only goes down (a pause lets the voltage rise a little: that is not shown),
-     and while charging it stops at 99 % until the charger has finished. The battery turns red
-     under 3.425 V.
+1. **The header** (above): "Now playing", the position in the play queue, what plays, the play
+   mode, the volume, the battery.
 2. **The title**, or the file name when the file has no title tag. It uses two large lines when
    it fits; longer names scroll in full across one large line after a short pause.
-3. **The artist and the album**, or the folder when the file has no album tag. They scroll when
-   too long.
-4. **The time and the bar**.
+3. **The artist and the album**, or the folder when the file has no album tag. The album comes
+   after the track's number when the file has one ("3 · Discovery"). They scroll when too long.
+4. **The time**, the time left at the right, and **the bar**.
 5. **The format line**:
    - the codec, the sample rate and the bit depth;
-   - the volume, as an attenuation in dB;
    - the ReplayGain applied, in the "RG" box. The box is on yellow when the gain is the
      track's own (album mode, no album gain in the file).
 
@@ -104,7 +115,7 @@ follows it therefore does not move the volume.
 Hold **VOL+, then press VOL-** on the play screen (in that order, see "The keys"). The music goes on, and the screen shows
 a target as a mark on the bar, and how far it is from the current position:
 
-![Seek mode: go to 0:36 / 3:46, +0:30](docs/manual/seek-mode.png)
+![Seek mode: go to 0:24 / 0:25, +0:17](docs/manual/seek-mode.png)
 
 | Key | Action |
 |---|---|
@@ -129,15 +140,25 @@ page), after a short silence: about 0.2 s (Vorbis) or 0.3 s (Opus).
 
 ## The folder browser
 
-The top level lists **Library** (the music by its tags, below), **Internal** (the internal
-memory) and **SD card** (the microSD card, when one is inserted). In a folder, the subfolders come first, then the playable files. Names are
-sorted in natural order, ignoring case, so "track 2" comes before "track 10". Empty files
-(0 bytes) are greyed and never played.
+The top level, "Files", lists **Library** (the music by its tags, below), **Internal memory**
+and **SD card** (the microSD card), each with an icon and, at the right in grey: the library's
+tracks ("not built" before its first update), the free space of each volume, "no card" (the
+card's line greyed, nothing to open). The free space is counted when the library is updated
+(it takes well under a second) and kept across power-offs; it is not shown for a volume
+changed since (another card). The player starts there the first time, and after a USB session
+or an install; otherwise it goes back to the last folder.
+
+![The top level](docs/manual/browser-top.png)
+
+In a folder, the subfolders come first, then the playable files. Names are sorted in natural
+order, ignoring case, so "track 2" comes before "track 10". Empty files (0 bytes) are greyed
+and never played.
 
 ![Top level of the internal memory](docs/manual/browser-internal.png)
 ![A folder of the internal memory](docs/manual/browser-album.png)
 
-The number at the top right is the number of entries in the folder. Below, an empty file is
+The header shows the entry selected and the number of entries in the folder ("1/5"). A folder
+ends with ">". The track playing is marked with a note. Below, an empty file is
 greyed. A selected file or folder name that is too long scrolls after a short pause. While a track
 plays, the browser shows its progress bar at the bottom.
 
@@ -147,9 +168,9 @@ plays, the browser shows its progress bar at the bottom.
 |---|---|
 | **VOL+** / **VOL-** | move up / down (held: repeats) |
 | **PLAY** on a folder | open it |
-| **PLAY held** on a folder | play everything under it, subfolders included, in order (also on "Internal" or "SD card") |
+| **PLAY held** on a folder | play everything under it, subfolders included, in order (also on "Internal memory" or "SD card") |
 | **PLAY** on a file | play the folder from this file, and go to the play screen |
-| **BACK** | up one folder |
+| **BACK** | up one folder; at the top level, the main menu |
 | **MENU** | to the play screen |
 | **MENU held** | main menu |
 
@@ -220,23 +241,31 @@ Tracks of the microSD card are passed over while the card is out, or while anoth
 
 ## The main menu (MENU held)
 
-VOL+ / VOL- move, PLAY chooses, BACK or MENU closes the menu. The music goes on while the menu
-is open, except for the USB and system entries, which stop it.
+VOL+ / VOL- move, PLAY chooses, MENU closes the menu; BACK closes it, or goes back from USB
+or System to the menu. The music goes on while the menu is open, except for the USB and
+system entries, which stop it. A greyed entry cannot be used now (its reason at the right);
+PLAY does nothing there.
 
 ![Main menu](docs/manual/main-menu.png)
 
 | Entry | What it does |
 |---|---|
 | Files | the folder browser |
-| Now playing | the play screen |
-| Play queue | the play queue: its tracks, PLAY plays one, the first line empties it |
+| Now playing | the play screen (greyed with nothing to play) |
+| Play queue | the play queue: its tracks, PLAY plays one, the first line empties it; at the right its number of tracks |
+| Library | the library's lists (below); at the right its tracks, or "not built": PLAY builds it first |
+| USB > | greyed without the USB cable ("no cable"); with it, a menu: |
+| &nbsp;&nbsp;Disk, read only | the internal memory as a USB disk; the computer can read it but not write to it |
+| &nbsp;&nbsp;Disk, read/write | the same, and the computer can write to it (copy music, firmware images) |
+| &nbsp;&nbsp;Sound card | the player as a USB sound card for a computer (see below) |
 | Settings | the settings screen (below) |
-| USB disk, read only | the internal memory as a USB disk; the computer can read it but not write to it |
-| USB disk, read/write | the same, and the computer can write to it (copy music, firmware images) |
-| USB sound card | the player as a USB sound card for a computer (see below) |
-| Install a firmware (.IMG) | the installer (see "Installing") |
-| System screen | hardware state (battery, keys, plugs, clocks); any key returns |
-| USB loader mode (exit: RST) | restarts into the loader's USB mode, for recovery from a computer; leave it with the RST hole |
+| System > | a menu: |
+| &nbsp;&nbsp;Information | the version, the formats played, each volume's size and free space, the library's tracks, the battery and the music left; any key returns |
+| &nbsp;&nbsp;System screen | hardware state (battery, keys, plugs, clocks); any key returns |
+| &nbsp;&nbsp;Install a firmware (.IMG) | the installer (see "Installing"); at the right the images found in the root folder, greyed when there is none |
+| &nbsp;&nbsp;USB loader mode (exit: RST) | restarts into the loader's USB mode, for recovery from a computer; leave it with the RST hole |
+
+![System, Information](docs/manual/information.png)
 
 **USB disk**: plug the cable, then choose the entry.
 - Leave with **BACK**, after ejecting the disk on the computer.
@@ -300,6 +329,7 @@ power off (except the sleep timer).
 | Language | the language of the screens: English, Français, 日本語, 简体中文 (the catalogues of the image; see below). This line stays in English, so that it can be found in any language | English |
 | Date and time | shows the date and time; PLAY opens the clock screen (below) | |
 | Clock | **shown**: the time at the top of the play screen and the browser (once the clock is set); **hidden**: not shown | shown |
+| Battery | what the header shows of the battery: **icon**; **percent**; **time left**, the music left with the screen off, from full runs on battery (about 14.5 h), less 10 % for the screen and the keys: it is meant to be short of the real time rather than over it | icon |
 | Screen off after | 10 s, 30 s, 1 min, 2 min, 5 min, never | 30 s |
 | Brightness | 10 steps: 8, 12, 17, 23, 30, 39, 50, 63, 80, 100 % (even steps to the eye) | 100 % |
 | Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder | tags |
@@ -385,11 +415,11 @@ Storage:
 
 ## Installing
 
-1. Copy the image (`NEWFW104.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
-   instance `NEWFW104.IMG`) to the
-   root of the internal memory. Use the stock firmware's USB disk, or "USB disk, read/write"
+1. Copy the image (`NEWFW105.IMG` from the release, or `HIFIEC70.IMG` from the build renamed for
+   instance `NEWFW105.IMG`) to the
+   root of the internal memory. Use the stock firmware's USB disk, or USB, "Disk, read/write"
    with this firmware.
-2. Main menu → **Install a firmware (.IMG)**:
+2. Main menu → System → **Install a firmware (.IMG)**:
    - VOL+ / VOL- choose the image (long names are shown, and scroll when too long), and PLAY
      checks it;
    - PLAY then installs it, and BACK cancels.

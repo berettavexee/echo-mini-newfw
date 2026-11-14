@@ -11,12 +11,12 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/browser.c src/libbrowse.c
+#: src/browser.c src/libbrowse.c src/menu.c
 msgid "Library"
 msgstr ""
 
-#: src/browser.c
-msgid "Internal"
+#: src/browser.c src/menu.c
+msgid "Internal memory"
 msgstr ""
 
 #: src/browser.c
@@ -27,8 +27,38 @@ msgstr ""
 msgid "SD card (needs FAT32 or exFAT)"
 msgstr ""
 
-#: src/browser.c
+#: src/browser.c src/menu.c
 msgid "SD card"
+msgstr ""
+
+#: src/browser.c src/menu.c
+msgid "not built"
+msgstr ""
+
+#: src/browser.c src/menu.c src/settings.c
+#, c-format
+msgid "%u tracks"
+msgstr ""
+
+#: src/browser.c src/menu.c
+msgid "no card"
+msgstr ""
+
+#. TRANSLATORS: the free space of a volume (the top level of the files)
+#: src/browser.c
+#, c-format
+msgid "%u MB free"
+msgstr ""
+
+#. TRANSLATORS: the free space of a volume, GB with one decimal
+#: src/browser.c
+#, c-format
+msgid "%u.%u GB free"
+msgstr ""
+
+#: src/browser.c
+#, c-format
+msgid "%u GB free"
 msgstr ""
 
 #: src/browser.c
@@ -39,8 +69,8 @@ msgstr ""
 msgid "reading..."
 msgstr ""
 
-#: src/browser.c src/ui.c
-msgid "Storage"
+#: src/browser.c src/menu.c
+msgid "Files"
 msgstr ""
 
 #: src/browser.c
@@ -296,11 +326,7 @@ msgstr ""
 msgid "starting..."
 msgstr ""
 
-#: src/menu.c
-msgid "Files"
-msgstr ""
-
-#: src/menu.c
+#: src/menu.c src/playscreen.c
 msgid "Now playing"
 msgstr ""
 
@@ -308,24 +334,35 @@ msgstr ""
 msgid "Play queue"
 msgstr ""
 
+#. TRANSLATORS: the main menu's entry for the USB modes (disk, sound card)
+#: src/menu.c
+msgid "USB"
+msgstr ""
+
 #: src/menu.c src/settings.c
 msgid "Settings"
 msgstr ""
 
+#. TRANSLATORS: the main menu's entry for the information, installer and system screens
 #: src/menu.c
-msgid "USB disk, read only"
+msgid "System"
 msgstr ""
 
 #: src/menu.c
-msgid "USB disk, read/write"
-msgstr ""
-
-#: src/menu.c src/uac.c
-msgid "USB sound card"
+msgid "Disk, read only"
 msgstr ""
 
 #: src/menu.c
-msgid "Install a firmware (.IMG)"
+msgid "Disk, read/write"
+msgstr ""
+
+#: src/menu.c
+msgid "Sound card"
+msgstr ""
+
+#. TRANSLATORS: a page of facts: version, formats, free space, battery
+#: src/menu.c
+msgid "Information"
 msgstr ""
 
 #: src/menu.c
@@ -333,7 +370,74 @@ msgid "System screen"
 msgstr ""
 
 #: src/menu.c
+msgid "Install a firmware (.IMG)"
+msgstr ""
+
+#: src/menu.c
 msgid "Menu"
+msgstr ""
+
+#. TRANSLATORS: why the USB entry is greyed (main menu)
+#: src/menu.c
+msgid "no cable"
+msgstr ""
+
+#: src/menu.c
+#, c-format
+msgid "%u found"
+msgstr ""
+
+#: src/menu.c src/playscreen.c src/settings.c
+msgid "none"
+msgstr ""
+
+#. TRANSLATORS: a size (Information)
+#: src/menu.c
+#, c-format
+msgid "%u MB"
+msgstr ""
+
+#: src/menu.c
+#, c-format
+msgid "%u.%u GB"
+msgstr ""
+
+#: src/menu.c
+#, c-format
+msgid "%u GB"
+msgstr ""
+
+#: src/menu.c
+msgid "not readable"
+msgstr ""
+
+#. TRANSLATORS: the free space and the size of a volume (Information)
+#: src/menu.c
+#, c-format
+msgid "%s free of %s"
+msgstr ""
+
+#. TRANSLATORS: Information's lines
+#: src/menu.c
+msgid "Version"
+msgstr ""
+
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
+#: src/menu.c src/settings.c
+msgid "Battery"
+msgstr ""
+
+#: src/menu.c
+msgid "charging"
+msgstr ""
+
+#: src/menu.c
+msgid "charged"
+msgstr ""
+
+#. TRANSLATORS: the music left on the battery (Information)
+#: src/menu.c
+msgid "Time left"
 msgstr ""
 
 #: src/menu.c
@@ -493,39 +597,11 @@ msgid "nothing plays: PLAY on a file"
 msgstr ""
 
 #: src/playscreen.c
-msgid "repeat all"
-msgstr ""
-
-#: src/playscreen.c
-msgid "repeat one"
-msgstr ""
-
-#: src/playscreen.c
-msgid "shuffle"
-msgstr ""
-
-#: src/playscreen.c
-msgid "paused"
-msgstr ""
-
-#: src/playscreen.c
-msgid "stopped"
-msgstr ""
-
-#: src/playscreen.c src/uac.c
-msgid "playing"
-msgstr ""
-
-#: src/playscreen.c
 msgid "go to"
 msgstr ""
 
 #: src/playscreen.c
 msgid "VOL+/- move  PLAY go  BACK cancel"
-msgstr ""
-
-#: src/playscreen.c src/settings.c
-msgid "none"
 msgstr ""
 
 #: src/qscreen.c
@@ -545,17 +621,17 @@ msgstr ""
 msgid "Clock"
 msgstr ""
 
-#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
 #: src/settings.c
 msgid "Screen off after"
 msgstr ""
 
-#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
 #: src/settings.c
 msgid "Brightness"
 msgstr ""
 
-#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
 #: src/settings.c
 msgid "Track title"
 msgstr ""
@@ -624,6 +700,21 @@ msgstr ""
 msgid "shown"
 msgstr ""
 
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "icon"
+msgstr ""
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "percent"
+msgstr ""
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "time left"
+msgstr ""
+
 #: src/settings.c
 msgid "never"
 msgstr ""
@@ -662,17 +753,16 @@ msgstr ""
 msgid "no"
 msgstr ""
 
-#: src/settings.c
-#, c-format
-msgid "%u tracks"
-msgstr ""
-
 #: src/uac.c src/usbmode.c
 msgid "waiting for the host"
 msgstr ""
 
 #: src/uac.c
 msgid "connected, no stream"
+msgstr ""
+
+#: src/uac.c
+msgid "playing"
 msgstr ""
 
 #: src/uac.c
@@ -698,6 +788,10 @@ msgid "MENU: remote off"
 msgstr ""
 
 #: src/uac.c
+msgid "USB sound card"
+msgstr ""
+
+#: src/uac.c
 msgid "VOL+ / VOL-: volume, twice: track"
 msgstr ""
 
@@ -707,6 +801,10 @@ msgstr ""
 
 #: src/uac.c
 msgid "audio output failed"
+msgstr ""
+
+#: src/ui.c
+msgid "Storage"
 msgstr ""
 
 #: src/ui.c
@@ -727,6 +825,18 @@ msgstr ""
 
 #: src/ui.c
 msgid "details: NEWFWLOG.TXT"
+msgstr ""
+
+#. TRANSLATORS: the music left on the battery, in hours, then in minutes (header, short)
+#: src/uidraw.c
+#, c-format
+msgid "%uh"
+msgstr ""
+
+#. TRANSLATORS: the music left on the battery, in hours, then in minutes (header, short)
+#: src/uidraw.c
+#, c-format
+msgid "%um"
 msgstr ""
 
 #: src/update.c

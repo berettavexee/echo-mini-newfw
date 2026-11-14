@@ -1,5 +1,5 @@
 #!/bin/sh
-# mkseeds.sh OUTDIR [MUSIC_DIR]
+# mkseeds.sh OUTDIR [MUSIC_DIR [MPC_DIR]]
 # Seeds for fuzz_host.c (docs/FUZZING.md): OUTDIR/vorbis, opus, mp3 and m4a. Synthetic streams
 # made with ffmpeg (libvorbis, libopus, libmp3lame, its aac encoder) at several rates, channel
 # counts and qualities; MP3 with and without the Xing/LAME frame and with ID3v2/ID3v1 tags; M4A
@@ -7,11 +7,13 @@
 # each format found there, remuxed without re-encoding (-c copy) and without cover art, 6 s from
 # 20 s in. Vorbis, Opus and MP3 seeds are cut to 40,000 bytes (the headers and a few seconds of
 # audio, so that each run stays short); M4A seeds are kept whole (their moov box may be at the
-# end).
+# end). FLAC and ALAC (in M4A, OUTDIR/alac) are encoded by ffmpeg likewise. ffmpeg cannot encode
+# Musepack: MPC_DIR (default work/testsets/mpc_test, if present) gives SV7 and SV8 files, copied
+# (never changed) and into OUTDIR/mpc (SV7 cut to 40,000 bytes, SV8 whole).
 set -e
-O=$1; M=$2
+O=$1; M=$2; MP=${3:-$(dirname "$0")/../../../work/testsets/mpc_test}
 [ -n "$O" ] || { echo "usage: mkseeds.sh OUTDIR [MUSIC_DIR]"; exit 1; }
-mkdir -p "$O/vorbis" "$O/opus" "$O/mp3" "$O/m4a"
+mkdir -p "$O/vorbis" "$O/opus" "$O/mp3" "$O/m4a" "$O/flac" "$O/alac" "$O/mpc"
 ff() { ffmpeg -loglevel error -y "$@"; }
 i=0
 for spec in "44100 2 5" "44100 1 0" "48000 2 8" "22050 2 2" "8000 1 -1" "96000 2 4"; do
@@ -43,6 +45,28 @@ for spec in "44100 2 128k +faststart" "44100 1 64k -" "48000 2 192k +faststart" 
   ff $(src $1 330 3) -ac $2 -c:a aac -b:a $3 $mf -metadata title="Seed $i" -metadata artist=Fuzz \
      -metadata album=Seeds -metadata track=$i "$O/m4a/syn$i.m4a"
 done
+i=0
+for spec in "44100 2 s16" "44100 1 s16" "48000 2 s32" "96000 2 s32" "8000 1 s16" "22050 2 s16"; do
+  set -- $spec; i=$((i + 1))
+  ff $(src $1 440 3) -ac $2 -c:a flac -sample_fmt $3 -compression_level $((i * 2 % 13)) \
+     -metadata title="Seed $i" "$O/flac/syn$i.flac"
+done
+i=0
+for spec in "44100 2 s16p +faststart" "44100 1 s16p -" "48000 2 s32p +faststart" "96000 2 s32p -" \
+            "8000 1 s16p -" "22050 2 s16p -"; do
+  set -- $spec; i=$((i + 1))
+  mf=""; [ "$4" != "-" ] && mf="-movflags $4"
+  ff $(src $1 330 3) -ac $2 -c:a alac -sample_fmt $3 $mf -metadata title="Seed $i" "$O/alac/syn$i.m4a"
+done
+i=0
+for f in "$MP"/*.[mM][pP][cC]; do
+  [ -f "$f" ] || continue
+  case "$(head -c3 "$f")" in MP+|MPC) ;; *) continue;; esac       # SV7 and SV8 only
+  case "$f" in *Z_*|*R_*|*H_*|*M_*) continue;; esac                # same stream, other settings
+  i=$((i + 1))
+  # SV7 is cut; an SV8 file is kept whole (mpc_demux_init wants its end, the seek table)
+  case "$(head -c3 "$f")" in MP+) head -c 40000 "$f" > "$O/mpc/m$i.mpc";; *) cp "$f" "$O/mpc/m$i.mpc";; esac
+done
 if [ -n "$M" ]; then
   i=0
   find "$M" -iname "*.ogg" | head -n 6 | while read -r f; do
@@ -57,11 +81,15 @@ if [ -n "$M" ]; then
     i=$((i + 1)); ff -ss 20 -t 6 -i "$f" -map 0:a -c copy "$O/mp3/m$i.mp3"
   done
   i=0
+  find "$M" -iname "*.flac" | head -n 4 | while read -r f; do
+    i=$((i + 1)); ff -ss 20 -t 6 -i "$f" -map 0:a -c copy -map_metadata -1 "$O/flac/m$i.flac"
+  done
+  i=0
   find "$M" -iname "*.m4a" | head -n 4 | while read -r f; do
     i=$((i + 1)); ff -ss 20 -t 6 -i "$f" -map 0:a -c copy "$O/m4a/m$i.m4a"
   done
 fi
-for f in "$O"/vorbis/* "$O"/opus/* "$O"/mp3/*; do
+for f in "$O"/vorbis/* "$O"/opus/* "$O"/mp3/* "$O"/flac/*; do
   head -c 40000 "$f" > "$f.t" && mv "$f.t" "$f"
 done
-ls -l "$O/vorbis" "$O/opus" "$O/mp3" "$O/m4a"
+ls -l "$O/vorbis" "$O/opus" "$O/mp3" "$O/m4a" "$O/flac" "$O/alac" "$O/mpc"

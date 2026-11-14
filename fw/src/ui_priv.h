@@ -92,6 +92,9 @@ void dir_of_entry(const struct entry *e, struct fat_dir *d);
 #define VOL_LIB   3                             /* of a library list (libbrowse.c) */
 #define F_LIB     0x0001                        /* with F_DIR: a library list (cluster: its
                                                  * kind, size: its param) */
+#define F_ABSENT  0x0002                        /* with F_VOLROOT: the card's line, no card */
+#define ABSENT(e) (((e)->flags & (F_VOLROOT | F_ABSENT)) == (F_VOLROOT | F_ABSENT))  /* (a file's */
+                                                /* codec uses the bit) */
 #define LIBV_UPDATE 99                          /* an F_LIB row that updates the library */
 #define LIBV_INFO   98                          /* an F_LIB row that says something only */
 #define DEPTH_MAX 16
@@ -104,6 +107,9 @@ extern struct path_level path[DEPTH_MAX];
 extern int depth;                               /* path[depth] is the folder shown */
 void copy_name(char *d, const char *s, int max);
 void path_root(int v);                          /* path[1]: the root of a volume */
+void browser_lib_changed(void); /* the library updated: its tracks read again (top level) */
+void browser_top(void);         /* the top level, the internal memory selected */
+void browser_library(void);     /* the library's lists, from their top (the main menu) */
 int sd_open(void);                              /* the card set up and mounted, 0: ready */
 int sd_card_bad(void);                          /* the card in failed to mount (until changed) */
 void sd_forget(void);                           /* set up again at the next access */
@@ -242,8 +248,12 @@ int play_key(const struct key_ev *e);
 int seek_key(const struct key_ev *e);
 
 /* ---- menu.c ---- */
-enum { M_FILES, M_PLAYING, M_QUEUE, M_SETTINGS, M_USB_RO, M_USB_RW, M_USB_DAC, M_INSTALL, M_SYSTEM,
-       M_LOADER, M_COUNT };
+enum { M_FILES, M_PLAYING, M_QUEUE, M_SETTINGS, M_LIBRARY, M_INFO, M_USB_RO, M_USB_RW, M_USB_DAC,
+       M_INSTALL, M_SYSTEM, M_LOADER };            /* menu_choice (menu.c): from M_USB_RO on, the */
+                                                /* player stopped first (ui.c) */
+extern const struct screen info_screen;         /* System, Information (menu.c) */
+extern const uint8_t ic_lib[];                  /* the library's icon (browser.c) */
+char *bat_time_text(char *p, char *end, int pct);   /* the music left: "11h", "45m" (uidraw.c) */
 extern const struct screen menu_screen, clock_screen, queue_screen;
 extern int menu_choice;              /* the main menu's choice once closed, -1: none */
 
@@ -252,6 +262,7 @@ void uac_mode(void);            /* the USB sound card, until BACK held or the ca
 
 /* ---- settings.c ---- */
 enum { START_PLAY, START_PAUSED, START_BROWSER, START_COUNT };
+enum { BAT_ICON, BAT_PCT, BAT_TIME, BAT_COUNT };    /* the header's battery: what it shows */
 struct settings {
     uint8_t screen;                             /* screen off after: an index (settings.c) */
     uint8_t bright;                             /* backlight, step 1 to 10 (settings.c) */
@@ -266,7 +277,9 @@ struct settings {
     char lang[8];                               /* the interface's language: its code (lang.h), */
                                                 /* "" English (0.101) */
     uint8_t hide_clock;                         /* the clock not shown (§120): 0 in a block of */
-};                                              /* 0.101 (its padding byte), shown */
+                                                /* 0.101 (its padding byte), shown */
+    uint8_t bat_show;                           /* BAT_*: 0 in a block of 0.102 to 0.104 (its */
+};                                              /* padding byte), the icon */
 #define SET_V2_BYTES 9                          /* the values up to uac_remote (version 2) */
 extern struct settings cfg;
 extern uint32_t sleep_at;                       /* the sleep timer ends (millis), 0: off */
@@ -280,6 +293,11 @@ void settings_get(const uint32_t *w);           /* from it, when valid; then app
 /* ---- libui.c (ETUDE §126) ---- */
 int lib_status(void);           /* the tracks of the library's index, -1: none */
 int lib_update(void);           /* the update screen (the player stopped): 0, or < 0 (LB_*) */
+/* The free space of a volume (FAT_VOL_INT, FAT_VOL_SD), counted at the library's update and kept
+ * in the resume state with the volume's serial: MiB, or -1 (not counted, or another volume) */
+int32_t space_free_mib(int v);
+uint32_t space_put(uint32_t *w);                /* into the state sector (8 words): its sum */
+void space_get(const uint32_t *w);
 
 /* ---- resume.c ---- */
 void resume_save(void);
@@ -294,5 +312,8 @@ int bar_x(uint32_t pos, uint32_t len);
 void progress_bar(int y, int h, uint32_t pos, uint32_t len);
 void text_right(int x0, int x1, int y, const char *s, uint16_t fg, uint16_t bg);
 void draw_clock(int x0, int x1, int force);
+void head_title(const char *title, uint16_t fg, const char *extra);  /* the header (§147) */
+void head_extra(const char *extra);
+void head_status(int force);
 
 #endif

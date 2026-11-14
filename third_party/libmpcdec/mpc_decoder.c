@@ -369,9 +369,11 @@ void mpc_decoder_read_bitstream_sv7(mpc_decoder * d, mpc_bits_reader * r)
 	for ( n = 1; n <= d->max_band; n++ ) {
 		idx   = mpc_bits_huff_lut(r, & mpc_HuffHdr);
 		d->Res_L[n] = (idx!=4) ? d->Res_L[n - 1] + idx : (int) mpc_bits_read(r, 4);
+		if ((mpc_uint32_t) d->Res_L[n] > 17) d->Res_L[n] = 0;	/* ECHO MINI: Cc[] has 18 entries (damaged stream) */
 
 		idx   = mpc_bits_huff_lut(r, & mpc_HuffHdr);
 		d->Res_R[n] = (idx!=4) ? d->Res_R[n - 1] + idx : (int) mpc_bits_read(r, 4);
+		if ((mpc_uint32_t) d->Res_R[n] > 17) d->Res_R[n] = 0;
 
 		if (!(d->Res_L[n] == 0 && d->Res_R[n] == 0)) {
 			if (d->ms)
@@ -524,8 +526,10 @@ void mpc_decoder_read_bitstream_sv8(mpc_decoder * d, mpc_bits_reader * r, mpc_bo
 		for ( n = Max_used_Band - 2; n >= 0; n--) {
 			d->Res_L[n] = mpc_bits_can_dec(r, & mpc_can_Res[d->Res_L[n + 1] > 2]) + d->Res_L[n + 1];
 			if (d->Res_L[n] > 15) d->Res_L[n] -= 17;
+			if (d->Res_L[n] < -1 || d->Res_L[n] > 17) d->Res_L[n] = 0;	/* ECHO MINI: Cc[-1..17] (damaged stream) */
 			d->Res_R[n] = mpc_bits_can_dec(r, & mpc_can_Res[d->Res_R[n + 1] > 2]) + d->Res_R[n + 1];
 			if (d->Res_R[n] > 15) d->Res_R[n] -= 17;
+			if (d->Res_R[n] < -1 || d->Res_R[n] > 17) d->Res_R[n] = 0;
 		}
 
 		if (d->ms) {
