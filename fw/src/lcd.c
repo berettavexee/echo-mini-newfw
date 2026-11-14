@@ -568,6 +568,17 @@ int lcd_glyph(int x, int y, uint32_t cp, uint16_t fg, uint16_t bg)
     return adv;
 }
 
+/* A 1-bit picture in a glyph record (font.h), in a cell of its advance by FONT_LINE: the icons
+ * of the header (uidraw.c); every pixel written once */
+int lcd_icon(int x, int y, const uint8_t *rec, uint16_t fg, uint16_t bg)
+{
+    int adv = rec[0];
+    if (!adv || x + adv > LCD_W)
+        return 0;
+    STRIPS(x, x + adv, y, FONT_LINE, bg, draw_glyph(x, y, rec, fg, 1));
+    return adv;
+}
+
 uint32_t utf8_next(const char **ps)
 {
     const uint8_t *s = (const uint8_t *)*ps;

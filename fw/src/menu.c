@@ -11,31 +11,41 @@ static const char *const m_names[M_COUNT] = {
 /* A screen of the stack (ui.c, ETUDE §99): VOL+/VOL- move, PLAY chooses, BACK or MENU closes; the
  * choice in menu_choice (-1: none), acted on by ui.c once the menu is off the stack */
 int menu_choice = -1;
-static int m_sel, m_top, m_dirty;
+static int m_sel, m_top, m_dirty, m_page;
 
 static void menu_enter(void)
 {
     m_sel = m_top = 0;
-    m_dirty = 1;
+    m_dirty = m_page = 1;
     menu_choice = -1;
 }
 
 static void menu_shown(void)
 {
-    m_dirty = 1;
+    m_dirty = m_page = 1;
 }
 
+/* Every pixel written once, nothing cleared first (a clear, then the rows, flickered: §147) */
 static int menu_draw(void)
 {
+    if (m_page) {
+        head_title(T("Menu"), TITLE_FG, 0);
+        lcd_fill(0, ROW_Y0 + 16 * ROWS, LCD_W, LCD_H - ROW_Y0 - 16 * ROWS, BG);
+        head_status(1);
+        m_page = 0;
+    } else
+        head_status(0);
     if (!m_dirty)                               /* ROWS of the M_COUNT entries: scrolled */
         return SCR_STAY;
     const char *pp = perf_begin("menu draw");
-    lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    lcd_text(4, 0, T("Menu"), TITLE_FG, BG);
-    for (int i = m_top; i < M_COUNT && i < m_top + ROWS; i++) {
+    for (int r = 0; r < ROWS; r++) {
+        int i = m_top + r, y = ROW_Y0 + 16 * r;
         uint16_t bg = i == m_sel ? SEL_BG : BG;
-        int y = ROW_Y0 + 16 * (i - m_top);
-        lcd_fill(0, y, LCD_W, 16, bg);
+        if (i >= M_COUNT) {
+            lcd_fill(0, y, LCD_W, 16, BG);
+            continue;
+        }
+        lcd_fill(0, y, 12, 16, bg);
         lcd_text_clip(12, y, tr(m_names[i]), list_text_end(M_COUNT, ROWS), FG, bg);
     }
     list_scrollbar(ROW_Y0, ROWS, m_top, M_COUNT);

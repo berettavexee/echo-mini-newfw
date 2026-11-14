@@ -3,5 +3,7 @@ libmpcdec, the Musepack decoder library, from the Musepack source release r475
 include/mpc/) only. BSD 3-clause licence (see COPYING). Built for core B with
 MPC_FIXED_POINT (no FPU) and -fcommon (the headers declare tables without extern); the few C
 library functions it uses outside decoding (pow, log10, sprintf, the SV8 CRC32 of common/crc32.c)
-are provided by fw/hifi/codec_mpc.c. ETUDE §61. One change, marked "ECHO MINI": in
-synth_filter.c, the synthesis goes to the SYNTH accelerator (fw/hifi/mpcsynth.c, ETUDE §77).
+are provided by fw/hifi/codec_mpc.c. ETUDE §61. Changes, marked "ECHO MINI": in
+synth_filter.c, the synthesis goes to the SYNTH accelerator (fw/hifi/mpcsynth.c, ETUDE §77); in
+mpc_decoder.c, the band resolutions read from the stream are bounded to the requantisation
+tables (SV7 0 to 17, SV8 -1 to 17), which a damaged stream read outside (fuzzing, ETUDE §146).

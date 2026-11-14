@@ -263,6 +263,16 @@ TESTS = {
                        expect=[r"ui: clock hidden", r"ui: settings 3: .*clock hidden"],
                        forbid=[r"ui: settings 3: .*clock shown"],
                        reboot=dict(ms=8000)),
+    # Settings, the line Battery (under Clock) to percent, then time left, drawn without flicker;
+    # after the reboot the setting read
+    "battery-show": dict(files={"A.WAV": "wav"}, ms=14000,
+                         keys=keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"),
+                                   (4600, "VOL-"), (4900, "PLAY"), (5300, "VOL-"), (5600, "VOL-"),
+                                   (5900, "VOL-"), (6200, "PLAY"), (6600, "PLAY"), (7200, "BACK")),
+                         expect=[r"ui: battery percent", r"ui: battery time left",
+                                 r"ui: settings 3: .*battery time left",
+                                 r"-- panel: .*, 0 flickers"],
+                         reboot=dict(ms=8000)),
     "install-ok": dict(files={"NEWDATE.IMG": "@NEWDATE.IMG"}, fw2=True,
                        keys=keys(*_INST, (14000, "PLAY")), ms=60000,
                        emu_args=["--expect-fw", "@NEWDATE.IMG"],
@@ -882,11 +892,11 @@ def lib_build_test(variant):
 
 LIB_KEYS = keys((2000, "MENU", 1500), (4000, "VOL-"), (4300, "VOL-"), (4600, "VOL-"),
                 (4900, "PLAY"),
-               *[(5200 + 250 * i, "VOL-") for i in range(12)], (8800, "PLAY"))
+               *[(5200 + 250 * i, "VOL-") for i in range(13)], (8800, "PLAY"))
 
 
 def lib_settings(img, elf, tmp):
-    """Settings, the line Library (the 13th), PLAY: the update screen; the index compared with
+    """Settings, the line Library (the 14th), PLAY: the update screen; the index compared with
     mklib.py's answers (the production image: the path the user takes)"""
     IMG_FOR_DISK[0] = img
     disk, card, _ = lib_disks(tmp)

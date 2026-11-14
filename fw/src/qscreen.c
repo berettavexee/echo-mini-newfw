@@ -31,27 +31,32 @@ static int qs_draw(void)
         s_msg = 0;
         s_dirty = 1;
     }
-    if (!s_dirty && s_shown_cur == q_cur)
+    if (!s_dirty && s_shown_cur == q_cur) {
+        head_status(0);
         return SCR_STAY;
-    lcd_fill(0, 0, LCD_W, LCD_H, BG);
-    lcd_text_clip(4, 0, s_msg ? T("Queue emptied") : T("Play queue"), LCD_W - 80,
-                  s_msg ? SK_FG : TITLE_FG, BG);
+    }
     char b[24], *p = put_dec(b, q_n ? (uint32_t)q_cur + 1 : 0);
     p = put_str(p, "/");
     p = put_dec(p, (uint32_t)q_n);
     *p = 0;
-    text_right(LCD_W - 76, LCD_W - 4, 0, b, DIM, BG);
+    /* each band once, nothing cleared first (§147) */
+    head_title(s_msg ? T("Queue emptied") : T("Play queue"), s_msg ? SK_FG : TITLE_FG, b);
+    head_status(1);
+    lcd_fill(0, ROW_Y0 + 16 * ROWS, LCD_W, LCD_H - ROW_Y0 - 16 * ROWS, BG);
     int n = rows(), xmax = list_text_end(n, ROWS);
-    for (int r = 0; r < ROWS && s_top + r < n; r++) {
+    for (int r = 0; r < ROWS; r++) {
         int i = s_top + r, y = ROW_Y0 + 16 * r;
         uint16_t bg = i == s_sel ? SEL_BG : BG;
-        lcd_fill(0, y, LCD_W, 16, bg);
+        if (i >= n) {
+            lcd_fill(0, y, LCD_W, 16, BG);
+            continue;
+        }
         if (!i) {
+            lcd_fill(0, y, 22, 16, bg);
             lcd_text_clip(22, y, T("Empty the queue (the track playing kept)"), xmax, DIR_FG, bg);
             continue;
         }
-        if (i - 1 == q_cur && (q_playing || parked))
-            lcd_glyph(3, y, 0x266a, TITLE_FG, bg);
+        list_mark(y, i - 1 == q_cur && (q_playing || parked), bg);
         lcd_text_clip(22, y, q_name(i - 1), xmax, i - 1 == q_cur ? TITLE_FG : FG, bg);
     }
     list_scrollbar(ROW_Y0, ROWS, s_top, n);

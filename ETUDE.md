@@ -4835,3 +4835,32 @@ Cibles `flac`, `alac` (`mp4.c` puis `codec_alac.c`, chaîne de la cible `aac`), 
 - **Musepack SV7** : **un vrai défaut**, lecture hors de la table `Cc[]` (18 entrées) dans `mpc_decoder_requantisierung` (`third_party/libmpcdec/mpc_decoder.c`) : la résolution de chaque bande, la précédente plus une différence décodée (`Res_L[n - 1] + idx`, vers la ligne 371), n'est jamais bornée. Sur l'appareil, lecture hors table (pas d'écriture). Proposition : `if ((mpc_uint32_t) Res > 17) Res = 0;` après chaque calcul, gauche et droite ; vérifiée sur une copie (les 40 cas rejoués passent, 25 min sur 8 instances sans rien). SV8 (vers les lignes 520-528) : même borne conseillée après le repli `> 15`, non trouvé par le fuzzing (une seule graine SV8, entière).
 - **ALAC** : seulement des décalages de 32 bits ou plus (`denshift` 0 ligne 201, `k` 0 ligne 95, `mixbits` ≥ 32 lignes 437 et 450), définis sur ARM et faits de même par le code de référence d'Apple ; sans ce contrôle, rien d'autre en 25 min. Propositions : `denshift ? 1 << (denshift - 1) : 0`, `k ? … >> (32 - k) : 0`, refuser `mixbits` > 31.
 - **Banc** : l'anneau d'entrée n'était plus projeté à son adresse (`HP_IN_BASE`), les cibles `mp4` et `aac` plantaient sur chaque entrée ; corrigé. `codec_mpc.c` fournit `malloc`/`free`/`sprintf` à libmpcdec, ce qui bouclait sur le PC : renommés pour ce fichier seulement dans `build.sh`.
+
+## 147. L'interface, première étape : en-tête commun, listes, écran de lecture, clignotements (0.104u1, 2026-11-14)
+
+À la demande de l'utilisateur, les points 1, 3, 6 et 7 du §145. Les corrections du fuzzing (§146) sont appliquées dans la même image.
+
+**Corrections du fuzzing** : `third_party/libmpcdec/mpc_decoder.c` (marquées « ECHO MINI », notées dans son README) borne la résolution des bandes aux tables (SV7 0 à 17, SV8 −1 à 17) ; `fw/hifi/alacdec.c` : `denshift` 0 donne `denhalf` 0, `k` 0 une valeur 0 (comme la ligne 125 le faisait déjà), `mixbits` > 31 refusé (−1, paquet abîmé). Vérifié : 60 cas Musepack et 60 cas ALAC trouvés par le fuzzing rejoués sans défaut ; décodage identique au bit près avant et après sur trois fichiers Musepack et un ALAC du jeu de test (le quatrième fichier Musepack ne sort de PCM ni avant ni après dans le banc).
+
+**1. En-tête commun** (`uidraw.c`, `head_title()`, `head_extra()`, `head_status()`) : sur les 16 premières lignes, le titre à gauche ; à droite, un texte (« n/N »), l'horloge, l'état de lecture (icône lecture, pause, arrêt, rien sans file), le mode (boucle, boucle avec un 1, flèches croisées ; rien « dans l'ordre »), le pourcentage et une icône de batterie (contour, niveau ; rouge sous 3,425 V, bleu en charge) ; un filet ligne 16. Le titre n'est dessiné qu'avec l'écran entier ; `head_status()` ne redessine que les cases qui changent. Les icônes sont des enregistrements au format des glyphes (`lcd_icon()`, `lcd.c`), dessinés par bandes comme le texte, chaque pixel une fois. Écrans : navigateur, lecture, menu, réglages, file d'attente.
+
+**3. Listes** : un dossier finit par « > » à droite (gris, blanc sélectionné ; le défilement du nom s'arrête avant) au lieu de « » » à gauche ; la colonne de gauche ne porte plus que la note du morceau joué. Pas de réglage de taille : la seule police est Fusion Pixel 12 px ; une taille plus grande demanderait une seconde police.
+
+**6. Écran de lecture** : l'en-tête commun (« Now playing », n/N, état, mode, batterie) remplace la ligne d'état en texte et le « CHG / USB nn % » ; l'album suit le numéro de piste quand les tags le donnent (« 3 · Discovery ») ; le temps restant à droite de la ligne du temps (« -0:20 ») ; la barre passe de 5 à 6 pixels ; l'état vide garde son texte sous l'en-tête.
+
+**7. Clignotements** (compteur de l'émulateur, §144) :
+- colonne du repère des listes (`list_mark()`, navigateur et file d'attente) : la note dessinée avec son fond, le reste de la colonne rempli à côté ;
+- menu, réglages, file d'attente : plus d'effacement de tout l'écran à chaque redessin ; chaque ligne remplit sa largeur (marge, texte jusqu'au bord), les lignes vides et la bande du bas remplies seules ; le menu effaçait l'écran à chaque déplacement ;
+- mode de recherche : la barre et ses bords étaient effacés puis le repère de la cible redessiné par-dessus à chaque passage (6 clignotements par seconde) ; maintenant dessinés autour du repère (`fill_but()`).
+Résultat sur les visites de l'émulateur (navigation, lecture, modes, pause, recherche, menu, réglages, file d'attente) : « 0 flickers, 0 on full clears ». Les captures du manuel (`docs/manual/`) sont refaites avec l'interface nouvelle.
+
+## 148. La batterie de l'en-tête : marge de l'icône, réglage icône / pourcentage / autonomie (0.104v1, 2026-11-14)
+
+Essai de 0.104u1 sur l'appareil : tout fonctionne ; l'icône de batterie montrait une colonne vide à gauche du niveau (une marge d'un pixel à gauche et à droite, aucune en haut et en bas), et l'en-tête jugé un peu chargé. Le journal porte la ligne du §143 : `bt pins: power 0 tx 1 rx 1, gpio2 ddr 8255 dr 8055, grf iomux2a 0 2c 1 pull2a 0 2c 0` : l'alimentation du module coupée, mais ses broches UART en fonction UART1 et hautes (tirage), ce qui pourrait alimenter le module éteint par ses entrées : c'est ce que RECHO évite en les mettant à 0 (test des GPIO de la ROADMAP).
+
+**Icône** : une marge d'un pixel sur les quatre côtés entre le contour et le niveau (jauge de 16 × 6).
+
+**Réglage « Battery »** (sous « Clock ») : `icon` (défaut), `percent`, `time left`. Il prend l'octet de bourrage suivant du bloc des réglages (version 3, la somme reste au mot 8) : un bloc de 0.104 se lit avec l'icône. L'autonomie : `battery_pct()` est déjà la part du temps de lecture restant (courbe du §65), multipliée par une décharge complète (14,5 h, docs/BATTERY.md), moins 10 % à la demande de l'utilisateur pour l'écran et les touches, absents des essais d'endurance (mieux vaut une autonomie plus longue qu'annoncée) : 783 minutes à 100 %. Heures entières arrondies vers le bas (« 11h »), minutes sous une heure (« 45m ») ; en français « 11 h », « 45 min ». Câble branché : le pourcentage à la place. Les textes en blanc, rouge si faible, bleu en charge ; la place libérée reste vide (l'horloge ne bouge pas).
+
+Test `battery-show` (émulateur) : les deux changements journalisés, le réglage relu après redémarrage, aucun clignotement. Captures : 89 % donne « 11h ».
+

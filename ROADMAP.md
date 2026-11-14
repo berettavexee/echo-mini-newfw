@@ -87,7 +87,15 @@ do".
 - 0.104a1: core A at 100 MHz while the music plays with the screen off (core A's divider only,
   PCLK kept at 50 MHz, as RECHO does; 200 MHz for the screen, a track's tags, the storage task);
   the emulator's CRU registers with their write mask, the test `clock-a` (§141). Checked on the
-  device; its gain on the battery life still to measure.
+  device; no gain on the battery life (0.104b1's full run: 14.6 h, as 0.104k1).
+- 0.104b1: the charging screen's text without flicker (§142). 0.104g1: the Bluetooth module's
+  pins logged at boot (§143).
+- 0.104u1: the interface, first step (§145, §147): one header on every screen (title, n/N,
+  clock, play state, play mode, battery as an icon), a folder ends with ">", the play screen
+  with the track's number and the time left, no more flickers (list mark, menu, settings, play
+  queue, seek mode); the fuzzing fixes in libmpcdec and the ALAC decoder (§146).
+- 0.104v1: the battery icon with a margin on its four sides; Settings, "Battery": the header
+  shows the icon, the percent or the music left (full runs less 10 %, §148).
 
 ## Version history
 
@@ -260,6 +268,10 @@ One line per version; the measurements are in `ETUDE.md`.
   6. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
   Also done (§144): `--foreign`, another firmware without an ELF (RECHO 0.10.1 runs: its
   screens, keys and files, its core B not run), for comparisons.
+- The interface, next steps (§145; 1, 3, 6 and 7 done in 0.104u1, §147): a bar of the keys'
+  actions at the bottom, also for short messages (2); the main menu grouped, with icons, one
+  "USB" entry greyed with its reason, a "System" submenu (4); the volumes first at the top of the
+  files (5); a larger text needs a second font (Fusion Pixel has only 12 px).
 - Output and DAC settings (CS43131 registers, little code each):
   - headphone gain low / high (low suits sensitive in-ear monitors);
   - volume limiter (an adjustable ceiling);

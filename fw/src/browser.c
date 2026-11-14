@@ -320,12 +320,15 @@ static void draw_row(int r, int sel, int mark)
     const struct entry *e = ent(i);
     uint16_t bg = i == sel ? SEL_BG : BG;
     int dirent = e->flags & F_DIR;
-    /* a fixed column for the mark: » folder, ♪ the track that plays */
-    lcd_fill(0, y, 22, 16, bg);
-    if (dirent || i == mark)
-        lcd_glyph(dirent ? 6 : 3, y, dirent ? 0xbb : 0x266a, dirent ? DIR_FG : TITLE_FG, bg);
+    /* a fixed column for the mark (♪ the track that plays); a folder ends with ">" (§147) */
+    list_mark(y, i == mark, bg);
     const char *name = ent_name(i);
-    int xmax = list_text_end(dir_n, ROWS);
+    int xend = list_text_end(dir_n, ROWS), xmax = dirent ? xend - 12 : xend;
+    if (dirent) {
+        lcd_fill(xmax, y, 2, 16, bg);
+        int w = lcd_glyph(xmax + 2, y, '>', i == sel ? FG : DIM, bg);
+        lcd_fill(xmax + 2 + w, y, xend - xmax - 2 - w, 16, bg);
+    }
     uint16_t fg = dirent ? DIR_FG : e->size ? FG : DIM;
     if (i == sel && (dirent || e->size)) {
         if (browser_mq.index != i || browser_mq.top != path[depth].top || b_dirty) {
@@ -446,12 +449,13 @@ int browser_walk_poll(void)
     return 0;
 }
 
-static void draw_count(int sel)
+static char *count_text(char *b, int sel)
 {
-    char b[24], *p = b;
+    char *p = b;
     if (walk.state == WALK_RUNNING) {
-        text_right(LCD_W - 110, LCD_W - 4, 0, T("reading..."), DIM, BG);
-        return;
+        p = put_str(b, T("reading..."));
+        *p = 0;
+        return p;
     }
     if (dir_n) {
         p = put_dec(p, (uint32_t)sel + 1);
@@ -461,7 +465,14 @@ static void draw_count(int sel)
     if (dir_full)
         *p++ = '+';
     *p = 0;
-    text_right(LCD_W - 70, LCD_W - 4, 0, b, DIM, BG);
+    return b;
+}
+
+static void draw_count(int sel)                 /* "selected/count" in the header */
+{
+    char b[40];
+    count_text(b, sel);
+    head_extra(b);
 }
 
 void browser_marquee_tick(void)
@@ -512,26 +523,26 @@ static void draw_browser_do(void)
         b_mark = mark;
         if (q_playing && player_heard.length_ms)
             progress_bar(ROW_Y0 + 16 * ROWS + 3, 4, player_heard.time_ms, player_heard.length_ms);
-        draw_clock(LCD_W - 114, LCD_W - 70, 0);
+        head_status(0);
         return;
     }
     if (b_dirty) {                              /* every band once, nothing cleared first */
-        lcd_fill(0, 0, 4, 16, BG);
         const char *title = depth ? path[depth].name : T("Storage");
         uint16_t tfg = TITLE_FG;
         if (qmsg_on)
             title = qmsg, tfg = SK_FG;
         else if (qmode)
             title = T("Queue: PLAY next, MENU add"), tfg = SK_FG;
-        lcd_text_clip(4, 0, title, LCD_W - 114, tfg, BG);
-        draw_clock(LCD_W - 114, LCD_W - 70, 1);
-        lcd_fill(LCD_W - 4, 0, 4, 16, BG);
-        lcd_fill(0, 16, LCD_W, ROW_Y0 - 16, BG);
-    }
+        char b[40];
+        count_text(b, sel);
+        head_title(title, tfg, b);
+        head_status(1);
+    } else
+        head_status(0);
     for (int r = 0; r < ROWS; r++)
         draw_row(r, sel, mark);
     list_scrollbar(ROW_Y0, ROWS, top, dir_n);
-    if (b_dirty || sel != b_sel)
+    if (!b_dirty && sel != b_sel)
         draw_count(sel);
     b_sel = sel;
     b_top = top;

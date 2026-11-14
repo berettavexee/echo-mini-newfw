@@ -300,7 +300,7 @@ msgstr ""
 msgid "Files"
 msgstr ""
 
-#: src/menu.c
+#: src/menu.c src/playscreen.c
 msgid "Now playing"
 msgstr ""
 
@@ -493,30 +493,6 @@ msgid "nothing plays: PLAY on a file"
 msgstr ""
 
 #: src/playscreen.c
-msgid "repeat all"
-msgstr ""
-
-#: src/playscreen.c
-msgid "repeat one"
-msgstr ""
-
-#: src/playscreen.c
-msgid "shuffle"
-msgstr ""
-
-#: src/playscreen.c
-msgid "paused"
-msgstr ""
-
-#: src/playscreen.c
-msgid "stopped"
-msgstr ""
-
-#: src/playscreen.c src/uac.c
-msgid "playing"
-msgstr ""
-
-#: src/playscreen.c
 msgid "go to"
 msgstr ""
 
@@ -545,17 +521,22 @@ msgstr ""
 msgid "Clock"
 msgstr ""
 
-#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
+#: src/settings.c
+msgid "Battery"
+msgstr ""
+
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
 #: src/settings.c
 msgid "Screen off after"
 msgstr ""
 
-#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
 #: src/settings.c
 msgid "Brightness"
 msgstr ""
 
-#. TRANSLATORS: the time shown at the top of the play screen and the browser
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
 #: src/settings.c
 msgid "Track title"
 msgstr ""
@@ -624,6 +605,21 @@ msgstr ""
 msgid "shown"
 msgstr ""
 
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "icon"
+msgstr ""
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "percent"
+msgstr ""
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "time left"
+msgstr ""
+
 #: src/settings.c
 msgid "never"
 msgstr ""
@@ -673,6 +669,10 @@ msgstr ""
 
 #: src/uac.c
 msgid "connected, no stream"
+msgstr ""
+
+#: src/uac.c
+msgid "playing"
 msgstr ""
 
 #: src/uac.c
@@ -727,6 +727,18 @@ msgstr ""
 
 #: src/ui.c
 msgid "details: NEWFWLOG.TXT"
+msgstr ""
+
+#. TRANSLATORS: the music left on the battery, in hours, then in minutes (header, short)
+#: src/uidraw.c
+#, c-format
+msgid "%uh"
+msgstr ""
+
+#. TRANSLATORS: the music left on the battery, in hours, then in minutes (header, short)
+#: src/uidraw.c
+#, c-format
+msgid "%um"
 msgstr ""
 
 #: src/update.c

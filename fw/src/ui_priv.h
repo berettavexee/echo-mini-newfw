@@ -252,6 +252,7 @@ void uac_mode(void);            /* the USB sound card, until BACK held or the ca
 
 /* ---- settings.c ---- */
 enum { START_PLAY, START_PAUSED, START_BROWSER, START_COUNT };
+enum { BAT_ICON, BAT_PCT, BAT_TIME, BAT_COUNT };    /* the header's battery: what it shows */
 struct settings {
     uint8_t screen;                             /* screen off after: an index (settings.c) */
     uint8_t bright;                             /* backlight, step 1 to 10 (settings.c) */
@@ -266,7 +267,9 @@ struct settings {
     char lang[8];                               /* the interface's language: its code (lang.h), */
                                                 /* "" English (0.101) */
     uint8_t hide_clock;                         /* the clock not shown (§120): 0 in a block of */
-};                                              /* 0.101 (its padding byte), shown */
+                                                /* 0.101 (its padding byte), shown */
+    uint8_t bat_show;                           /* BAT_*: 0 in a block of 0.102 to 0.104 (its */
+};                                              /* padding byte), the icon */
 #define SET_V2_BYTES 9                          /* the values up to uac_remote (version 2) */
 extern struct settings cfg;
 extern uint32_t sleep_at;                       /* the sleep timer ends (millis), 0: off */
@@ -294,5 +297,8 @@ int bar_x(uint32_t pos, uint32_t len);
 void progress_bar(int y, int h, uint32_t pos, uint32_t len);
 void text_right(int x0, int x1, int y, const char *s, uint16_t fg, uint16_t bg);
 void draw_clock(int x0, int x1, int force);
+void head_title(const char *title, uint16_t fg, const char *extra);  /* the header (§147) */
+void head_extra(const char *extra);
+void head_status(int force);
 
 #endif

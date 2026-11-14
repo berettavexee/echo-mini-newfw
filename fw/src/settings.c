@@ -4,8 +4,8 @@
 #include "ui_priv.h"
 #include "lang.h"
 
-static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "", 0 };
-struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "", 0 };
+static const struct settings defaults = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "", 0, BAT_ICON };
+struct settings cfg = { 1, 10, 0, START_PLAY, 1, 0, 0, 0, 1, "", 0, BAT_ICON };
 uint32_t sleep_at;
 
 static const uint16_t screen_s[] = { 10, 30, 60, 120, 300, 0 };     /* 0: never */
@@ -33,6 +33,8 @@ void sleep_cancel(void)
     sleep_sel = 0;
 }
 
+static const char *const bat_log[BAT_COUNT] = { "icon", "percent", "time left" };
+
 /* ---- storage: 64 words, "NEWFWSET 3", the values, a sum. Version 2 (0.99 to 0.100) had the
  * values up to uac_remote, its sum in word 6; version 1 (up to 0.99) the first 8 bytes, its sum
  * in word 5: read, the others at their defaults ---- */
@@ -46,6 +48,7 @@ struct set_block {
 _Static_assert(sizeof(struct set_block) <= 40 * 4, "settings reach the resume's track (resume.c)");
 /* hide_clock (§120) took the padding byte after lang: the sum stays in word 8, so that a block
  * of 0.101 reads as it is (the clock shown) and 0.101 reads ours */
+/* bat_show took the next padding byte, the same way: a block of 0.104 reads with the icon */
 _Static_assert(__builtin_offsetof(struct set_block, sum) == 32, "version 3's sum in word 8");
 
 static uint32_t set_sum(const uint32_t *w, unsigned n)
@@ -93,11 +96,15 @@ void settings_get(const uint32_t *w)
             cfg.rg_pre = 0;
         cfg.uac_remote = cfg.uac_remote != 0;
         cfg.hide_clock = cfg.hide_clock != 0;
+        if (cfg.bat_show >= BAT_COUNT)
+            cfg.bat_show = defaults.bat_show;
         log_printf("ui: settings %u: screen %u, brightness %u %%, %s, RG preamp %d dB, start %u, "
-                   "off %u, swap %u, remote %u, language %s, clock %s", v3 ? 3 : v2 ? 2 : 1,
+                   "off %u, swap %u, remote %u, language %s, clock %s, battery %s",
+                   v3 ? 3 : v2 ? 2 : 1,
                    cfg.screen, bright_pct[cfg.bright - 1], cfg.names ? "names" : "tags",
                    cfg.rg_pre, cfg.start, cfg.auto_off, cfg.swap_vol, cfg.uac_remote,
-                   cfg.lang[0] ? cfg.lang : "en", cfg.hide_clock ? "hidden" : "shown");
+                   cfg.lang[0] ? cfg.lang : "en", cfg.hide_clock ? "hidden" : "shown",
+                   bat_log[cfg.bat_show]);
     }                                           /* (RG mode: resume.c) */
     lang_set_code(cfg.lang);                    /* unknown to this image: English */
     lcd_brightness(bright_pct[cfg.bright - 1]); /* (ReplayGain: when a track is heard) */
@@ -105,13 +112,15 @@ void settings_get(const uint32_t *w)
 
 /* ---- the screen: VOL+/VOL- the line, PLAY the next value, PLAY held the one before,
  * BACK or MENU back (saved). Each change takes effect at once. ---- */
-enum { S_LANG, S_CLOCK, S_SHOW_CLOCK, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE, S_START,
-       S_SLEEP, S_AUTO_OFF, S_SWAP, S_LIBRARY, S_DEFAULTS, S_COUNT };
+enum { S_LANG, S_CLOCK, S_SHOW_CLOCK, S_BATTERY, S_SCREEN, S_BRIGHT, S_NAMES, S_RG, S_RG_PRE,
+       S_START, S_SLEEP, S_AUTO_OFF, S_SWAP, S_LIBRARY, S_DEFAULTS, S_COUNT };
 static const char *const s_names[S_COUNT] = {
     EN("Language"),                             /* in English: found again in any language */
     N_("Date and time"),
     /* TRANSLATORS: the time shown at the top of the play screen and the browser */
-    N_("Clock"), N_("Screen off after"), N_("Brightness"), N_("Track title"),
+    N_("Clock"),
+    /* TRANSLATORS: the battery at the top right: its icon, its percent or the music left */
+    N_("Battery"), N_("Screen off after"), N_("Brightness"), N_("Track title"),
     N_("ReplayGain"), N_("ReplayGain preamp"), N_("At power on"), N_("Sleep timer"),
     N_("Power off when idle"), N_("Swap VOL+ and VOL-"),
     /* TRANSLATORS: the music library (artists, albums...): its index, PLAY updates it */
@@ -167,6 +176,12 @@ static void value_text(int i, char *b)
         /* TRANSLATORS: the value of the line "Clock": the time shown or not */
         p = log_format(p, end, "%s", cfg.hide_clock ? T("hidden") : T("shown"));
         break;
+    case S_BATTERY: {
+        /* TRANSLATORS: the values of the line "Battery" */
+        static const char *const v[BAT_COUNT] = { N_("icon"), N_("percent"), N_("time left") };
+        p = log_format(p, end, "%s", tr(v[cfg.bat_show]));
+        break;
+    }
     case S_SCREEN:
         if (!screen_s[cfg.screen])
             p = log_format(p, end, "%s", T("never"));
@@ -244,6 +259,10 @@ static void change(int i, int d)
         cfg.hide_clock ^= 1;
         clock_min = -1;                         /* drawn again (or cleared) at once */
         log_printf("ui: clock %s", cfg.hide_clock ? "hidden" : "shown");
+        break;
+    case S_BATTERY:
+        cfg.bat_show = (uint8_t)step(cfg.bat_show, BAT_COUNT, d);
+        log_printf("ui: battery %s", bat_log[cfg.bat_show]);
         break;
     case S_SCREEN:
         cfg.screen = (uint8_t)step(cfg.screen, N(screen_s), d);
@@ -344,12 +363,14 @@ static void settings_shown(void)
 static int settings_draw(void)
 {
     const char *pp = perf_begin("settings draw");
-    if (s_page) {
-        lcd_fill(0, 0, LCD_W, LCD_H, BG);
-        lcd_text(4, 0, T("Settings"), TITLE_FG, BG);
+    if (s_page) {                               /* no clear first: each band once (§147) */
+        head_title(T("Settings"), TITLE_FG, "");
+        lcd_fill(0, ROW_Y0 + 16 * ROWS, LCD_W, LCD_H - ROW_Y0 - 16 * ROWS, BG);
+        head_status(1);
         s_page = 0;
         s_dirty = 1;
-    }
+    } else
+        head_status(0);
     static uint32_t t_live, now_live;           /* the clock read 4 times a second, not each */
     if (s_dirty || millis() - t_live >= 250) {  /* pass (an I2C read, about 1.9 ms) */
         t_live = millis();
@@ -361,7 +382,7 @@ static int settings_draw(void)
         p = put_str(p, "/");
         p = put_dec(p, S_COUNT);
         *p = 0;
-        text_right(LCD_W - 70, LCD_W - 4, 0, b, DIM, BG);
+        head_extra(b);
         for (int i = s_top; i < S_COUNT && i < s_top + ROWS; i++)
             draw_row(i, s_top, s_sel);
         list_scrollbar(ROW_Y0, ROWS, s_top, S_COUNT);

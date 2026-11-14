@@ -3,9 +3,28 @@
 This manual is for the ECHO MINI new firmware, version 0.104. It describes what the player shows
 and what each key does on each screen. To install the firmware, see "Installing" at the end.
 
-The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing Daft
-Punk's "Discovery" in Opus. The emulator has no real-time clock, so the clock is missing from the
-status line and the date screen says it is not set.
+The screenshots come from the emulator of the build tree (`fw/tools/emu_fw.py`), playing a few
+tracks of Daft Punk's "Discovery" in Opus. The emulator has no real-time clock, so the clock is
+missing from the header and the date screen says it is not set.
+
+## The header
+
+Every screen (browser, play screen, menu, settings, play queue) starts with the same header, a
+thin line under it:
+
+- at the left, the screen's title (the folder's name in the browser);
+- the position in the list or in the play queue, as "3/5";
+- the clock (Settings: "Clock");
+- what plays: a play sign, two bars when paused, a square when stopped, nothing when the queue
+  is empty;
+- the play mode, unless it is "in order": a loop for repeat all, a loop with a 1 for repeat one,
+  crossed arrows for shuffle;
+- the battery (Settings: "Battery"): an icon, its percent, or the music left ("11h", then
+  "45m" under an hour). The level follows the voltage over about a minute, so it does not jump
+  when a track starts; on battery it only goes down (a pause lets the voltage rise a little:
+  that is not shown), and while charging it stops at 99 % until the charger has finished. With
+  the cable in, the battery is blue while charging, and the music left shows the percent
+  instead. The battery turns red under 3.425 V.
 
 ## The keys
 
@@ -58,25 +77,17 @@ Holding Power 2 s while playing with the cable in also leads to the charging scr
 
 ## The play screen
 
-![Play screen: playing, track 4 of 14, repeat all, title on two lines, artist, album, time, bar, format line with the track gain on yellow](docs/manual/play-screen.png)
+![Play screen: playing, track 3 of 5, repeat all, title, artist, track number and album, time and time left, bar, format line](docs/manual/play-screen.png)
 
 From top to bottom:
 
-1. **The status line**:
-   - the state: playing, paused or stopped;
-   - the position in the play queue;
-   - the play mode, unless it is "in order";
-   - the clock;
-   - the battery. "CHG" means charging and "USB" means charged, with the cable in. The
-     percent follows the voltage over about a minute, so it does not jump when a track starts;
-     on battery it only goes down (a pause lets the voltage rise a little: that is not shown),
-     and while charging it stops at 99 % until the charger has finished. The battery turns red
-     under 3.425 V.
+1. **The header** (above): "Now playing", the position in the play queue, what plays, the play
+   mode, the battery.
 2. **The title**, or the file name when the file has no title tag. It uses two large lines when
    it fits; longer names scroll in full across one large line after a short pause.
-3. **The artist and the album**, or the folder when the file has no album tag. They scroll when
-   too long.
-4. **The time and the bar**.
+3. **The artist and the album**, or the folder when the file has no album tag. The album comes
+   after the track's number when the file has one ("3 · Discovery"). They scroll when too long.
+4. **The time**, the time left at the right, and **the bar**.
 5. **The format line**:
    - the codec, the sample rate and the bit depth;
    - the volume, as an attenuation in dB;
@@ -104,7 +115,7 @@ follows it therefore does not move the volume.
 Hold **VOL+, then press VOL-** on the play screen (in that order, see "The keys"). The music goes on, and the screen shows
 a target as a mark on the bar, and how far it is from the current position:
 
-![Seek mode: go to 0:36 / 3:46, +0:30](docs/manual/seek-mode.png)
+![Seek mode: go to 0:24 / 0:25, +0:17](docs/manual/seek-mode.png)
 
 | Key | Action |
 |---|---|
@@ -137,7 +148,8 @@ sorted in natural order, ignoring case, so "track 2" comes before "track 10". Em
 ![Top level of the internal memory](docs/manual/browser-internal.png)
 ![A folder of the internal memory](docs/manual/browser-album.png)
 
-The number at the top right is the number of entries in the folder. Below, an empty file is
+The header shows the entry selected and the number of entries in the folder ("1/5"). A folder
+ends with ">". The track playing is marked with a note. Below, an empty file is
 greyed. A selected file or folder name that is too long scrolls after a short pause. While a track
 plays, the browser shows its progress bar at the bottom.
 
@@ -300,6 +312,7 @@ power off (except the sleep timer).
 | Language | the language of the screens: English, Français, 日本語, 简体中文 (the catalogues of the image; see below). This line stays in English, so that it can be found in any language | English |
 | Date and time | shows the date and time; PLAY opens the clock screen (below) | |
 | Clock | **shown**: the time at the top of the play screen and the browser (once the clock is set); **hidden**: not shown | shown |
+| Battery | what the header shows of the battery: **icon**; **percent**; **time left**, the music left with the screen off, from full runs on battery (about 14.5 h), less 10 % for the screen and the keys: it is meant to be short of the real time rather than over it | icon |
 | Screen off after | 10 s, 30 s, 1 min, 2 min, 5 min, never | 30 s |
 | Brightness | 10 steps: 8, 12, 17, 23, 30, 39, 50, 63, 80, 100 % (even steps to the eye) | 100 % |
 | Track title | **tags**: the title, artist and album tags; **file name**: the file name and the folder | tags |

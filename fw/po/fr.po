@@ -830,3 +830,35 @@ msgstr "Carte SD illisible (FAT32 ou exFAT seulement)"
 #: src/ovl.c
 msgid "This part of the firmware is damaged: install it again"
 msgstr "Cette partie du micrologiciel est abîmée : réinstallez-le"
+
+#. TRANSLATORS: the battery at the top right: its icon, its percent or the music left
+#: src/settings.c
+msgid "Battery"
+msgstr "Batterie"
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "icon"
+msgstr "icône"
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "percent"
+msgstr "pourcentage"
+
+#. TRANSLATORS: the values of the line "Battery"
+#: src/settings.c
+msgid "time left"
+msgstr "autonomie"
+
+#. TRANSLATORS: the music left on the battery, in hours, then in minutes (header, short)
+#: src/uidraw.c
+#, c-format
+msgid "%uh"
+msgstr "%u h"
+
+#. TRANSLATORS: the music left on the battery, in hours, then in minutes (header, short)
+#: src/uidraw.c
+#, c-format
+msgid "%um"
+msgstr "%u min"

@@ -28,6 +28,7 @@ int lcd_text(int x, int y, const char *s, uint16_t fg, uint16_t bg);
 /* UTF-8 */
 uint32_t utf8_next(const char **s);
 int lcd_glyph(int x, int y, uint32_t cp, uint16_t fg, uint16_t bg);
+int lcd_icon(int x, int y, const uint8_t *rec, uint16_t fg, uint16_t bg);  /* a glyph record */
 int lcd_text_width(const char *s);
 int lcd_text_clip(int x, int y, const char *s, int xmax, uint16_t fg, uint16_t bg);
 /* the same, each pixel of the font a square of sc x sc (lines of 16 x sc pixels) */
