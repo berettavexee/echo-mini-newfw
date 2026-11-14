@@ -69,10 +69,10 @@ static int qs_key(const struct key_ev *e)
 {
     int ev = e->type, k = e->key;
     if (k == KEY_VOLUP && ev != EV_LONG) {
-        list_move(&s_sel, &s_top, rows(), ROWS, -1);
+        list_step(&s_sel, &s_top, rows(), ROWS, -1, ev, 0);
         s_dirty = 1;
     } else if (k == KEY_VOLDOWN && ev != EV_LONG) {
-        list_move(&s_sel, &s_top, rows(), ROWS, 1);
+        list_step(&s_sel, &s_top, rows(), ROWS, 1, ev, 0);
         s_dirty = 1;
     } else if (k == KEY_PLAY && ((ev == EV_PRESS && !s_sel) || ev == EV_LONG)) {
         q_clear_keep();                         /* the first line, or held on any line */

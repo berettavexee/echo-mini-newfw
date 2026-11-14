@@ -67,6 +67,7 @@ the volumes' free space, a grouped main menu, an Information page, no flicker).
 | One header on every screen (title, n/N, clock, play state and mode icons, volume, battery as an icon, a percent or the music left), a folder ends with ">", the play screen with the track's number and the time left, every screen drawn without flicker (checked by the emulator's panel model) | 0.105 | §144, §147-§148, §150 |
 | The files' top level: Library, Internal memory, SD card with icons, the library's tracks and each volume's free space (counted at the library's update, kept across power-offs), the card greyed without one; BACK there opens the main menu | 0.105 | §149, §152 |
 | The main menu grouped with icons, USB inactive without the cable, System (Information, system screen, installer, loader mode) | 0.105 | §151-§152 |
+| Long lists scrolled faster: VOL held moves a row, then a screen after 1.5 s, then an initial after 3 s (a big letter shown, the library's sort followed, no wrap while held); BACK in a pause keeps the pause (the start of the track, or the track before) | 0.105i3 | §154-§155 |
 | Damaged Musepack and ALAC files cannot crash the decoders (found by fuzzing FLAC, ALAC and Musepack) | 0.105 | §146 |
 
 ## The rework (0.99r1-r37, merged in 0.100)

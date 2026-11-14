@@ -362,6 +362,47 @@ void play_index(int i)
     play_step(i, 1);
 }
 
+/* BACK in a pause (ETUDE §154): track i at its start, parked, still paused (PLAY plays it from
+ * there); core B asleep as after a long pause. Another track: its tags read for the screen, its
+ * length not known until it plays (0: no bar). */
+void play_park_start(int i)
+{
+    uint32_t len = i == q_cur ? len_ms() : 0;
+    if (q_playing)
+        play_stop(STOP_NOW);                    /* from a pause: the DACs stay muted */
+    hifi_sleep();
+    if (i != q_cur) {
+        const struct entry *e = q_ent(i);
+        if (prep.state == PREP_RUNNING)
+            storage_drain();                    /* tags.c is not reentrant */
+        prep.state = PREP_NONE;
+        tg = (struct tags){ .rg_gain = { RG_NONE, RG_NONE } };
+        tg_key.ok = 0;
+        if (e && e->size && !(e->flags & F_OTHER) &&
+            (!(e->flags & F_SD) || (sd_present() && !sd_open()))) {
+            struct fat_file f;
+            copy_name(f.name, q_name(i), sizeof f.name);
+            f.vol = e->flags & F_SD ? FAT_VOL_SD : FAT_VOL_INT;
+            f.contig = (e->flags & F_CONTIG) != 0;
+            f.cluster = e->cluster;
+            f.size = e->size;
+            fat_open(&f);
+            tags_read(&f, e->flags & F_CODEC, &tg_next);
+            tg = tg_next;                       /* kept for PLAY (q_open: the same file) */
+            tg_key.cluster = f.cluster;
+            tg_key.size = f.size;
+            tg_key.vol = f.vol;
+            tg_key.ok = 1;
+        }
+    }
+    q_cur = q_dec = i;
+    parked = 1;
+    parked_ms = 0;
+    parked_len = len;
+    log_printf("ui: back to the start of %d/%d, paused", i + 1, q_n);
+    resume_save_later();
+}
+
 /* Core B stopped on a fault, or stuck, in the middle of a track (rework step 7, 0.99r33): the
  * same track again 1 s before where it was (core B loaded again: player.c); a second time on
  * the same track, it is passed over as one that does not play */

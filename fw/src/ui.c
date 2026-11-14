@@ -554,6 +554,8 @@ void ui_main(void)
             drawn_gen = heard_gen;
             full = b_dirty = 1;
         }
+        if (scr == SCR_BROWSER && !scr_n && browser_letter_done())
+            full = 1;                           /* the big letter off at once (§155) */
         /* Drawing: at most one frame every 33 ms (30/s, key repeat included), the periodic
          * refresh 4/s (play screen) or 2/s, nothing while the screen is off */
         if (scr_n && !sys_screen_is_off() && !banner_ms) {

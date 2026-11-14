@@ -140,6 +140,8 @@ int browser_chord(void);                        /* VOL+ and VOL- together: the m
 int libv_load(int kind, uint32_t param);        /* a list shown: its rows */
 const char *libv_name(int i);
 const struct entry *libv_ent(int i);
+int32_t libv_key(int i);
+int browser_letter_done(void);
 const char *libv_empty(void);                   /* what an empty list shows */
 void libv_close(void);                          /* the index changed: opened again when used */
 void libv_card_changed(void);                   /* the card in or out: the views set up again */
@@ -221,6 +223,7 @@ enum { STOP_NOW, STOP_SKIP, STOP_DRAIN };
 void play_stop(int how);
 void play_index(int i);
 void play_step(int i, int step);
+void play_park_start(int i);
 #define Q_EEMPTY (-60)                          /* an empty file (0 bytes) */
 #define Q_EABSENT (-63)                         /* on a card that is not in: passed over */
 extern char fail_name[64];                      /* nothing could be played: the banner */

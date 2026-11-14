@@ -362,6 +362,48 @@ const struct entry *libv_ent(int i)
     return &slot[slot_of(i)].e;
 }
 
+/* The folded first character row i is sorted by (libbuild.c), for the fast scroll's letters
+ * (§155): an artist's name (without "The "), a genre's, an album's artist (the albums are in
+ * their artists' order), a song's title (else its file name); 0xffff: none (sorted last); -1:
+ * a list not sorted by a name (the top, years, an artist's albums, an album's tracks) */
+int32_t libv_key(int i)
+{
+    uint32_t id, ref = 0;
+    int artist = 1;
+    char s[100];
+    if (cur_kind != LV_ARTISTS && cur_kind != LV_GENRES && cur_kind != LV_ALBUMS &&
+        cur_kind != LV_YEAR_ALBUMS && cur_kind != LV_GENRE_ALBUMS && cur_kind != LV_SONGS)
+        return -1;
+    if (lv_item(cur_kind, cur_param, (uint32_t)i, &id))
+        return 0xffff;
+    s[0] = 0;
+    if (cur_kind == LV_ARTISTS) {
+        struct lib_artist a;
+        if (!lib_artist(id, &a))
+            ref = a.name;
+    } else if (cur_kind == LV_GENRES) {
+        struct lib_genre g;
+        artist = 0;
+        if (!lib_genre(id, &g))
+            ref = g.name;
+    } else if (cur_kind == LV_SONGS) {
+        struct lib_track t;
+        artist = 0;
+        if (!lib_track(id, &t) && (lib_str(t.title, s, sizeof s) < 0 || !s[0]))
+            ref = t.file;
+    } else {
+        struct lib_album al;
+        struct lib_artist a;
+        if (!lib_album(id, &al) && !lib_artist(al.artist, &a))
+            ref = a.name;
+    }
+    if (ref && lib_str(ref, s, sizeof s) < 0)
+        s[0] = 0;
+    uint16_t k;
+    lib_key(s, artist, &k, 1, 0);
+    return k;
+}
+
 /* ---- the tracks of a list for the queue (queue.c, ETUDE §128) ---- */
 static uint16_t *c_ids;
 static uint32_t c_n;

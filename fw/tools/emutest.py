@@ -97,6 +97,24 @@ def menu_to(*names):
 
 
 _INST = menu_to("System", "Install a firmware (.IMG)") + [(7600, "PLAY")]
+
+def fast_scroll_check(w):
+    """Each step of letters lands on the first row of an initial (or the last row), forward
+    then back, never wrapping"""
+    steps = [(int(a), int(b)) for a, b in re.findall(r"ui: letter (\d+) -> (\d+) of 312", w)]
+    fwd = [s for s in steps if s[1] >= s[0]]
+    back = [s for s in steps if s[1] < s[0]]
+    bad = [s for s in steps if s[1] % 12 and s[1] != 311]
+    if steps[len(fwd) - 1][1] != 311 or any(b < a for a, b in steps[:len(fwd)]):
+        return [f"not stopped at the last row: {steps}"]
+    if len(fwd) < 10 or len(back) < 3:
+        return [f"letters: {len(fwd)} forward, {len(back)} back"]
+    if bad:
+        return [f"not the first row of an initial: {bad}"]
+    if any(b - a > 12 for a, b in fwd if b != 311) or any(a - b > 24 for a, b in back):
+        return [f"an initial passed over: {steps}"]
+    return []
+
 TESTS = {
     "boot": dict(files={"A.WAV": "wav"}, keys="", ms=7000,          # the log: every 5 s
                  expect=[r"=== boot", r"font: Fusion Pixel",
@@ -215,6 +233,31 @@ TESTS = {
                          expect=[r"audio: paused", r"audio: resumed", r"audio: paused",
                                  r"audio: resumed", r"player: finished after 441000 frames, 94\d\d ms"],
                          forbid=[r"core B stuck", r"core B underruns [1-9]"]),
+    # BACK in a pause (ETUDE §154): back to the start of the track, still paused (it played
+    # again from its start until 0.105); BACK again, at 0: the track before, paused, its tags
+    # kept for PLAY, which plays it from its start
+    "back-paused": dict(files={"A.WAV": "wav10", "B.WAV": "wav10"},
+                        keys=keys((2000, "PLAY"), (3000, "PLAY", 900), (8000, "PLAY"),
+                                  (8600, "BACK"), (9400, "BACK"), (10600, "PLAY")), ms=15000,
+                        expect=[r"ui: queue 2/2: B\.WAV \(0\)", r"audio: paused",
+                                r"ui: back to the start of 2/2, paused",
+                                r"ui: back to the start of 1/2, paused", r"keys: play",
+                                r"ui: tags kept \(the same track again\)",
+                                r"ui: queue 1/2: A\.WAV \(0\)"],
+                        check=lambda w: [] if not re.search(
+                            r"audio: paused\n(?:(?![^\n]*keys: play)[^\n]*\n)*?[^\n]*"
+                            r"(?:audio: resumed|ui: queue)", w)
+                        else ["played again before PLAY"]),
+    # the fast scroll (ETUDE §155): VOL- held in a folder of 312 rows (12 for each initial):
+    # rows, pages from 1.5 s, then from 3 s each step the first row of the next initial, up to
+    # the last row and no further (no wrap); then VOL+ held: back by initials
+    "fast-scroll": dict(files={f"{c}{i:02}.MP3": "empty" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                               for i in range(12)},
+                        keys=keys((2000, "VOL-", 14000), (16500, "VOL+", 5000)), ms=26000,
+                        expect=[r"keys: vol- held", r"ui: letter \d+ -> 311 of 312",
+                                r"keys: vol\+ held",
+                                r"ui: letter \d+ -> \d+ of 312"],
+                        check=lambda w: fast_scroll_check(w)),
     # both headphone outputs in, PLAY: the 3.5 mm out (the 4.4 mm still in: no pause), then the
     # 4.4 mm out: a pause (ETUDE §119); in again: no play until PLAY; PLAY, PLAY (paused by
     # hand), out again: nothing more
@@ -629,6 +672,9 @@ def run(name, t, img, elf, tmp):
         if src.startswith("wav"):               # "wav", or "wav10": its length in seconds
             src = os.path.join(tmp, dst.replace("/", "_"))
             wav(src, int(src_len) if (src_len := t["files"][dst][3:]) else 3)
+        elif src == "empty":                    # a name only (a long folder's rows)
+            src = os.path.join(tmp, dst.replace("/", "_"))
+            open(src, "wb").close()
         files.append(f"{at(src)}={dst}")
     subprocess.run([sys.executable, MKDISK, disk, img, "--synth-idb", "--size-mb", "300"] +
                    (["--fw2"] if t.get("fw2") else []) + files, check=True,

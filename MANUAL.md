@@ -41,7 +41,9 @@ Each key knows three gestures:
 
 - a **press**: a short press, counted when the key is released;
 - a **long press**: PLAY, BACK and MENU held for 0.6 s;
-- a **held** VOL+ or VOL-: repeats from 0.45 s, about ten steps a second.
+- a **held** VOL+ or VOL-: repeats from 0.45 s, about ten steps a second. In a list of more
+  than two screens, the steps grow: a screen at a time after 1.5 s, then after 3 s a letter at
+  a time (see the folder browser).
 
 **VOL+ and VOL- together**, the "chord", opens the seek mode on the play screen. Press and hold
 **VOL+ first, then press VOL-** while still holding VOL+, and release both. The other order does
@@ -100,7 +102,7 @@ From top to bottom:
 |---|---|
 | **PLAY** | pause / play |
 | **PLAY held** | next track. On the last track (play mode "in order"), it stops; PLAY then plays that last track again from its start |
-| **BACK** | back to the start of the track; within its first 3 s, the track before (in shuffle: the one heard before). So a double press of BACK goes to the track before |
+| **BACK** | back to the start of the track; within its first 3 s, the track before (in shuffle: the one heard before). So a double press of BACK goes to the track before. In a pause, the track stays paused at its start (the track before: its length shows once it plays) |
 | **BACK held** | next play mode: in order → repeat all → repeat one → shuffle → in order. Shuffle plays every track of the queue once, in a random order, then another order |
 | **VOL+** / **VOL-** | volume up / down, 1 dB a step (held: repeats) |
 | **VOL+ held, then VOL-** | seek mode (below) |
@@ -173,6 +175,16 @@ plays, the browser shows its progress bar at the bottom.
 | **BACK** | up one folder; at the top level, the main menu |
 | **MENU** | to the play screen |
 | **MENU held** | main menu |
+
+**A long list**: VOL+ or VOL- held moves one row at a time, then a screen at a time after
+1.5 s, then after 3 s from one initial to the next (VOL+: back to the start of the initial,
+then the one before), shown as a big letter in the middle of the screen. On release the list
+shows again, the first row of that letter at the top. A list held to its end stops on its
+last row (from the last row to the first only by a press). The letters follow each list's
+order: in the library an artist's "The" is skipped ("The Beatles" under B), an accented letter
+counts as its base letter (É under E), and the Albums list, in its artists' order, goes by the
+artist's initial; digits and signs come first, as "#". The tracks of an album, the years and
+the play queue go a screen at a time.
 
 PLAY held takes the whole tree, up to 4,000 folders with tracks and 8 levels of folders (a
 folder of more than about 550 tracks is cut). After a power off, the player resumes a track

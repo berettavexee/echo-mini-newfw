@@ -551,9 +551,133 @@ static void draw_count(int sel)                 /* "selected/count" in the heade
     head_extra(b);
 }
 
+/* ---- the fast scroll's letters (ETUDE §155): VOL held 3 s in a list sorted by a name, each
+ * step to the first row of the next initial (the one before: back to the start of the initial,
+ * then the one before it), shown as a big letter over the list until the key is released ---- */
+static int letter_on;                           /* the big letter shown */
+static int32_t letter_g, letter_drawn = -1;     /* its group (below), the one drawn (-1: none) */
+
+/* A row's group, in the order of the listing: "#" (digits, signs), a to z, then the other
+ * characters (a library's folded code point; a file's other bytes, one group), no name last;
+ * -1: a list not sorted by a name */
+static int32_t grp(int i)
+{
+    if (lib_shown) {
+        int32_t k = libv_key(i);
+        return k < 0 ? -1 : k == 0xffff ? 0x10000 : k < 'a' ? '#' : k;
+    }
+    int c = lower((uint8_t)ent_name(i)[0]);
+    return c < 'a' ? '#' : c <= 'z' ? c : 0x100;
+}
+
+static int first_ge(int lo, int hi, int32_t g) /* the first row of [lo, hi) of group >= g */
+{
+    while (lo < hi) {
+        int m = lo + (hi - lo) / 2;
+        if (grp(m) < g)
+            lo = m + 1;
+        else
+            hi = m;
+    }
+    return lo;
+}
+
+/* Row i's part of the listing, sorted on its own: a folder's folders, then its files */
+static void section(int i, int *s, int *e)
+{
+    int lo = 0, hi = dir_n;
+    *s = 0;
+    *e = dir_n;
+    if (lib_shown)
+        return;
+    while (lo < hi) {                           /* the first file */
+        int m = lo + (hi - lo) / 2;
+        if (ent(m)->flags & F_DIR)
+            lo = m + 1;
+        else
+            hi = m;
+    }
+    if (i < lo)
+        *e = lo;
+    else
+        *s = lo;
+}
+
+static int letter_row(int from, int d)
+{
+    int32_t g = grp(from);
+    int s, e, to;
+    if (g < 0)
+        return -1;
+    section(from, &s, &e);
+    if (d > 0) {
+        to = first_ge(from + 1, e, g + 1);      /* (e: the next part's first row) */
+        if (to >= dir_n)
+            to = dir_n - 1;
+    } else {
+        to = first_ge(s, from, g);
+        if (to == from && from > 0) {           /* at the start of its initial: the one before */
+            section(from - 1, &s, &e);
+            to = first_ge(s, from - 1, grp(from - 1));
+        }
+    }
+    letter_g = grp(to);
+    letter_on = 1;
+    if (to != from)
+        log_printf("ui: letter %d -> %d of %d", from, to, dir_n);
+    return to;
+}
+
+/* The letter: a box of 80 x 80 in the middle of the rows, the list around it cleared once */
+#define LB_X ((LCD_W - 80) / 2)
+#define LB_Y (ROW_Y0 + (16 * ROWS - 80) / 2)
+static void draw_letter(void)
+{
+    if (letter_drawn == letter_g)
+        return;
+    if (letter_drawn < 0) {
+        lcd_fill(0, ROW_Y0, LCD_W, LB_Y - ROW_Y0, BG);
+        lcd_fill(0, LB_Y, LB_X, 80, BG);
+        lcd_fill(LB_X + 80, LB_Y, LCD_W - LB_X - 80, 80, BG);
+        lcd_fill(0, LB_Y + 80, LCD_W, ROW_Y0 + 16 * ROWS - LB_Y - 80, BG);
+    }
+    letter_drawn = letter_g;
+    char b[8];
+    int32_t g = letter_g;
+    if (g == 0x10000)
+        g = '?';
+    else if (g == 0x100) {                      /* a file's other bytes: its first character */
+        const char *n = ent_name(path[depth].sel);
+        g = (int32_t)utf8_next(&n);
+    }
+    else if (g >= 'a' && g <= 'z')
+        g -= 32;
+    if (g > 0xffff)
+        g = '?';
+    char *p = b;
+    if (g < 0x80)
+        *p++ = (char)g;
+    else if (g < 0x800) {
+        *p++ = (char)(0xc0 | g >> 6);
+        *p++ = (char)(0x80 | (g & 0x3f));
+    } else {
+        *p++ = (char)(0xe0 | (g >> 12 & 0x0f));
+        *p++ = (char)(0x80 | (g >> 6 & 0x3f));
+        *p++ = (char)(0x80 | (g & 0x3f));
+    }
+    *p = 0;
+    int x = LB_X + (80 - lcd_text_width_x(b, 4)) / 2;
+    if (x < LB_X)
+        x = LB_X;
+    lcd_fill(LB_X, LB_Y, 80, 8, SEL_BG);
+    lcd_fill(LB_X, LB_Y + 8, x - LB_X, 64, SEL_BG);
+    lcd_text_clip_x(x, LB_Y + 8, b, LB_X + 80, FG, SEL_BG, 4);
+    lcd_fill(LB_X, LB_Y + 72, 80, 8, SEL_BG);
+}
+
 void browser_marquee_tick(void)
 {
-    if (!browser_mq.width || browser_mq.index != path[depth].sel ||
+    if (letter_on || !browser_mq.width || browser_mq.index != path[depth].sel ||
         browser_mq.top != path[depth].top)
         return;
     uint32_t now = ticks();
@@ -585,6 +709,20 @@ static void draw_browser_do(void)
         b_dirty = 1;
     }
     int sel = path[depth].sel, top = path[depth].top, mark = playing_index();
+    if (letter_on && !key_held()) {             /* released: the list again */
+        letter_on = 0;
+        letter_drawn = -1;
+        b_dirty = 1;
+    }
+    if (letter_on && !b_dirty) {
+        draw_letter();
+        if (sel != b_sel)
+            draw_count(sel);
+        b_sel = sel;
+        b_top = -1;                             /* (the rows drawn again after) */
+        head_status(0);
+        return;
+    }
     if (!b_dirty && top == b_top) {
         /* the same page: only the rows whose look changed (selection, playing mark) */
         for (int r = 0; r < ROWS; r++) {
@@ -636,6 +774,12 @@ static void draw_browser_do(void)
     } else
         lcd_fill(0, yb, LCD_W, LCD_H - yb, BG);
     b_dirty = 0;
+    letter_drawn = -1;                          /* (a page drawn over the letter: it again) */
+}
+
+int browser_letter_done(void)                   /* the key released: a frame at once */
+{
+    return letter_on && !key_held();
 }
 
 void draw_browser(void)
@@ -837,9 +981,9 @@ int sd_watch(void)
     return 1 + stopped;
 }
 
-static void move(int d)
+static void move(int d, int ev)
 {
-    list_move(&path[depth].sel, &path[depth].top, dir_n, ROWS, d);
+    list_step(&path[depth].sel, &path[depth].top, dir_n, ROWS, d, ev, letter_row);
 }
 
 /* A key on the browser: VOL+/VOL- move, BACK goes up, PLAY opens a folder or plays the file and
@@ -926,9 +1070,9 @@ int browser_key(const struct key_ev *e)
             return UI_FULL;
     }
     if (k == KEY_VOLUP)
-        move(-1);
+        move(-1, ev);
     else if (k == KEY_VOLDOWN)
-        move(1);
+        move(1, ev);
     else if (k == KEY_BACK && ev == EV_PRESS && !depth)
         scr_push(&menu_screen);                 /* nothing above the top level: the menu (§152) */
     else if (k == KEY_BACK && ev == EV_PRESS)

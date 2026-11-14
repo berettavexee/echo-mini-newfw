@@ -425,10 +425,11 @@ static int glyph_width(const uint8_t *g)
     return g[0];                                /* the advance */
 }
 
-/* A glyph record (font.h) in a line of 16 px times 'sc' (1 or 2: each pixel a square): baseline
- * at row font_ascent; only the columns in [cl, cr) of the screen, and the strip's part. Only the
- * glyph's pixels are written: the strip was filled with the background (strip_begin, the same
- * colour as the text's), and the cells of a line never overlap. A row of the glyph is read as one
+/* A glyph record (font.h) in a line of 16 px times 'sc' (each pixel a square; 4: the big letter
+ * of a list's fast scroll, §155): baseline at row font_ascent; only the columns in [cl, cr) of
+ * the screen, and the strip's part. Only the glyph's pixels are written: the strip was filled
+ * with the background (strip_begin, the same colour as the text's), and the cells of a line
+ * never overlap. A row of the glyph is read as one
  * 32-bit word, then only its set bits are visited (count leading zeros). ETUDE §136: until
  * 0.103d4 every pixel of the cell was written, bg or fg, a sixth of the cost of a line. */
 static void draw_glyph_cols(int x, int y, const uint8_t *g, uint16_t fg, int sc, int cl, int cr)
@@ -460,7 +461,7 @@ static void draw_glyph_cols(int x, int y, const uint8_t *g, uint16_t fg, int sc,
     const uint8_t *bits = g + 5;
     uint16_t *d = st.p + (r0 - st.y0) * stride - st.x0;  /* d[c]: column c of row r */
     for (int r = r0; r < r1; r++, d += stride) {
-        int gy = (sc == 1 ? r - y : (r - y) >> 1) - top;
+        int gy = (sc == 1 ? r - y : sc == 2 ? (r - y) >> 1 : (r - y) / sc) - top;
         const uint8_t *row = bits + gy * bpr;
         uint32_t v = (uint32_t)row[0] << 24;
         if (bpr > 1) {
@@ -475,8 +476,9 @@ static void draw_glyph_cols(int x, int y, const uint8_t *g, uint16_t fg, int sc,
             int c = gx0 + i * sc;
             if (c >= c0 && c < c1)
                 d[c] = fg;
-            if (sc == 2 && c + 1 >= c0 && c + 1 < c1)
-                d[c + 1] = fg;
+            for (int k = 1; k < sc; k++)
+                if (c + k >= c0 && c + k < c1)
+                    d[c + k] = fg;
         }
     }
 }
