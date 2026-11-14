@@ -19,6 +19,7 @@ thin line under it:
   is empty;
 - the play mode, unless it is "in order": a loop for repeat all, a loop with a 1 for repeat one,
   crossed arrows for shuffle;
+- the volume: a speaker and the attenuation in dB ("-20 dB": 0 is the loudest);
 - the battery (Settings: "Battery"): an icon, its percent, or the music left ("11h", then
   "45m" under an hour). The level follows the voltage over about a minute, so it does not jump
   when a track starts; on battery it only goes down (a pause lets the voltage rise a little:
@@ -82,7 +83,7 @@ Holding Power 2 s while playing with the cable in also leads to the charging scr
 From top to bottom:
 
 1. **The header** (above): "Now playing", the position in the play queue, what plays, the play
-   mode, the battery.
+   mode, the volume, the battery.
 2. **The title**, or the file name when the file has no title tag. It uses two large lines when
    it fits; longer names scroll in full across one large line after a short pause.
 3. **The artist and the album**, or the folder when the file has no album tag. The album comes
@@ -90,7 +91,6 @@ From top to bottom:
 4. **The time**, the time left at the right, and **the bar**.
 5. **The format line**:
    - the codec, the sample rate and the bit depth;
-   - the volume, as an attenuation in dB;
    - the ReplayGain applied, in the "RG" box. The box is on yellow when the gain is the
      track's own (album mode, no album gain in the file).
 
@@ -140,10 +140,19 @@ page), after a short silence: about 0.2 s (Vorbis) or 0.3 s (Opus).
 
 ## The folder browser
 
-The top level lists **Library** (the music by its tags, below), **Internal** (the internal
-memory) and **SD card** (the microSD card, when one is inserted). In a folder, the subfolders come first, then the playable files. Names are
-sorted in natural order, ignoring case, so "track 2" comes before "track 10". Empty files
-(0 bytes) are greyed and never played.
+The top level, "Files", lists **Library** (the music by its tags, below), **Internal memory**
+and **SD card** (the microSD card), each with an icon and, at the right in grey: the library's
+tracks ("not built" before its first update), the free space of each volume, "no card" (the
+card's line greyed, nothing to open). The free space is counted when the library is updated
+(it takes well under a second) and kept across power-offs; it is not shown for a volume
+changed since (another card). The player starts there the first time, and after a USB session
+or an install; otherwise it goes back to the last folder.
+
+![The top level](docs/manual/browser-top.png)
+
+In a folder, the subfolders come first, then the playable files. Names are sorted in natural
+order, ignoring case, so "track 2" comes before "track 10". Empty files (0 bytes) are greyed
+and never played.
 
 ![Top level of the internal memory](docs/manual/browser-internal.png)
 ![A folder of the internal memory](docs/manual/browser-album.png)
@@ -159,7 +168,7 @@ plays, the browser shows its progress bar at the bottom.
 |---|---|
 | **VOL+** / **VOL-** | move up / down (held: repeats) |
 | **PLAY** on a folder | open it |
-| **PLAY held** on a folder | play everything under it, subfolders included, in order (also on "Internal" or "SD card") |
+| **PLAY held** on a folder | play everything under it, subfolders included, in order (also on "Internal memory" or "SD card") |
 | **PLAY** on a file | play the folder from this file, and go to the play screen |
 | **BACK** | up one folder |
 | **MENU** | to the play screen |

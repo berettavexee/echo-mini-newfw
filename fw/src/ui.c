@@ -326,8 +326,7 @@ static void menu_action(int m, int *scr)
         if (m == M_USB_RW || m == M_INSTALL || m == M_USB_RO) {
             libv_close();                       /* (NEWFWLIB.DAT too) */
             qf_forget();                        /* (and NEWFWQ.DAT) */
-            path_root(FAT_VOL_INT);             /* the volume may have changed */
-            dir_load(&path[1].dir);
+            browser_top();                      /* the volume may have changed */
             q_clear();
         }
         if (m == M_USB_RW && msc.written_sectors) {     /* the computer wrote: the library */
@@ -373,10 +372,8 @@ void ui_main(void)
         sd_open();
     resume_load();                              /* nothing plays yet; the language set */
     copy_name(path[0].name, T("Storage"), sizeof path[0].name);
-    if (!depth && !dir_n) {                     /* nothing saved: the internal volume */
-        path_root(FAT_VOL_INT);
-        dir_load(&path[1].dir);
-    }
+    if (!depth && !dir_n)                       /* nothing saved: the top level (§149) */
+        browser_top();
 #ifdef ECHO_LIBBUILD
     if (!q_playing && !parked) {                /* test build (ETUDE §125): the library's index */
         struct lb_result lr;                    /* built at power-on, nothing playing */

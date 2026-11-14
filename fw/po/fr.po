@@ -862,3 +862,32 @@ msgstr "%u h"
 #, c-format
 msgid "%um"
 msgstr "%u min"
+
+#: src/browser.c
+msgid "Internal memory"
+msgstr "Mémoire interne"
+
+#: src/browser.c
+msgid "not built"
+msgstr "à créer"
+
+#: src/browser.c
+msgid "no card"
+msgstr "pas de carte"
+
+#. TRANSLATORS: the free space of a volume (the top level of the files)
+#: src/browser.c
+#, c-format
+msgid "%u MB free"
+msgstr "%u Mo libres"
+
+#. TRANSLATORS: the free space of a volume, GB with one decimal
+#: src/browser.c
+#, c-format
+msgid "%u.%u GB free"
+msgstr "%u,%u Go libres"
+
+#: src/browser.c
+#, c-format
+msgid "%u GB free"
+msgstr "%u Go libres"

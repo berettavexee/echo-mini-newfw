@@ -16,7 +16,7 @@ msgid "Library"
 msgstr ""
 
 #: src/browser.c
-msgid "Internal"
+msgid "Internal memory"
 msgstr ""
 
 #: src/browser.c
@@ -32,6 +32,36 @@ msgid "SD card"
 msgstr ""
 
 #: src/browser.c
+msgid "not built"
+msgstr ""
+
+#: src/browser.c src/settings.c
+#, c-format
+msgid "%u tracks"
+msgstr ""
+
+#: src/browser.c
+msgid "no card"
+msgstr ""
+
+#. TRANSLATORS: the free space of a volume (the top level of the files)
+#: src/browser.c
+#, c-format
+msgid "%u MB free"
+msgstr ""
+
+#. TRANSLATORS: the free space of a volume, GB with one decimal
+#: src/browser.c
+#, c-format
+msgid "%u.%u GB free"
+msgstr ""
+
+#: src/browser.c
+#, c-format
+msgid "%u GB free"
+msgstr ""
+
+#: src/browser.c
 msgid "no folder or playable file here"
 msgstr ""
 
@@ -39,8 +69,8 @@ msgstr ""
 msgid "reading..."
 msgstr ""
 
-#: src/browser.c src/ui.c
-msgid "Storage"
+#: src/browser.c src/menu.c
+msgid "Files"
 msgstr ""
 
 #: src/browser.c
@@ -294,10 +324,6 @@ msgstr ""
 
 #: src/main.c
 msgid "starting..."
-msgstr ""
-
-#: src/menu.c
-msgid "Files"
 msgstr ""
 
 #: src/menu.c src/playscreen.c
@@ -658,11 +684,6 @@ msgstr ""
 msgid "no"
 msgstr ""
 
-#: src/settings.c
-#, c-format
-msgid "%u tracks"
-msgstr ""
-
 #: src/uac.c src/usbmode.c
 msgid "waiting for the host"
 msgstr ""
@@ -707,6 +728,10 @@ msgstr ""
 
 #: src/uac.c
 msgid "audio output failed"
+msgstr ""
+
+#: src/ui.c
+msgid "Storage"
 msgstr ""
 
 #: src/ui.c

@@ -25,4 +25,9 @@ struct lb_result {
  * missing (lib_file). Blocking: the hooks keep the screen and the watchdog going. */
 int lib_build(const struct lb_hooks *h, struct lb_result *r);
 
+/* 48 KiB of core B's memory that lib_build() used, still powered and free when it returns (until
+ * a codec is loaded again): the free space counted in it (libui.c) */
+#define LB_WORK       ((void *)0x0302c000u)
+#define LB_WORK_BYTES (48u * 1024)
+
 #endif

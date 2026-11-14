@@ -92,6 +92,9 @@ void dir_of_entry(const struct entry *e, struct fat_dir *d);
 #define VOL_LIB   3                             /* of a library list (libbrowse.c) */
 #define F_LIB     0x0001                        /* with F_DIR: a library list (cluster: its
                                                  * kind, size: its param) */
+#define F_ABSENT  0x0002                        /* with F_VOLROOT: the card's line, no card */
+#define ABSENT(e) (((e)->flags & (F_VOLROOT | F_ABSENT)) == (F_VOLROOT | F_ABSENT))  /* (a file's */
+                                                /* codec uses the bit) */
 #define LIBV_UPDATE 99                          /* an F_LIB row that updates the library */
 #define LIBV_INFO   98                          /* an F_LIB row that says something only */
 #define DEPTH_MAX 16
@@ -104,6 +107,8 @@ extern struct path_level path[DEPTH_MAX];
 extern int depth;                               /* path[depth] is the folder shown */
 void copy_name(char *d, const char *s, int max);
 void path_root(int v);                          /* path[1]: the root of a volume */
+void browser_lib_changed(void); /* the library updated: its tracks read again (top level) */
+void browser_top(void);         /* the top level, the internal memory selected */
 int sd_open(void);                              /* the card set up and mounted, 0: ready */
 int sd_card_bad(void);                          /* the card in failed to mount (until changed) */
 void sd_forget(void);                           /* set up again at the next access */
@@ -283,6 +288,11 @@ void settings_get(const uint32_t *w);           /* from it, when valid; then app
 /* ---- libui.c (ETUDE §126) ---- */
 int lib_status(void);           /* the tracks of the library's index, -1: none */
 int lib_update(void);           /* the update screen (the player stopped): 0, or < 0 (LB_*) */
+/* The free space of a volume (FAT_VOL_INT, FAT_VOL_SD), counted at the library's update and kept
+ * in the resume state with the volume's serial: MiB, or -1 (not counted, or another volume) */
+int32_t space_free_mib(int v);
+uint32_t space_put(uint32_t *w);                /* into the state sector (8 words): its sum */
+void space_get(const uint32_t *w);
 
 /* ---- resume.c ---- */
 void resume_save(void);

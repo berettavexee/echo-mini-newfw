@@ -47,6 +47,10 @@ def damage_overlays(disk):
     open(disk, "wb").write(d)
 
 
+# Opens the internal memory from the top level, before a test's own keys (from 2 s on)
+ENTER_INTERNAL = "1500:PLAY,1620:NONE"
+
+
 def keys(*seq):
     out = []
     for t, key, hold in (k + (100,) if len(k) == 2 else k for k in seq):
@@ -73,7 +77,8 @@ _INST = [(2000, "MENU", 1500)] + [(4000 + 300 * i, "VOL-") for i in range(7)] + 
         [(6300, "PLAY"), (7600, "PLAY")]
 TESTS = {
     "boot": dict(files={"A.WAV": "wav"}, keys="", ms=7000,          # the log: every 5 s
-                 expect=[r"=== boot", r"font: Fusion Pixel", r"ui: folder 0: \d+ entries"]),
+                 expect=[r"=== boot", r"font: Fusion Pixel",
+                         r"ui: top level: library -1 tracks, card none"]),
     # a short PLAY while the loop is held (a long operation): read by the SysTick interrupt
     # (ETUDE §140), taken once the loop goes on; until 0.104 it was lost
     "keys-stall": dict(files={"A.WAV": "wav"}, keys=keys((2100, "PLAY", 120)), ms=8000,
@@ -105,7 +110,7 @@ TESTS = {
                     expect=[r"ui: card not readable: no FAT32 or exFAT volume"]),
     # a card in at power-on: mounted at once, before the resume lists the top level (0.99r26, §106)
     "sd-boot": dict(files={"A.WAV": "wav"}, sd="fat", ms=9000, keys="",
-                    expect=[r"ui: card mounted in \d+ ms: FAT32", r"ui: folder 0: "]),
+                    expect=[r"ui: card mounted in \d+ ms: FAT32", r"ui: top level: .*card in"]),
     "sd-noreply": dict(files={"A.WAV": "wav"}, sd=True, emu_args=["--sd-noreply"], ms=11000,
                        keys=keys((2000, "BACK"), (3000, "VOL-"), (4000, "PLAY")),
                        expect=[r"ui: card not readable: no reply"]),
@@ -138,7 +143,7 @@ TESTS = {
                      keys=keys((2000, "MENU", 1500), *[(4000 + 300 * i, "VOL-") for i in range(4)],
                                (6000, "PLAY"), (8000, "BACK", 300)),
                      expect=[r"ovl: USB from FW1 in \d+ us", r"usb: read only disk",
-                             r"ui: card to be set up again", r"ui: folder [0-9a-f]+: \d+ entries"]),
+                             r"ui: card to be set up again", r"ui: top level: "]),
     # the same with the USB overlay damaged in the image on the eMMC: a message, no fault
     "ovl-bad": dict(files={"A.WAV": "wav"}, ms=12000,
                     emu_args=["--vbus", "1", "--power", "1", "--gpio-at", "1500:2:5:0"],
@@ -263,6 +268,22 @@ TESTS = {
                        expect=[r"ui: clock hidden", r"ui: settings 3: .*clock hidden"],
                        forbid=[r"ui: settings 3: .*clock shown"],
                        reboot=dict(ms=8000)),
+    # a blank disk starts at the top level, the internal memory selected (§149); the card's line
+    # greyed without a card: PLAY there opens nothing; up to the internal memory, PLAY opens it
+    "top-level": dict(files={"A.WAV": "wav"}, ms=8000, top=True,
+                      keys=keys((2000, "VOL-"), (2500, "PLAY"), (3000, "PLAY", 900),
+                                (4500, "VOL+"), (5000, "PLAY")),
+                      expect=[r"ui: top level: library -1 tracks, card none",
+                              r"keys: vol-", r"keys: play", r"keys: play long", r"keys: vol\+",
+                              r"keys: play", r"ui: folder 0: 1 entries",
+                              r"-- panel: .*, 0 flickers"],
+                      forbid=[r"ui: folder .*\n(.*\n)*.*keys: vol\+", r"tracks in \d+ folders"]),
+    # the volume in the header (§150): VOL- and VOL+ on the play screen redraw it, no flicker
+    "vol-header": dict(files={"A.WAV": "wav10"}, ms=9000,
+                       keys=keys((2000, "PLAY"), (3500, "VOL-"), (4000, "VOL-"), (4500, "VOL+"),
+                                 (5000, "VOL-")),
+                       expect=[r"player: .*A\.WAV", r"keys: vol-", r"keys: vol\+", r"keys: vol-",
+                               r"-- panel: .*, 0 flickers"]),
     # Settings, the line Battery (under Clock) to percent, then time left, drawn without flicker;
     # after the reboot the setting read
     "battery-show": dict(files={"A.WAV": "wav"}, ms=14000,
@@ -423,7 +444,8 @@ def run_set(group, t, img, elf, tmp):
         ms = 2000 + 1000 * len(man) * (t.get("seconds", SET_SECONDS) + 1) + 6000
     dac = os.path.join(tmp, "dac.raw")
     out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--keys",
-                          keys(*ks), "--ms", str(ms), "--steps", "300000000000", "--dump-disk",
+                          ENTER_INTERNAL + "," + keys(*ks), "--ms", str(ms), "--steps",
+                          "300000000000", "--dump-disk",
                           dump] + (["--dac", dac] if t.get("exact") else []),
                          capture_output=True, text=True)
     text = read_log(dump) if os.path.exists(dump) else ""
@@ -588,8 +610,11 @@ def run(name, t, img, elf, tmp):
         if t["sd"] == "fat":                    # or a FAT32 volume on the whole card
             subprocess.run(["/usr/sbin/mkfs.fat", "-F", "32", "-n", "CARD", sd[1]], check=True,
                            stdout=subprocess.DEVNULL)
+    keyseq = t["keys"]
+    if keyseq and not t.get("top"):             # a blank disk starts at the top level, the
+        keyseq = ENTER_INTERNAL + "," + keyseq  # internal memory selected (ETUDE §149): opened
     out = subprocess.run([sys.executable, EMU, img, "--elf", elf, "--disk", disk, "--keys",
-                          t["keys"], "--ms", str(t["ms"]), "--steps", "30000000000",
+                          keyseq, "--ms", str(t["ms"]), "--steps", "30000000000",
                           "--dump-disk", dump] + sd + [at(a) for a in t.get("emu_args", [])],
                          capture_output=True, text=True).stdout
     between = t["between"](dump, tmp) if "between" in t and os.path.exists(dump) else []
@@ -905,15 +930,30 @@ def lib_settings(img, elf, tmp):
     text = read_log(dump)
     fails = [] if re.search(r"library: 89 tracks \(89 read, 0 from the index before\)", text) \
         else ["not 89 tracks read"]
-    return fails + lib_compare(dump, disk, card, tmp, "settings"), text + "\n" + whole
+    # the free space counted after the update (§149): the internal volume's as mtools sees it
+    m = re.search(r"space: internal (\d+) MiB free", text)
+    free = re.search(r"([\d ]+) bytes free", mtools(dump, "mdir", "::").stdout)
+    host = int(free.group(1).replace(" ", "")) >> 20 if free else -1
+    if not m or int(m.group(1)) != host:
+        fails.append(f"free space: {m.group(1) if m else 'not counted'} MiB, mtools {host}")
+    if not re.search(r"space: card \d+ MiB free", text):
+        fails.append("the card's free space not counted")
+    fails += lib_compare(dump, disk, card, tmp, "settings")
+    shutil.move(dump, disk)                     # booted again: the counts read back, shown
+    whole += lib_boot(img, elf, disk, card, dump, ["--boot-disk"])
+    text = read_log(dump)
+    boot = text[text.rfind("=== boot"):]
+    if m and not re.search(rf"space: kept, internal {m.group(1)} MiB, card \d+ MiB", boot):
+        fails.append("the free space not kept across a boot")
+    return fails, text + "\n" + whole
 
 
 TESTS["lib-settings"] = dict(custom=lib_settings)
 
 
 def lib_views(img, elf, tmp):
-    """The library's lists (ETUDE §127): the index made by mklib.py put on the disk; BACK to the
-    top level (the boot shows the internal root), Library (its first line), Artists, the first artist, its first album, its first track played;
+    """The library's lists (ETUDE §127): the index made by mklib.py put on the disk; BACK at the
+    top level (where a blank disk starts, §149), Library (its first line), Artists, the first artist, its first album, its first track played;
     then BACK to the top of the library, All songs, its third track played. The views' count of
     songs is mklib.py's (the card in)"""
     IMG_FOR_DISK[0] = img

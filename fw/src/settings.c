@@ -45,7 +45,7 @@ struct set_block {
 };
 #define SET_V1_WORDS 5
 #define SET_V2_WORDS 6
-_Static_assert(sizeof(struct set_block) <= 40 * 4, "settings reach the resume's track (resume.c)");
+_Static_assert(sizeof(struct set_block) <= 32 * 4, "settings reach the free space (resume.c)");
 /* hide_clock (§120) took the padding byte after lang: the sum stays in word 8, so that a block
  * of 0.101 reads as it is (the clock shown) and 0.101 reads ours */
 /* bat_show took the next padding byte, the same way: a block of 0.104 reads with the icon */
@@ -396,16 +396,12 @@ static int settings_draw(void)
 static int settings_key(const struct key_ev *e)
 {
     int ev = e->type, k = e->key;
-    if (k == KEY_VOLUP && ev != EV_LONG) {
-        int t = s_top;
-        list_move(&s_sel, &s_top, S_COUNT, ROWS, -1);
+    if (k == KEY_VOLUP && ev != EV_LONG) {     /* (scrolled: the rows only, each drawn whole; */
+        list_move(&s_sel, &s_top, S_COUNT, ROWS, -1);   /* the header again flickered: §149) */
         s_dirty = 1;
-        s_page = t != s_top;
     } else if (k == KEY_VOLDOWN && ev != EV_LONG) {
-        int t = s_top;
         list_move(&s_sel, &s_top, S_COUNT, ROWS, 1);
         s_dirty = 1;
-        s_page = t != s_top;
     } else if (k == KEY_PLAY && ev == EV_PRESS && s_sel == S_CLOCK) {
         scr_push(&clock_screen);
     } else if (k == KEY_PLAY && ev == EV_PRESS && s_sel == S_LIBRARY) {

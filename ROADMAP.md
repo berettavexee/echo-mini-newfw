@@ -96,6 +96,12 @@ do".
   queue, seek mode); the fuzzing fixes in libmpcdec and the ALAC decoder (§146).
 - 0.104v1: the battery icon with a margin on its four sides; Settings, "Battery": the header
   shows the icon, the percent or the music left (full runs less 10 %, §148).
+- 0.104w1: the top level of the files (point 5, §149): Library, Internal memory, SD card with
+  icons, the library's tracks and each volume's free space (counted at the library's update,
+  kept in the resume state), the card's line greyed without a card; a blank disk, a USB
+  session or an install start there. Flickers fixed: Settings scrolled, the library's update
+  screen. 0.104w2: the library's icon as stacked folders; the volume in the header (a speaker
+  and "-20 dB", §150), no longer on the play screen's format line.
 
 ## Version history
 
@@ -268,10 +274,11 @@ One line per version; the measurements are in `ETUDE.md`.
   6. later: an interactive mode (a live window, the PC's keys), QEMU for the whole image (speed).
   Also done (§144): `--foreign`, another firmware without an ELF (RECHO 0.10.1 runs: its
   screens, keys and files, its core B not run), for comparisons.
-- The interface, next steps (§145; 1, 3, 6 and 7 done in 0.104u1, §147): a bar of the keys'
-  actions at the bottom, also for short messages (2); the main menu grouped, with icons, one
-  "USB" entry greyed with its reason, a "System" submenu (4); the volumes first at the top of the
-  files (5); a larger text needs a second font (Fusion Pixel has only 12 px).
+- The interface, next steps (§145; 1, 3, 6 and 7 done in 0.104u1, §147; 5 in 0.104w1, §149): a
+  bar of the keys' actions at the bottom, also for short messages (2); the main menu grouped,
+  with icons, one "USB" entry inactive without the cable, a "System" submenu with an
+  Information page (4, proposal agreed); a larger text needs a second font (Fusion Pixel has
+  only 12 px).
 - Output and DAC settings (CS43131 registers, little code each):
   - headphone gain low / high (low suits sensitive in-ear monitors);
   - volume limiter (an adjustable ceiling);

@@ -55,8 +55,8 @@ static uint8_t *const gmark = (uint8_t *)(HR + 0x5c500);          /* genre names
 static uint8_t (*const sbuf)[512] = (uint8_t (*)[512])(HR + 0x5c900);   /* 2 string buffers */
 static uint8_t *const mark = (uint8_t *)(HR + 0x5d300);           /* names used: 1 KiB */
 static uint16_t *const order = (uint16_t *)0x03020000u;           /* SYSRAM: 48 KiB */
-static struct bdir *const dirs = (struct bdir *)0x0302c000u;      /* 48 KiB */
-static uint32_t *const pairs = (uint32_t *)0x0302c000u;           /* (dirs: after the scan) */
+static struct bdir *const dirs = (struct bdir *)LB_WORK;          /* 48 KiB */
+static uint32_t *const pairs = (uint32_t *)LB_WORK;               /* (dirs: after the scan) */
 /* after the scan, nhash and slots (64 KiB) hold the names' keys, then the names by index */
 static uint16_t (*const nkey)[4] = (uint16_t (*)[4])(HR + 0x38000);
 static uint16_t *const art_name = (uint16_t *)(HR + 0x38000);

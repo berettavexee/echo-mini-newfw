@@ -203,9 +203,7 @@ static void draw_playing_do(int full)
     }
     p = put_str(p, EN(" kHz  "));
     p = put_dec(p, player_heard.bps);
-    p = put_str(p, EN(" bit   -"));
-    p = put_dec(p, (uint32_t)play_level / 2);
-    p = put_str(p, EN(" dB  "));
+    p = put_str(p, EN(" bit  "));              /* (the volume: in the header, §150) */
     *p = 0;
     /* left to right, each pixel once: the text, the ReplayGain box (on yellow when the gain is
      * the track's), then the rest of the line */

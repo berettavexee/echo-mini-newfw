@@ -68,17 +68,18 @@ void draw_clock(int x0, int x1, int force)
 
 /* ---- the header (ETUDE §147): on the first 16 rows, the screen's title at the left; at the right,
  * an extra text (a list's "n/N"), the clock, what plays (play, pause, stop), the play mode, the
- * battery (its icon, its percent or the music left: Settings); a line under it (row 16), row 17
- * blank. The title is drawn by head_title() when the screen is drawn in full; head_status()
- * redraws the right side's parts that changed (each pass), each pixel once ---- */
+ * volume, the battery (its icon, its percent or the music left: Settings); a line under it
+ * (row 16), row 17 blank. The title is drawn by head_title() when the screen is drawn in full;
+ * head_status() redraws the right side's parts that changed (each pass), each pixel once ---- */
 #define HEAD_LINE   RGB(60, 60, 70)
 #define X_BAT       (LCD_W - 26)                /* the icon: 20 x 10 and its 2-pixel tip */
-#define X_STATE     (LCD_W - 90)                /* icons of 10 and 13 pixels side by side */
-#define X_MODE      (X_STATE + 10)
-#define X_PCT0      (X_MODE + 13)               /* the percent or the time left, right-aligned */
+#define X_PCT0      (LCD_W - 42)                /* the battery: its icon, percent or time left */
+#define X_VOL0      (X_PCT0 - 54)               /* the volume: a speaker, "-20 dB" (§150) */
+#define X_MODE      (X_VOL0 - 13)               /* icons of 10 and 13 pixels side by side */
+#define X_STATE     (X_MODE - 10)
 #define X_CLOCK1    (X_STATE - 4)
 #define X_CLOCK0    (X_CLOCK1 - 36)
-#define X_EXTRA0    (X_CLOCK0 - 60)
+#define X_EXTRA0    (X_CLOCK0 - 50)               /* "999/999" (42 px) and its gap */
 
 static const uint8_t ic_play[] = { 0x0a, 0x08, 0x09, 0x00, 0x01, 0x80, 0xe0, 0xf8, 0xfe, 0xff,
                                    0xfe, 0xf8, 0xe0, 0x80 };
@@ -97,10 +98,13 @@ static const uint8_t ic_shuffle[] = { 0x0d, 0x0b, 0x09, 0x00, 0x01, 0x00, 0x80, 
                                       0x80, 0x14, 0x00, 0x08, 0x00, 0x14, 0x00, 0x22, 0x80, 0xc1,
                                       0xe0, 0x00, 0x80 };
 static const uint8_t ic_order[] = { 0x0d, 0x00, 0x00, 0x00, 0x00 };
+static const uint8_t ic_vol[] = { 0x0e, 0x0b, 0x09, 0x01, 0x00, 0x06, 0x00, 0x0a, 0x40, 0x72, 0x20,
+                                  0x82, 0xa0, 0x82, 0xa0, 0x82, 0xa0, 0x72, 0x20, 0x0a, 0x40,
+                                  0x06, 0x00 };      /* a speaker (the user's drawing, §150) */
 
 static struct {
-    int state, mode, pct, bat;                  /* as drawn; -1: to draw */
-} hd = { -1, -1, -1, -1 };
+    int state, mode, vol, pct, bat;             /* as drawn; -1: to draw */
+} hd = { -1, -1, -1, -1, -1 };
 
 void head_title(const char *title, uint16_t fg, const char *extra)
 {
@@ -112,7 +116,7 @@ void head_title(const char *title, uint16_t fg, const char *extra)
     lcd_fill(X_CLOCK0 - 6, 0, 6, 16, BG);
     lcd_fill(0, 16, LCD_W, 1, HEAD_LINE);
     lcd_fill(0, 17, LCD_W, 1, BG);
-    hd.state = hd.mode = hd.pct = hd.bat = -1;  /* the right side drawn again in full */
+    hd.state = hd.mode = hd.vol = hd.pct = hd.bat = -1;     /* the right side again in full */
     clock_min = -1;
 }
 
@@ -173,6 +177,17 @@ void head_status(int force)
                                                        ic_shuffle };
         lcd_icon(X_MODE, 0, ic[play_mode], FG, BG);
         hd.mode = play_mode;
+    }
+    if (force || play_level != hd.vol) {        /* the attenuation, as on the volume keys */
+        char b[12], *p = b;
+        *p++ = '-';
+        p = put_dec(p, (uint32_t)play_level / 2);
+        p = put_str(p, EN(" dB"));
+        *p = 0;
+        lcd_icon(X_VOL0, 0, ic_vol, DIM, BG);
+        text_right(X_VOL0 + 14, X_PCT0 - 2, 0, b, DIM, BG);
+        lcd_fill(X_PCT0 - 2, 0, 2, 16, BG);
+        hd.vol = play_level;
     }
     int low = !vbus() && battery_avg_mv() < 3425, chg = vbus() ? 1 + !!charging() : 0;
     int show = cfg.bat_show;

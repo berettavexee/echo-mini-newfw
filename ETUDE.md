@@ -4864,3 +4864,21 @@ Essai de 0.104u1 sur l'appareil : tout fonctionne ; l'icône de batterie montrai
 
 Test `battery-show` (émulateur) : les deux changements journalisés, le réglage relu après redémarrage, aucun clignotement. Captures : 89 % donne « 11h ».
 
+## 149. La racine des fichiers : volumes, icônes, espace libre (point 5, 0.104w1, 2026-11-14)
+
+Propositions 4 et 5 écrites à la demande de l'utilisateur ; ses choix : sans câble, l'entrée USB inactive ; arriver au niveau du haut au démarrage quand rien n'est sauvegardé ; l'espace libre, calculé à la construction de la bibliothèque. Le point 5 d'abord.
+
+**Niveau du haut** (`browser.c`) : titre « Files » (au lieu de « Storage ») ; trois lignes toujours : Library, Internal memory, SD card, avec une icône 16 × 12 dans la colonne du repère (dossiers empilés, puce, carte ; enregistrements au format des glyphes, dessinés par nous ; la bibliothèque d'abord en livres, remplacés en 0.104w2 à la demande de l'utilisateur par des dossiers empilés, idée de l'icône « folders » de Font Awesome Pixel, redessinée : celle-ci est sous licence Pro, non redistribuable) ; à droite en gris : les morceaux de la bibliothèque (« not built » sans index), l'espace libre de chaque volume, « no card ». Sans carte, sa ligne est grisée, sans chevron, et PLAY n'ouvre rien (`F_ABSENT`, avec `F_VOLROOT` : le bit 0x0002 est aussi un code de format ; FLAC, codec 2, était pris pour une carte absente au premier essai, d'où la macro `ABSENT()`). Le compte de la bibliothèque est relu après une mise à jour.
+
+**Démarrage** : disque vierge (rien de sauvegardé), après une session USB ou une installation : le niveau du haut, la mémoire interne sélectionnée (`browser_top()`). Sinon, le dossier sauvegardé comme avant.
+
+**Espace libre** (`fat_free()`, `fat.c`) : FAT32, la FAT lue en entier (le compteur de FSInfo n'est pas fiable : nous l'écrivons « inconnu ») ; exFAT, le bitmap d'allocation (entrée 0x81 du premier cluster de la racine), bits comptés jusqu'au dernier cluster. Compté à la fin d'une mise à jour réussie de la bibliothèque, dans les 48 Kio de la mémoire du cœur B que la construction vient de libérer (`LB_WORK`). Gardé dans le secteur d'état (mots 96 à 103, « SPC1 », numéro de série et Mio libres par volume ; les réglages limités à 32 mots) : affiché seulement si le numéro de série du volume monté est le même. Emulateur : mémoire interne de 300 Mio, 243 ms ; carte exFAT de 64 Mio, 3 ms. Sur l'appareil (1 838 584 clusters, 7 Mio de FAT) : environ 0,5 s attendu, à mesurer ; carte exFAT de 238 Gio : 122 Kio de bitmap.
+
+**Clignotements trouvés en passant** (compteur de l'émulateur) : les Réglages redessinaient l'en-tête à chaque défilement (le titre puis le compteur par-dessus) : seules les lignes sont redessinées ; l'écran de mise à jour de la bibliothèque effaçait sa zone à chaque phase puis la redessinait : bandes et marges remplies autour des lignes.
+
+**Tests** : le banc démarre maintenant au niveau du haut ; `ENTER_INTERNAL` (PLAY à 1,5 s) ouvre la mémoire interne avant les touches de chaque test, sauf `top=True`. Nouveau test `top-level` (carte absente grisée, PLAY sans effet, la mémoire interne ouverte, aucun clignotement). `lib-settings` compare l'espace libre compté à celui de mtools et vérifie qu'il est relu après un redémarrage. 38 tests sur 38.
+
+## 150. Le volume dans l'en-tête (0.104w2, 2026-11-14)
+
+L'utilisateur a dessiné un glyphe de haut-parleur (Pixilart, `volume.pixil` : JSON, un PNG par calque ; le calque visible lu tel quel, 11 × 9) et choisi de l'afficher dans l'en-tête plutôt que sur la ligne technique. L'en-tête, de droite à gauche : batterie (42 px : icône, « 100% » ou « 45 min »), volume (54 px : le haut-parleur et « -20 dB », en gris), mode, état, horloge, « n/N » (50 px au lieu de 60, la place de « 999/999 »). Le titre perd 19 px quand un « n/N » est affiché (« Daft Punk - Disc… » au lieu de « Daft Punk - Discovery »). Le volume n'est plus sur la ligne technique de l'écran de lecture. Redessiné seulement quand il change (`hd.vol`). Test `vol-header` (VOL− et VOL+ pendant la lecture, aucun clignotement) ; 39 tests sur 39.
+
